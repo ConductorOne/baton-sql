@@ -1,0 +1,55 @@
+version: 2
+project_name: baton-sql
+builds:
+  - binary: baton-sql
+    env:
+      - CGO_ENABLED=0
+    id: linux
+    main: ./cmd/baton-sql
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+dockers:
+  - use: buildx
+    goos: linux
+    goarch: amd64
+    image_templates:
+      - "ghcr.io/conductorone/baton-sql:{{ .Version }}-amd64"
+      - "ghcr.io/conductorone/baton-sql:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title=baton-sql"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source=https://github.com/conductorone/baton-sql"
+  - use: buildx
+    goos: linux
+    goarch: arm64
+    image_templates:
+      - "ghcr.io/conductorone/baton-sql:{{ .Version }}-arm64"
+      - "ghcr.io/conductorone/baton-sql:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title=baton-sql"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source=https://github.com/conductorone/baton-sql"
+docker_manifests:
+  - name_template: ghcr.io/conductorone/baton-sql:{{ .Version }}
+    image_templates:
+      - ghcr.io/conductorone/baton-sql:{{ .Version }}-amd64
+      - ghcr.io/conductorone/baton-sql:{{ .Version }}-arm64
+  - name_template: ghcr.io/conductorone/baton-sql:latest
+    image_templates:
+      - ghcr.io/conductorone/baton-sql:latest-amd64
+      - ghcr.io/conductorone/baton-sql:latest-arm64
+checksum:
+  disable: true
+release:
+  disable: true
+changelog:
+  disable: true
