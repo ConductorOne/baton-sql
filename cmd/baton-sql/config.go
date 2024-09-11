@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-
 	"github.com/conductorone/baton-sdk/pkg/field"
 	"github.com/spf13/viper"
 )
@@ -24,6 +22,6 @@ var (
 // error if it isn't valid. Implementing this function is optional, it only
 // needs to perform extra validations that cannot be encoded with configuration
 // parameters.
-func ValidateConfig(ctx context.Context, v *viper.Viper) error {
+func ValidateConfig(v *viper.Viper) error {
 	return nil
 }
