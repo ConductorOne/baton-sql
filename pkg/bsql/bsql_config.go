@@ -1,0 +1,94 @@
+package bsql
+
+import (
+	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	AppName       string                  `yaml:"app_name" json:"app_name"`
+	Connect       DatabaseConfig          `yaml:"connect" json:"connect"`
+	ResourceTypes map[string]ResourceType `yaml:"resource_types" json:"resource_types"`
+}
+
+type DatabaseConfig struct {
+	DSN string `yaml:"dsn" json:"dsn"` // DSN connection string
+}
+
+type ResourceType struct {
+	Name               string              `yaml:"name" json:"name"`
+	List               ListQuery           `yaml:"list,omitempty" json:"list,omitempty"`
+	Entitlements       *EntitlementsQuery  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
+	StaticEntitlements *EntitlementsStatic `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
+	Grants             *GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
+}
+
+type ListQuery struct {
+	Query      string          `yaml:"query" json:"query"`
+	Pagination Pagination      `yaml:"pagination" json:"pagination"`
+	Map        ResourceMapping `yaml:"map" json:"map"`
+}
+
+type ResourceMapping struct {
+	Id          string       `yaml:"id" json:"id"`
+	DisplayName string       `yaml:"display_name" json:"display_name"`
+	Description string       `yaml:"description" json:"description"`
+	Traits      *Traits      `yaml:"traits" json:"traits"`
+	Annotations *Annotations `yaml:"annotations" json:"annotations"`
+}
+
+type Annotations struct {
+	EntitlementImmutable *connector_v2.EntitlementImmutable `yaml:"entitlement_immutable" json:"entitlement_immutable"`
+	ExternalLink         *connector_v2.ExternalLink         `yaml:"external_link" json:"external_link"`
+}
+
+type Traits struct {
+	App   *connector_v2.AppTrait   `yaml:"app" json:"app"`
+	Group *connector_v2.GroupTrait `yaml:"group" json:"group"`
+	Role  *connector_v2.RoleTrait  `yaml:"role" json:"role"`
+	User  *connector_v2.UserTrait  `yaml:"user" json:"user"`
+}
+
+type Pagination struct {
+	Strategy   string `yaml:"strategy" json:"strategy"` // "offset" or "cursor"
+	PrimaryKey string `yaml:"primary_key,omitempty" json:"primary_key,omitempty"`
+}
+
+type EntitlementsQuery struct {
+	Query      string             `yaml:"query" json:"query"`
+	Pagination Pagination         `yaml:"pagination" json:"pagination"`
+	Map        EntitlementMapping `yaml:"map" json:"map"`
+}
+
+type EntitlementMapping struct {
+	Id          string       `yaml:"id" json:"id"`
+	DisplayName string       `yaml:"display_name" json:"display_name"`
+	Description string       `yaml:"description" json:"description"`
+	GrantableTo []string     `yaml:"grantable_to" json:"grantable_to"`
+	Annotations *Annotations `yaml:"annotations" json:"annotations"`
+	Purpose     string       `yaml:"purpose" json:"purpose"`
+	Slug        string       `yaml:"slug" json:"slug"`
+}
+
+type EntitlementsStatic struct {
+	// TODO(pquerna): figure this out
+}
+
+type GrantsQuery struct {
+	Query      string       `yaml:"query" json:"query"`
+	Pagination Pagination   `yaml:"pagination" json:"pagination"`
+	Map        GrantMapping `yaml:"map" json:"map"`
+}
+
+type GrantMapping struct {
+	PrincipalId   string       `yaml:"principal_id" json:"principal_id"`
+	PrincipalType string       `yaml:"principal_type" json:"principal_type"`
+	Entitlement   string       `yaml:"entitlement_id" json:"entitlement_id"`
+	Annotations   *Annotations `yaml:"annotations" json:"annotations"`
+}
+
+func Parse(data []byte) (*Config, error) {
+	config := &Config{}
+	err := yaml.Unmarshal(data, config)
+	return config, err
+}
