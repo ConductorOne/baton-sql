@@ -3,7 +3,7 @@ module github.com/conductorone/baton-sql
 go 1.22.6
 
 require (
-	github.com/conductorone/baton-sdk v0.2.27
+	github.com/conductorone/baton-sdk v0.2.31
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/spf13/viper v1.19.0
