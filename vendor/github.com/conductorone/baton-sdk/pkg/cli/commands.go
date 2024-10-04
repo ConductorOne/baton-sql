@@ -33,13 +33,9 @@ func MakeMainCommand(
 	getconnector GetConnectorFunc,
 	opts ...connectorrunner.Option,
 ) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		// NOTE(shackra): bind all the flags (persistent and
-		// regular) with our instance of Viper, doing this
-		// anywhere else may fail to communicate to Viper the
-		// values gathered by Cobra.
-		err := v.BindPFlags(cmd.Flags())
-		if err != nil {
+	return func(*cobra.Command, []string) error {
+		// validate required fields and relationship constraints
+		if err := field.Validate(confschema, v); err != nil {
 			return err
 		}
 
@@ -56,17 +52,11 @@ func MakeMainCommand(
 		l := ctxzap.Extract(runCtx)
 
 		if isService() {
-			l.Debug("running as service", zap.String("name", name))
 			runCtx, err = runService(runCtx, name)
 			if err != nil {
 				l.Error("error running service", zap.Error(err))
 				return err
 			}
-		}
-
-		// validate required fields and relationship constraints
-		if err := field.Validate(confschema, v); err != nil {
-			return err
 		}
 
 		c, err := getconnector(runCtx, v)
@@ -186,13 +176,9 @@ func MakeGRPCServerCommand(
 	confschema field.Configuration,
 	getconnector GetConnectorFunc,
 ) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		// NOTE(shackra): bind all the flags (persistent and
-		// regular) with our instance of Viper, doing this
-		// anywhere else may fail to communicate to Viper the
-		// values gathered by Cobra.
-		err := v.BindPFlags(cmd.Flags())
-		if err != nil {
+	return func(*cobra.Command, []string) error {
+		// validate required fields and relationship constraints
+		if err := field.Validate(confschema, v); err != nil {
 			return err
 		}
 
@@ -203,11 +189,6 @@ func MakeGRPCServerCommand(
 			logging.WithLogLevel(v.GetString("log-level")),
 		)
 		if err != nil {
-			return err
-		}
-
-		// validate required fields and relationship constraints
-		if err := field.Validate(confschema, v); err != nil {
 			return err
 		}
 
@@ -297,19 +278,9 @@ func MakeCapabilitiesCommand(
 	ctx context.Context,
 	name string,
 	v *viper.Viper,
-	confschema field.Configuration,
 	getconnector GetConnectorFunc,
 ) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		// NOTE(shackra): bind all the flags (persistent and
-		// regular) with our instance of Viper, doing this
-		// anywhere else may fail to communicate to Viper the
-		// values gathered by Cobra.
-		err := v.BindPFlags(cmd.Flags())
-		if err != nil {
-			return err
-		}
-
+	return func(*cobra.Command, []string) error {
 		runCtx, err := initLogger(
 			ctx,
 			name,
@@ -317,11 +288,6 @@ func MakeCapabilitiesCommand(
 			logging.WithLogLevel(v.GetString("log-level")),
 		)
 		if err != nil {
-			return err
-		}
-
-		// validate required fields and relationship constraints
-		if err := field.Validate(confschema, v); err != nil {
 			return err
 		}
 

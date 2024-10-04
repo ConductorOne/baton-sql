@@ -1,8 +1,11 @@
 package bsql
 
 import (
-	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"os"
+
 	"gopkg.in/yaml.v3"
+
+	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
 type Config struct {
@@ -17,16 +20,17 @@ type DatabaseConfig struct {
 
 type ResourceType struct {
 	Name               string              `yaml:"name" json:"name"`
-	List               ListQuery           `yaml:"list,omitempty" json:"list,omitempty"`
+	List               *ListQuery          `yaml:"list,omitempty" json:"list,omitempty"`
 	Entitlements       *EntitlementsQuery  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
 	StaticEntitlements *EntitlementsStatic `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
 	Grants             *GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
+	Description        string              `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 type ListQuery struct {
-	Query      string          `yaml:"query" json:"query"`
-	Pagination Pagination      `yaml:"pagination" json:"pagination"`
-	Map        ResourceMapping `yaml:"map" json:"map"`
+	Query      string           `yaml:"query" json:"query"`
+	Pagination *Pagination      `yaml:"pagination" json:"pagination"`
+	Map        *ResourceMapping `yaml:"map" json:"map"`
 }
 
 type ResourceMapping struct {
@@ -55,9 +59,9 @@ type Pagination struct {
 }
 
 type EntitlementsQuery struct {
-	Query      string             `yaml:"query" json:"query"`
-	Pagination Pagination         `yaml:"pagination" json:"pagination"`
-	Map        EntitlementMapping `yaml:"map" json:"map"`
+	Query      string              `yaml:"query" json:"query"`
+	Pagination *Pagination         `yaml:"pagination" json:"pagination"`
+	Map        *EntitlementMapping `yaml:"map" json:"map"`
 }
 
 type EntitlementMapping struct {
@@ -75,9 +79,9 @@ type EntitlementsStatic struct {
 }
 
 type GrantsQuery struct {
-	Query      string       `yaml:"query" json:"query"`
-	Pagination Pagination   `yaml:"pagination" json:"pagination"`
-	Map        GrantMapping `yaml:"map" json:"map"`
+	Query      string        `yaml:"query" json:"query"`
+	Pagination *Pagination   `yaml:"pagination" json:"pagination"`
+	Map        *GrantMapping `yaml:"map" json:"map"`
 }
 
 type GrantMapping struct {
@@ -90,5 +94,24 @@ type GrantMapping struct {
 func Parse(data []byte) (*Config, error) {
 	config := &Config{}
 	err := yaml.Unmarshal(data, config)
-	return config, err
+	if err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+func LoadConfigFromFile(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &Config{}
+	err = yaml.Unmarshal(data, config)
+	if err != nil {
+		return nil, err
+	}
+
+	return config, nil
 }

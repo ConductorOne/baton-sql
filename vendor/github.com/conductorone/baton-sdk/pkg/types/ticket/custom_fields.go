@@ -11,7 +11,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
@@ -47,13 +46,6 @@ func CustomFieldForSchemaField(id string, schema *v2.TicketSchema, value interfa
 			return nil, fmt.Errorf("unexpected value type for custom field: %s %T", id, v)
 		}
 		return BoolField(id, v), nil
-
-	case *v2.TicketCustomField_NumberValue:
-		v, ok := value.(float32)
-		if !ok {
-			return nil, fmt.Errorf("unexpected value type for custom field: %s %T", id, v)
-		}
-		return NumberField(id, v), nil
 
 	case *v2.TicketCustomField_TimestampValue:
 		v, ok := value.(*timestamppb.Timestamp)
@@ -158,17 +150,6 @@ func GetBoolValue(field *v2.TicketCustomField) (bool, error) {
 	return v.BoolValue.Value, nil
 }
 
-func GetNumberValue(field *v2.TicketCustomField) (float32, error) {
-	if field == nil {
-		return 0, ErrFieldNil
-	}
-	v, ok := field.GetValue().(*v2.TicketCustomField_NumberValue)
-	if !ok {
-		return 0, errors.New("error: expected number value")
-	}
-	return v.NumberValue.GetValue().GetValue(), nil
-}
-
 func GetTimestampValue(field *v2.TicketCustomField) (time.Time, error) {
 	if field == nil {
 		return time.Time{}, ErrFieldNil
@@ -247,12 +228,6 @@ func GetCustomFieldValue(field *v2.TicketCustomField) (interface{}, error) {
 	case *v2.TicketCustomField_BoolValue:
 		return v.BoolValue.GetValue(), nil
 
-	case *v2.TicketCustomField_NumberValue:
-		wrapperVal := v.NumberValue.GetValue()
-		if wrapperVal == nil {
-			return nil, nil
-		}
-		return wrapperVal.GetValue(), nil
 	case *v2.TicketCustomField_TimestampValue:
 		return v.TimestampValue.GetValue(), nil
 
@@ -306,13 +281,6 @@ func GetDefaultCustomFieldValue(field *v2.TicketCustomField) (interface{}, error
 
 	case *v2.TicketCustomField_BoolValue:
 		return v.BoolValue.GetValue(), nil
-
-	case *v2.TicketCustomField_NumberValue:
-		defaultWrapper := v.NumberValue.GetDefaultValue()
-		if defaultWrapper == nil {
-			return nil, nil
-		}
-		return defaultWrapper.GetValue(), nil
 
 	case *v2.TicketCustomField_TimestampValue:
 		return v.TimestampValue.GetDefaultValue(), nil
@@ -433,12 +401,6 @@ func ValidateTicket(ctx context.Context, schema *v2.TicketSchema, ticket *v2.Tic
 			tv, tok := ticketCf.GetValue().(*v2.TicketCustomField_BoolValue)
 			if !tok {
 				l.Debug("error: invalid ticket: expected bool value for field", zap.String("custom_field_id", cf.Id), zap.Any("value", tv))
-				return false, nil
-			}
-		case *v2.TicketCustomField_NumberValue:
-			tv, tok := ticketCf.GetValue().(*v2.TicketCustomField_NumberValue)
-			if !tok {
-				l.Debug("error: invalid ticket: expected number value for field", zap.String("custom_field_id", cf.Id), zap.Any("value", tv))
 				return false, nil
 			}
 
@@ -714,34 +676,12 @@ func BoolFieldSchema(id, displayName string, required bool) *v2.TicketCustomFiel
 	}
 }
 
-func NumberFieldSchema(id, displayName string, required bool) *v2.TicketCustomField {
-	return &v2.TicketCustomField{
-		Id:          id,
-		DisplayName: displayName,
-		Required:    required,
-		Value: &v2.TicketCustomField_NumberValue{
-			NumberValue: &v2.TicketCustomFieldNumberValue{},
-		},
-	}
-}
-
 func BoolField(id string, value bool) *v2.TicketCustomField {
 	return &v2.TicketCustomField{
 		Id: id,
 		Value: &v2.TicketCustomField_BoolValue{
 			BoolValue: &v2.TicketCustomFieldBoolValue{
 				Value: value,
-			},
-		},
-	}
-}
-
-func NumberField(id string, value float32) *v2.TicketCustomField {
-	return &v2.TicketCustomField{
-		Id: id,
-		Value: &v2.TicketCustomField_NumberValue{
-			NumberValue: &v2.TicketCustomFieldNumberValue{
-				Value: wrapperspb.Float(value),
 			},
 		},
 	}
