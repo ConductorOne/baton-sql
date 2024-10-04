@@ -21,6 +21,7 @@ type ResourceType struct {
 	Entitlements       *EntitlementsQuery  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
 	StaticEntitlements *EntitlementsStatic `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
 	Grants             *GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
+	Description        string              `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 type ListQuery struct {
