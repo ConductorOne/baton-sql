@@ -1,6 +1,7 @@
 package bsql
 
 import (
+	"context"
 	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -45,7 +46,7 @@ func (c Config) extractTraits(rtID string) ([]v2.ResourceType_Trait, error) {
 	return traits, nil
 }
 
-func (c Config) GetResourceTypes() ([]*v2.ResourceType, error) {
+func (c Config) GetResourceTypes(ctx context.Context) ([]*v2.ResourceType, error) {
 	var resourceTypes []*v2.ResourceType
 	for rtID, rt := range c.ResourceTypes {
 		traits, err := c.extractTraits(rtID)
@@ -63,7 +64,7 @@ func (c Config) GetResourceTypes() ([]*v2.ResourceType, error) {
 	return resourceTypes, nil
 }
 
-func (c Config) GetResourceType(rtID string) (*v2.ResourceType, error) {
+func (c Config) GetResourceType(ctx context.Context, rtID string) (*v2.ResourceType, error) {
 	traits, err := c.extractTraits(rtID)
 	if err != nil {
 		return nil, err

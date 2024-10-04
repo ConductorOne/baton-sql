@@ -17,7 +17,7 @@ type Connector struct {
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.config.GetSqlSyncers()
+	syncers, err := c.config.GetSQLSyncers(ctx)
 	if err != nil {
 		return nil
 	}

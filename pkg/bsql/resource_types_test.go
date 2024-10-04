@@ -1,6 +1,7 @@
 package bsql
 
 import (
+	"context"
 	"testing"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -8,11 +9,12 @@ import (
 )
 
 func TestConfig_GetResourceTypes_wordpress(t *testing.T) {
+	ctx := context.Background()
 	wordpressConfig := loadExampleConfig(t, "wordpress")
 	c, err := Parse([]byte(wordpressConfig))
 	require.NoError(t, err)
 
-	ret, err := c.GetResourceTypes()
+	ret, err := c.GetResourceTypes(ctx)
 	require.NoError(t, err)
 	require.Len(t, ret, 2)
 	for _, rt := range ret {

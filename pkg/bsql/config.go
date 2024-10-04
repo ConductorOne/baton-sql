@@ -3,8 +3,9 @@ package bsql
 import (
 	"os"
 
-	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"gopkg.in/yaml.v3"
+
+	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
 type Config struct {
@@ -111,6 +112,6 @@ func LoadConfigFromFile(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return config, nil
 }
