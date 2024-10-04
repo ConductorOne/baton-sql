@@ -32,7 +32,7 @@ func (c *Connector) Close() error {
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.config.GetSQLSyncers(ctx)
+	syncers, err := c.config.GetSQLSyncers(ctx, c.db)
 	if err != nil {
 		return nil
 	}
