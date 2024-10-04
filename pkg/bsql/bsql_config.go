@@ -90,5 +90,9 @@ type GrantMapping struct {
 func Parse(data []byte) (*Config, error) {
 	config := &Config{}
 	err := yaml.Unmarshal(data, config)
-	return config, err
+	if err != nil {
+		return nil, err
+	}
+
+	return config, nil
 }
