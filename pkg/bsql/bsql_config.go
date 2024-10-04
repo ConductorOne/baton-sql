@@ -17,7 +17,7 @@ type DatabaseConfig struct {
 
 type ResourceType struct {
 	Name               string              `yaml:"name" json:"name"`
-	List               ListQuery           `yaml:"list,omitempty" json:"list,omitempty"`
+	List               *ListQuery          `yaml:"list,omitempty" json:"list,omitempty"`
 	Entitlements       *EntitlementsQuery  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
 	StaticEntitlements *EntitlementsStatic `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
 	Grants             *GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
@@ -25,9 +25,9 @@ type ResourceType struct {
 }
 
 type ListQuery struct {
-	Query      string          `yaml:"query" json:"query"`
-	Pagination Pagination      `yaml:"pagination" json:"pagination"`
-	Map        ResourceMapping `yaml:"map" json:"map"`
+	Query      string           `yaml:"query" json:"query"`
+	Pagination *Pagination      `yaml:"pagination" json:"pagination"`
+	Map        *ResourceMapping `yaml:"map" json:"map"`
 }
 
 type ResourceMapping struct {
@@ -56,9 +56,9 @@ type Pagination struct {
 }
 
 type EntitlementsQuery struct {
-	Query      string             `yaml:"query" json:"query"`
-	Pagination Pagination         `yaml:"pagination" json:"pagination"`
-	Map        EntitlementMapping `yaml:"map" json:"map"`
+	Query      string              `yaml:"query" json:"query"`
+	Pagination *Pagination         `yaml:"pagination" json:"pagination"`
+	Map        *EntitlementMapping `yaml:"map" json:"map"`
 }
 
 type EntitlementMapping struct {
@@ -76,9 +76,9 @@ type EntitlementsStatic struct {
 }
 
 type GrantsQuery struct {
-	Query      string       `yaml:"query" json:"query"`
-	Pagination Pagination   `yaml:"pagination" json:"pagination"`
-	Map        GrantMapping `yaml:"map" json:"map"`
+	Query      string        `yaml:"query" json:"query"`
+	Pagination *Pagination   `yaml:"pagination" json:"pagination"`
+	Map        *GrantMapping `yaml:"map" json:"map"`
 }
 
 type GrantMapping struct {
