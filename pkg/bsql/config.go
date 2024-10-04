@@ -1,6 +1,8 @@
 package bsql
 
 import (
+	"os"
+
 	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"gopkg.in/yaml.v3"
 )
@@ -95,5 +97,20 @@ func Parse(data []byte) (*Config, error) {
 		return nil, err
 	}
 
+	return config, nil
+}
+
+func LoadConfigFromFile(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &Config{}
+	err = yaml.Unmarshal(data, config)
+	if err != nil {
+		return nil, err
+	}
+	
 	return config, nil
 }

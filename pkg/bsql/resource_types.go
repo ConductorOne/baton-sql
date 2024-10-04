@@ -62,3 +62,22 @@ func (c Config) GetResourceTypes() ([]*v2.ResourceType, error) {
 	}
 	return resourceTypes, nil
 }
+
+func (c Config) GetResourceType(rtID string) (*v2.ResourceType, error) {
+	traits, err := c.extractTraits(rtID)
+	if err != nil {
+		return nil, err
+	}
+
+	rt, ok := c.ResourceTypes[rtID]
+	if !ok {
+		return nil, fmt.Errorf("resource type %s not found in config", rtID)
+	}
+
+	return &v2.ResourceType{
+		Id:          rtID,
+		DisplayName: rt.Name,
+		Description: rt.Description,
+		Traits:      traits,
+	}, nil
+}
