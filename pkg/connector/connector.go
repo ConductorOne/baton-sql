@@ -2,6 +2,8 @@ package connector
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"io"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -9,10 +11,23 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 
 	"github.com/conductorone/baton-sql/pkg/bsql"
+	"github.com/conductorone/baton-sql/pkg/database"
 )
 
 type Connector struct {
 	config *bsql.Config
+	db     *sql.DB
+}
+
+func (c *Connector) Close() error {
+	var errs error
+	if c.db != nil {
+		err := c.db.Close()
+		if err != nil {
+			errs = errors.Join(errs, err)
+		}
+	}
+	return errs
 }
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
@@ -52,7 +67,17 @@ func New(ctx context.Context, configFilePath string) (*Connector, error) {
 		return nil, err
 	}
 
+	return newConnector(ctx, c)
+}
+
+func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
+	db, err := database.Connect(ctx, c.Connect.DSN)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Connector{
 		config: c,
+		db:     db,
 	}, nil
 }
