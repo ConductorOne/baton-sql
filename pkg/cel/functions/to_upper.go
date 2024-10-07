@@ -45,9 +45,13 @@ func ToUpperFunc() *FunctionDefinition {
 						Expected: "fooBAR",
 					},
 					{
-						Expr:     "input + toUpper('bar')",
-						Expected: "123BAR",
-						Inputs:   map[string]interface{}{"input": "123"},
+						Expr:     `toUpper(cols["username"])`,
+						Expected: "ALICE",
+						Inputs: map[string]interface{}{
+							"cols": map[string]interface{}{
+								"username": "Alice",
+							},
+						},
 					},
 				},
 			},
