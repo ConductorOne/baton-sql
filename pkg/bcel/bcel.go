@@ -1,11 +1,12 @@
-package cel
+package bcel
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/cel-go/cel"
 
-	"github.com/conductorone/baton-sql/pkg/cel/functions"
+	"github.com/conductorone/baton-sql/pkg/bcel/functions"
 )
 
 type Env struct {
@@ -43,9 +44,29 @@ func (t *Env) Evaluate(ctx context.Context, expr string, inputs map[string]any) 
 		return "", err
 	}
 
+	// Make sure that our input always has the 'cols' member
+	if _, ok := inputs["cols"]; !ok {
+		inputs["cols"] = make(map[string]any)
+	}
+
 	out, _, err := prg.ContextEval(ctx, inputs)
 	if err != nil {
 		return "", err
 	}
+
 	return out.Value(), nil
+}
+
+func (t *Env) EvaluateString(ctx context.Context, expr string, inputs map[string]any) (string, error) {
+	out, err := t.Evaluate(ctx, expr, inputs)
+	if err != nil {
+		return "", err
+	}
+
+	switch ret := out.(type) {
+	case string:
+		return ret, nil
+	default:
+		return fmt.Sprintf("%s", out), nil
+	}
 }

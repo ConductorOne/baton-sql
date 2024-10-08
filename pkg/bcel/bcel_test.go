@@ -1,4 +1,4 @@
-package cel
+package bcel
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/conductorone/baton-sql/pkg/cel/functions"
+	"github.com/conductorone/baton-sql/pkg/bcel/functions"
 )
 
 func TestTemplateEnv_Evaluate(tt *testing.T) {

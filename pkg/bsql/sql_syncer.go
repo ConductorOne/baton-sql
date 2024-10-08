@@ -14,6 +14,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	sdkResource "github.com/conductorone/baton-sdk/pkg/types/resource"
+
+	"github.com/conductorone/baton-sql/pkg/bcel"
 )
 
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)\>`)
@@ -40,9 +42,10 @@ type SQLSyncer struct {
 	resourceType *v2.ResourceType
 	db           *sql.DB
 	config       ResourceType
+	env          *bcel.Env
 }
 
-func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]interface{}) (*v2.Resource, error) {
+func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]any) (*v2.Resource, error) {
 	traits := make(map[string]bool)
 	mapTraits := s.config.List.Map.Traits
 	if mapTraits != nil {
@@ -60,20 +63,11 @@ func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]interface
 	annos := annotations.Annotations{}
 
 	ret := &v2.Resource{}
-	rID, err := s.getMappedID(ctx, rowMap)
-	if err != nil {
-		return nil, err
-	}
-	ret.Id, err = sdkResource.NewResourceID(s.resourceType, rID)
-	if err != nil {
-		return nil, err
-	}
 
-	displayName, err := s.getMappedDisplayName(ctx, rowMap)
+	err := s.getMappedResource(ctx, ret, rowMap)
 	if err != nil {
 		return nil, err
 	}
-	ret.DisplayName = displayName
 
 	if traits["user"] {
 		ut, err := sdkResource.NewUserTrait()
@@ -111,38 +105,51 @@ func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]interface
 	return ret, nil
 }
 
-func (s *SQLSyncer) getMappedID(ctx context.Context, rowMap map[string]interface{}) (string, error) {
-	mapping := s.config.List.Map.Id
-	if mapping == "" {
-		return "", errors.New("no ID mapping provided")
+func (s *SQLSyncer) getMappedResource(ctx context.Context, r *v2.Resource, rowMap map[string]interface{}) error {
+	mapping := s.config.List.Map
+	if mapping == nil {
+		return errors.New("no mapping configuration provided")
+
 	}
 
-	if strings.HasPrefix(mapping, ".") {
-		if v, ok := rowMap[mapping[1:]]; ok {
-			return fmt.Sprintf("%s", v), nil
-		} else {
-			return "", errors.New("ID mapping not found in row")
+	inputs := map[string]any{
+		"cols": rowMap,
+	}
+
+	// Map ID
+	if mapping.Id == "" {
+		return errors.New("no ID mapping configuration provided")
+	}
+	v, err := s.env.EvaluateString(ctx, mapping.Id, inputs)
+	if err != nil {
+		return err
+	}
+	
+	r.Id, err = sdkResource.NewResourceID(s.resourceType, v)
+	if err != nil {
+		return err
+	}
+
+	// Map Displayname
+	if mapping.DisplayName == "" {
+		return errors.New("no display name mapping configuration provided")
+	}
+	v, err = s.env.EvaluateString(ctx, mapping.DisplayName, inputs)
+	if err != nil {
+		return err
+	}
+	r.DisplayName = v
+
+	// Map Description
+	if mapping.Description != "" {
+		v, err = s.env.EvaluateString(ctx, mapping.Description, inputs)
+		if err != nil {
+			return err
 		}
-	} else {
-		return mapping, nil
-	}
-}
-
-func (s *SQLSyncer) getMappedDisplayName(ctx context.Context, rowMap map[string]interface{}) (string, error) {
-	mapping := s.config.List.Map.DisplayName
-	if mapping == "" {
-		return "", errors.New("no display name mapping provided")
+		r.Description = v
 	}
 
-	if strings.HasPrefix(mapping, ".") {
-		if v, ok := rowMap[mapping[1:]]; ok {
-			return fmt.Sprintf("%s", v), nil
-		} else {
-			return "", errors.New("display name mapping not found in row")
-		}
-	} else {
-		return mapping, nil
-	}
+	return nil
 }
 
 func (s *SQLSyncer) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -221,7 +228,7 @@ func (s *SQLSyncer) Grants(ctx context.Context, resource *v2.Resource, pToken *p
 	return nil, "", nil, nil
 }
 
-func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB) ([]connectorbuilder.ResourceSyncer, error) {
+func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
 	var ret []connectorbuilder.ResourceSyncer
 	for rtID, rtConfig := range c.ResourceTypes {
 		rt, err := c.GetResourceType(ctx, rtID)
@@ -233,6 +240,7 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB) ([]connectorbuild
 			resourceType: rt,
 			config:       rtConfig,
 			db:           db,
+			env:          celEnv,
 		}
 		ret = append(ret, rv)
 	}
