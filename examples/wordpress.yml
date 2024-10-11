@@ -16,17 +16,17 @@ resource_types:
         FROM wp_users u
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
-        id: "cols['user_id']"             # Mapping user ID from query result to ID
-        display_name: "cols['username']"  # Mapping user_login to display name
-        description: "cols['email']"      # Using user email as description
+        id: ".user_id"             # Mapping user ID from query result to ID
+        display_name: ".username"  # Mapping user_login to display name
+        description: ".email"      # Using user email as description
         traits:
           user:
             emails:
-              - address: "cols['email']"          # Mapping user email to traits
+              - address: ".email"          # Mapping user email to traits
             status:
               status: 0
               details: "active"    # Static status for users
-            login: "cols['username']"    # Mapping login (user_login)
+            login: ".username"    # Mapping login (user_login)
       pagination:
         strategy: "offset"          # Using offset-based pagination
         primary_key: "ID"           # Primary key used for pagination
@@ -44,12 +44,12 @@ resource_types:
         WHERE um.meta_key = 'wp_capabilities'
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
-        id: "cols['role_name']"          # Using role_name as the ID
-        display_name: "mapKey(phpDeserialize(cols['role_name']), 0)" # Using role name as the display name
+        id: ".role_name"          # Using role_name as the ID
+        display_name: ".role_name" # Using role name as the display name
         description: "'Wordpress role for user'" # Static description
         traits:
           role:
-            name: "cols['role_name']"    # Mapping role name into traits
+            name: ".role_name"    # Mapping role name into traits
       pagination:
         strategy: "offset"
         primary_key: "meta_value"
@@ -65,8 +65,8 @@ resource_types:
         WHERE um.meta_key = 'wp_capabilities'
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
-        id: "cols['user_id']"            # Mapping user ID to entitlement ID
-        display_name: "cols['username']"  # Using user_login as display name
+        id: ".user_id"            # Mapping user ID to entitlement ID
+        display_name: ".username"  # Using user_login as display name
         description: "'Role entitlement for user'"
         grantable_to:
           - "user"
@@ -88,9 +88,9 @@ resource_types:
         WHERE um.meta_key = 'wp_capabilities'
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
-        principal_id: "cols['user_id']"       # User ID as principal ID
+        principal_id: ".user_id"       # User ID as principal ID
         principal_type: "user"       # Static principal type (users)
-        entitlement_id: "cols['role_name']"      # Role entitlement for user
+        entitlement_id: ".role_name"      # Role entitlement for user
         annotations:
           entitlement_immutable:
             value: true
