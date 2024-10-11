@@ -12,8 +12,8 @@ func isAlphaNumeric(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
 }
 
-// PreprocessColumnExpressions replaces all column expressions with the appropriate map access
-// Example input: ".role_name == 'Admin'" -> "cols['role_name'] == 'Admin'"
+// PreprocessColumnExpressions replaces all column expressions with the appropriate map access.
+// Example input: ".role_name == 'Admin'" -> "cols['role_name'] == 'Admin'".
 func preprocessColumnExpressions(expr string) string {
 	result := expr
 	offset := 0

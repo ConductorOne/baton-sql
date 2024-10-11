@@ -49,13 +49,17 @@ func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]any) (*v2
 	traits := make(map[string]bool)
 	mapTraits := s.config.List.Map.Traits
 	if mapTraits != nil {
-		if mapTraits.User != nil {
+		switch {
+		case mapTraits.User != nil:
 			traits["user"] = true
-		} else if mapTraits.Group != nil {
+
+		case mapTraits.Group != nil:
 			traits["group"] = true
-		} else if mapTraits.Role != nil {
+
+		case mapTraits.Role != nil:
 			traits["role"] = true
-		} else if mapTraits.App != nil {
+
+		case mapTraits.App != nil:
 			traits["app"] = true
 		}
 	}
@@ -109,7 +113,6 @@ func (s *SQLSyncer) getMappedResource(ctx context.Context, r *v2.Resource, rowMa
 	mapping := s.config.List.Map
 	if mapping == nil {
 		return errors.New("no mapping configuration provided")
-
 	}
 
 	inputs := map[string]any{
@@ -124,7 +127,7 @@ func (s *SQLSyncer) getMappedResource(ctx context.Context, r *v2.Resource, rowMa
 	if err != nil {
 		return err
 	}
-	
+
 	r.Id, err = sdkResource.NewResourceID(s.resourceType, v)
 	if err != nil {
 		return err

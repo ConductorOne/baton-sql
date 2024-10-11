@@ -34,9 +34,7 @@ func NewEnv(ctx context.Context) (*Env, error) {
 }
 
 func (t *Env) Evaluate(ctx context.Context, expr string, inputs map[string]any) (any, error) {
-	fmt.Println("previous expr", expr)
 	expr = preprocessColumnExpressions(expr)
-	fmt.Println("after expr", expr)
 
 	ast, issues := t.celEnv.Compile(expr)
 	if issues != nil && issues.Err() != nil {
