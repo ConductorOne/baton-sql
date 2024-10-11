@@ -10,6 +10,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 
+	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/bsql"
 	"github.com/conductorone/baton-sql/pkg/database"
 )
@@ -17,6 +18,7 @@ import (
 type Connector struct {
 	config *bsql.Config
 	db     *sql.DB
+	celEnv *bcel.Env
 }
 
 func (c *Connector) Close() error {
@@ -32,7 +34,7 @@ func (c *Connector) Close() error {
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.config.GetSQLSyncers(ctx)
+	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.celEnv)
 	if err != nil {
 		return nil
 	}
@@ -76,8 +78,14 @@ func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
 		return nil, err
 	}
 
+	celEnv, err := bcel.NewEnv(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Connector{
 		config: c,
 		db:     db,
+		celEnv: celEnv,
 	}, nil
 }

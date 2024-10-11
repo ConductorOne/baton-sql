@@ -89,7 +89,7 @@ resource_types:
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
         principal_id: ".user_id"       # User ID as principal ID
-        principal_type: "'user'"       # Static principal type (users)
+        principal_type: "user"       # Static principal type (users)
         entitlement_id: ".role_name"      # Role entitlement for user
         annotations:
           entitlement_immutable:
