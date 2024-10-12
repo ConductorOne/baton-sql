@@ -9,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
@@ -45,7 +48,7 @@ type SQLSyncer struct {
 	env          *bcel.Env
 }
 
-func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]any) (*v2.Resource, error) {
+func (s *SQLSyncer) fetchTraits(ctx context.Context) map[string]bool {
 	traits := make(map[string]bool)
 	mapTraits := s.config.List.Map.Traits
 	if mapTraits != nil {
@@ -64,49 +67,187 @@ func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]any) (*v2
 		}
 	}
 
-	annos := annotations.Annotations{}
+	return traits
+}
 
-	ret := &v2.Resource{}
+func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	l := ctxzap.Extract(ctx)
 
-	err := s.getMappedResource(ctx, ret, rowMap)
+	inputs, err := s.env.BaseInputs(rowMap)
+	if err != nil {
+		return err
+	}
+
+	mappings := s.config.List.Map.Traits.User
+
+	var opts []sdkResource.UserTraitOption
+
+	// Emails
+	for ii, mapping := range mappings.Emails {
+		if mapping == "" {
+			l.Warn("missing email mapping configuration for user trait", zap.Int("index", ii))
+			continue
+		}
+
+		// Make the first email listed in the mapping the primary
+		primary := false
+		if ii == 0 {
+			primary = true
+		}
+
+		v, err := s.env.EvaluateString(ctx, mapping, inputs)
+		if err != nil {
+			return err
+		}
+
+		opts = append(opts, sdkResource.WithEmail(v, primary))
+	}
+
+	// Status
+	if mappings.Status != "" {
+		//v, err := s.env.EvaluateString(ctx, mappings.Status, inputs)
+		//if err != nil {
+		//	return err
+		//}
+		////opts = append(opts, sdkResource.WithStatus(v))
+		//
+		//if mappings.StatusDetails != "" {
+		//	v, err = s.env.EvaluateString(ctx, mappings.StatusDetails, inputs)
+		//	if err != nil {
+		//		return err
+		//	}
+		//	//opts = append(opts, sdkResource.WithDetailedStatus(v))
+		//}
+	}
+	// Profile
+	// AccountType
+	// Login
+	// LoginAliases
+	// CreatedAt
+	// LastLogin
+	// MfaStatus
+	// SsoStatus
+
+	t, err := sdkResource.NewUserTrait(opts...)
+	if err != nil {
+		return err
+	}
+
+	annos := annotations.Annotations(r.Annotations)
+	annos.Update(t)
+	r.Annotations = annos
+
+	return nil
+}
+
+func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	//inputs, err := s.env.BaseInputs(rowMap)
+	//if err != nil {
+	//	return err
+	//}
+
+	var opts []sdkResource.AppTraitOption
+
+	t, err := sdkResource.NewAppTrait(opts...)
+	if err != nil {
+		return err
+	}
+
+	annos := annotations.Annotations(r.Annotations)
+	annos.Update(t)
+	r.Annotations = annos
+
+	return nil
+}
+
+func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	//inputs, err := s.env.BaseInputs(rowMap)
+	//if err != nil {
+	//	return err
+	//}
+
+	var opts []sdkResource.GroupTraitOption
+
+	t, err := sdkResource.NewGroupTrait(opts...)
+	if err != nil {
+		return err
+	}
+
+	annos := annotations.Annotations(r.Annotations)
+	annos.Update(t)
+	r.Annotations = annos
+
+	return nil
+}
+
+func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	//inputs, err := s.env.BaseInputs(rowMap)
+	//if err != nil {
+	//	return err
+	//}
+
+	var opts []sdkResource.RoleTraitOption
+
+	t, err := sdkResource.NewRoleTrait(opts...)
+	if err != nil {
+		return err
+	}
+
+	annos := annotations.Annotations(r.Annotations)
+	annos.Update(t)
+	r.Annotations = annos
+
+	return nil
+}
+
+func (s *SQLSyncer) mapTraits(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	l := ctxzap.Extract(ctx)
+
+	for trait, enabled := range s.fetchTraits(ctx) {
+		if !enabled {
+			continue
+		}
+
+		switch trait {
+		case "user":
+			if err := s.mapUserTrait(ctx, r, rowMap); err != nil {
+				return err
+			}
+		case "role":
+			if err := s.mapRoleTrait(ctx, r, rowMap); err != nil {
+				return err
+			}
+		case "app":
+			if err := s.mapAppTrait(ctx, r, rowMap); err != nil {
+				return err
+			}
+		case "group":
+			if err := s.mapGroupTrait(ctx, r, rowMap); err != nil {
+				return err
+			}
+		default:
+			l.Warn("unexpected trait type in mapping", zap.String("trait", trait))
+			continue
+		}
+	}
+
+	return nil
+}
+
+func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]any) (*v2.Resource, error) {
+	r := &v2.Resource{}
+
+	err := s.getMappedResource(ctx, r, rowMap)
 	if err != nil {
 		return nil, err
 	}
 
-	if traits["user"] {
-		ut, err := sdkResource.NewUserTrait()
-		if err != nil {
-			return nil, err
-		}
-		annos.Update(ut)
+	err = s.mapTraits(ctx, r, rowMap)
+	if err != nil {
+		return nil, err
 	}
 
-	if traits["role"] {
-		rt, err := sdkResource.NewRoleTrait()
-		if err != nil {
-			return nil, err
-		}
-		annos.Update(rt)
-	}
-
-	if traits["group"] {
-		gt, err := sdkResource.NewGroupTrait()
-		if err != nil {
-			return nil, err
-		}
-		annos.Update(gt)
-	}
-
-	if traits["app"] {
-		at, err := sdkResource.NewAppTrait()
-		if err != nil {
-			return nil, err
-		}
-		annos.Update(at)
-	}
-
-	ret.Annotations = annos
-	return ret, nil
+	return r, nil
 }
 
 func (s *SQLSyncer) getMappedResource(ctx context.Context, r *v2.Resource, rowMap map[string]interface{}) error {
@@ -115,10 +256,10 @@ func (s *SQLSyncer) getMappedResource(ctx context.Context, r *v2.Resource, rowMa
 		return errors.New("no mapping configuration provided")
 	}
 
-	inputs := map[string]any{
-		"cols": rowMap,
+	inputs, err := s.env.BaseInputs(rowMap)
+	if err != nil {
+		return err
 	}
-
 	// Map ID
 	if mapping.Id == "" {
 		return errors.New("no ID mapping configuration provided")

@@ -22,10 +22,9 @@ resource_types:
         traits:
           user:
             emails:
-              - address: ".email"          # Mapping user email to traits
-            status:
-              status: 0
-              details: "active"    # Static status for users
+              - ".email"        # Mapping user email to traits
+            status: "active"
+            status_details: "'detailed status'"    # Static status for users
             login: ".username"    # Mapping login (user_login)
       pagination:
         strategy: "offset"          # Using offset-based pagination
@@ -49,7 +48,8 @@ resource_types:
         description: "'Wordpress role for user'" # Static description
         traits:
           role:
-            name: ".role_name"    # Mapping role name into traits
+            profile:
+              name: ".role_name"    # Mapping role name into traits
       pagination:
         strategy: "offset"
         primary_key: "meta_value"

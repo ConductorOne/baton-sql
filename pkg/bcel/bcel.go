@@ -34,7 +34,7 @@ func NewEnv(ctx context.Context) (*Env, error) {
 }
 
 func (t *Env) Evaluate(ctx context.Context, expr string, inputs map[string]any) (any, error) {
-	expr = preprocessColumnExpressions(expr)
+	expr = preprocessExpressions(expr)
 
 	ast, issues := t.celEnv.Compile(expr)
 	if issues != nil && issues.Err() != nil {
@@ -71,4 +71,11 @@ func (t *Env) EvaluateString(ctx context.Context, expr string, inputs map[string
 	default:
 		return fmt.Sprintf("%s", out), nil
 	}
+}
+
+func (t *Env) BaseInputs(rowMap map[string]any) (map[string]any, error) {
+	ret := make(map[string]any)
+	ret["cols"] = rowMap
+
+	return ret, nil
 }

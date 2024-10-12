@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
 func loadExampleConfig(t *testing.T, exampleName string) string {
@@ -52,9 +50,9 @@ func TestParse(t *testing.T) {
 				require.Equal(t, ".user_id", userResourceType.List.Map.Id)
 				require.Equal(t, ".username", userResourceType.List.Map.DisplayName)
 				require.Equal(t, ".email", userResourceType.List.Map.Description)
-				require.Equal(t, ".email", userResourceType.List.Map.Traits.User.Emails[0].Address)
-				require.Equal(t, v2.UserTrait_Status_Status(0), userResourceType.List.Map.Traits.User.Status.Status)
-				require.Equal(t, "active", userResourceType.List.Map.Traits.User.Status.Details)
+				require.Equal(t, ".email", userResourceType.List.Map.Traits.User.Emails[0])
+				require.Equal(t, "active", userResourceType.List.Map.Traits.User.Status)
+				require.Equal(t, `'detailed status'`, userResourceType.List.Map.Traits.User.StatusDetails)
 				require.Equal(t, ".username", userResourceType.List.Map.Traits.User.Login)
 
 				require.Equal(t, "offset", userResourceType.List.Pagination.Strategy)
@@ -75,6 +73,7 @@ func TestParse(t *testing.T) {
 				require.Equal(t, ".role_name", roleResourceType.List.Map.Id)
 				require.Equal(t, ".role_name", roleResourceType.List.Map.DisplayName)
 				require.Equal(t, "'Wordpress role for user'", roleResourceType.List.Map.Description)
+				require.Equal(t, ".role_name", roleResourceType.List.Map.Traits.Role.Profile["name"])
 				require.Equal(t, "offset", roleResourceType.List.Pagination.Strategy)
 				require.Equal(t, "meta_value", roleResourceType.List.Pagination.PrimaryKey)
 

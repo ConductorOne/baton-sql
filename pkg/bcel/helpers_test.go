@@ -2,7 +2,7 @@ package bcel
 
 import "testing"
 
-func Test_preprocessColumnExpression(t *testing.T) {
+func Test_preprocessExpressions(t *testing.T) {
 	tests := []struct {
 		name string
 		expr string
@@ -23,11 +23,20 @@ func Test_preprocessColumnExpression(t *testing.T) {
 		{"Null comparison with map access", ".role_name == null", "cols['role_name'] == null"},
 		{"Empty string comparison with map access", ".role_name == \"\"", "cols['role_name'] == \"\""},
 		{"Function call on object with map access", "myObject.doSomething(.role_name)", "myObject.doSomething(cols['role_name'])"},
+		{"Simple bare string", "alert", "\"alert\""},
+		{"Bare string with numeric identifier", "status123", "\"status123\""},
+		{"Simple column replacement", ".role_name", "cols['role_name']"},
+		{"Bare string with special characters", "status_code", "\"status_code\""},
+		{"Mixed column replacement and string", ".role_name == alert", "cols['role_name'] == alert"},
+		{"Complex expression with column and bare string", "user.role == .role_name && state == ok", "user.role == cols['role_name'] && state == ok"},
+		{"Quoted string in expression", "user.role == 'admin'", "user.role == 'admin'"},
+		{"Function call with column access", "check_role(.role_name)", "check_role(cols['role_name'])"},
+		{"Bare string with existing quotes", "'alert'", "'alert'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := preprocessColumnExpressions(tt.expr); got != tt.want {
-				t.Errorf("preprocessColumnExpressions() = %v, want %v", got, tt.want)
+			if got := preprocessExpressions(tt.expr); got != tt.want {
+				t.Errorf("preprocessExpressions() = %v, want %v", got, tt.want)
 			}
 		})
 	}
