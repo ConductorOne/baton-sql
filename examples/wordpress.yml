@@ -71,11 +71,10 @@ resource_types:
         id: ".user_id"            # Mapping user ID to entitlement ID
         display_name: ".username"  # Using user_login as display name
         description: "'Role entitlement for user'"
+        slug: "slug"
         grantable_to:
           - "user"
-        annotations:
-          entitlement_immutable:
-            value: true
+        immutable: true
       pagination:
         strategy: "offset"
         primary_key: "ID"

@@ -91,13 +91,13 @@ type EntitlementsQuery struct {
 }
 
 type EntitlementMapping struct {
-	Id          string       `yaml:"id" json:"id"`
-	DisplayName string       `yaml:"display_name" json:"display_name"`
-	Description string       `yaml:"description" json:"description"`
-	GrantableTo []string     `yaml:"grantable_to" json:"grantable_to"`
-	Annotations *Annotations `yaml:"annotations" json:"annotations"`
-	Purpose     string       `yaml:"purpose" json:"purpose"`
-	Slug        string       `yaml:"slug" json:"slug"`
+	Id          string   `yaml:"id" json:"id"`
+	DisplayName string   `yaml:"display_name" json:"display_name"`
+	Description string   `yaml:"description" json:"description"`
+	GrantableTo []string `yaml:"grantable_to" json:"grantable_to"`
+	Purpose     string   `yaml:"purpose" json:"purpose"`
+	Slug        string   `yaml:"slug" json:"slug"`
+	Immutable   bool     `yaml:"immutable" json:"immutable"`
 }
 
 type EntitlementsStatic struct {
