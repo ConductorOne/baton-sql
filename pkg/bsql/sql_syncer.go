@@ -21,6 +21,13 @@ import (
 	"github.com/conductorone/baton-sql/pkg/bcel"
 )
 
+const (
+	userTraitType  = "user"
+	appTraitType   = "app"
+	groupTraitType = "group"
+	roleTraitType  = "role"
+)
+
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)\>`)
 
 func parseQueryOpts(ctx context.Context, query string, values map[string]string) (string, error) {
@@ -54,16 +61,16 @@ func (s *SQLSyncer) fetchTraits(ctx context.Context) map[string]bool {
 	if mapTraits != nil {
 		switch {
 		case mapTraits.User != nil:
-			traits["user"] = true
+			traits[userTraitType] = true
 
 		case mapTraits.Group != nil:
-			traits["group"] = true
+			traits[groupTraitType] = true
 
 		case mapTraits.Role != nil:
-			traits["role"] = true
+			traits[roleTraitType] = true
 
 		case mapTraits.App != nil:
-			traits["app"] = true
+			traits[appTraitType] = true
 		}
 	}
 
@@ -143,12 +150,12 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 	}
 
 	profile := make(map[string]interface{})
-	for profile_key, profile_value := range mappings.Profile {
-		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+	for profileKey, profileValue := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
 		if err != nil {
 			return err
 		}
-		profile[profile_key] = v
+		profile[profileKey] = v
 	}
 
 	if len(profile) > 0 {
@@ -176,6 +183,9 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 			accountType = v2.UserTrait_ACCOUNT_TYPE_HUMAN
 		}
 		opts = append(opts, sdkResource.WithAccountType(accountType))
+	} else {
+		// If no mapping is provided, default to human
+		opts = append(opts, sdkResource.WithAccountType(v2.UserTrait_ACCOUNT_TYPE_HUMAN))
 	}
 
 	if mappings.Login != "" {
@@ -253,12 +263,12 @@ func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[
 	}
 
 	profile := make(map[string]interface{})
-	for profile_key, profile_value := range mappings.Profile {
-		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+	for profileKey, profileValue := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
 		if err != nil {
 			return err
 		}
-		profile[profile_key] = v
+		profile[profileKey] = v
 	}
 
 	if len(profile) > 0 {
@@ -288,12 +298,12 @@ func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap ma
 	var opts []sdkResource.GroupTraitOption
 
 	profile := make(map[string]interface{})
-	for profile_key, profile_value := range mappings.Profile {
-		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+	for profileKey, profileValue := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
 		if err != nil {
 			return err
 		}
-		profile[profile_key] = v
+		profile[profileKey] = v
 	}
 	if len(profile) > 0 {
 		opts = append(opts, sdkResource.WithGroupProfile(profile))
@@ -322,12 +332,12 @@ func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map
 	var opts []sdkResource.RoleTraitOption
 
 	profile := make(map[string]interface{})
-	for profile_key, profile_value := range mappings.Profile {
-		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+	for profileKey, profileValue := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
 		if err != nil {
 			return err
 		}
-		profile[profile_key] = v
+		profile[profileKey] = v
 	}
 	if len(profile) > 0 {
 		opts = append(opts, sdkResource.WithRoleProfile(profile))
@@ -354,19 +364,19 @@ func (s *SQLSyncer) mapTraits(ctx context.Context, r *v2.Resource, rowMap map[st
 		}
 
 		switch trait {
-		case "user":
+		case userTraitType:
 			if err := s.mapUserTrait(ctx, r, rowMap); err != nil {
 				return err
 			}
-		case "role":
+		case roleTraitType:
 			if err := s.mapRoleTrait(ctx, r, rowMap); err != nil {
 				return err
 			}
-		case "app":
+		case appTraitType:
 			if err := s.mapAppTrait(ctx, r, rowMap); err != nil {
 				return err
 			}
-		case "group":
+		case groupTraitType:
 			if err := s.mapGroupTrait(ctx, r, rowMap); err != nil {
 				return err
 			}
