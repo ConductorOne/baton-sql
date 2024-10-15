@@ -58,25 +58,20 @@ type UserTraitMapping struct {
 	Status        string            `yaml:"status" json:"status"`
 	StatusDetails string            `yaml:"status_details" json:"status_details"`
 	Profile       map[string]string `yaml:"profile" json:"profile"`
-	Icon          string            `yaml:"icon" json:"icon"`
 	AccountType   string            `yaml:"account_type" json:"account_type"`
 	Login         string            `yaml:"login" json:"login"`
 	LoginAliases  []string          `yaml:"login_aliases" json:"login_aliases"`
-	CreatedAt     string            `yaml:"created_at" json:"created_at"`
 	LastLogin     string            `yaml:"last_login" json:"last_login"`
 	MfaEnabled    string            `yaml:"mfa_enabled" json:"mfa_enabled"`
 	SsoEnabled    string            `yaml:"sso_enabled" json:"sso_enabled"`
 }
 
 type GroupTraitMapping struct {
-	Icon    string            `yaml:"icon" json:"icon"`
 	Profile map[string]string `yaml:"profile" json:"profile"`
 }
 
 type AppTraitMapping struct {
 	HelpUrl string            `yaml:"help_url" json:"help_url"`
-	Icon    string            `yaml:"icon" json:"icon"`
-	Logo    string            `yaml:"logo" json:"logo"`
 	Profile map[string]string `yaml:"profile" json:"profile"`
 }
 

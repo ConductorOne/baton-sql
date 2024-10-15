@@ -105,28 +105,122 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 
 	// Status
 	if mappings.Status != "" {
-		//v, err := s.env.EvaluateString(ctx, mappings.Status, inputs)
+		statusValue, err := s.env.EvaluateString(ctx, mappings.Status, inputs)
+		if err != nil {
+			return err
+		}
+
+		var status v2.UserTrait_Status_Status
+		switch strings.ToLower(statusValue) {
+		case "active":
+			status = v2.UserTrait_Status_STATUS_ENABLED
+		case "enabled":
+			status = v2.UserTrait_Status_STATUS_ENABLED
+		case "disabled":
+			status = v2.UserTrait_Status_STATUS_DISABLED
+		case "inactive":
+			status = v2.UserTrait_Status_STATUS_DISABLED
+		case "suspended":
+			status = v2.UserTrait_Status_STATUS_DISABLED
+		case "locked":
+			status = v2.UserTrait_Status_STATUS_DISABLED
+		case "deleted":
+			status = v2.UserTrait_Status_STATUS_DELETED
+		default:
+			l.Warn("unexpected status value in mapping", zap.String("status", statusValue))
+			status = v2.UserTrait_Status_STATUS_UNSPECIFIED
+		}
+
+		if mappings.StatusDetails != "" {
+			v, err := s.env.EvaluateString(ctx, mappings.StatusDetails, inputs)
+			if err != nil {
+				return err
+			}
+			opts = append(opts, sdkResource.WithDetailedStatus(status, v))
+		} else {
+			opts = append(opts, sdkResource.WithStatus(status))
+		}
+	}
+
+	profile := make(map[string]interface{})
+	for profile_key, profile_value := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+		if err != nil {
+			return err
+		}
+		profile[profile_key] = v
+	}
+
+	if len(profile) > 0 {
+		opts = append(opts, sdkResource.WithUserProfile(profile))
+	}
+
+	if mappings.AccountType != "" {
+		v, err := s.env.EvaluateString(ctx, mappings.AccountType, inputs)
+		if err != nil {
+			return err
+		}
+
+		var accountType v2.UserTrait_AccountType
+		switch strings.ToLower(v) {
+		case "user":
+			accountType = v2.UserTrait_ACCOUNT_TYPE_HUMAN
+		case "human":
+			accountType = v2.UserTrait_ACCOUNT_TYPE_HUMAN
+		case "service":
+			accountType = v2.UserTrait_ACCOUNT_TYPE_SERVICE
+		case "system":
+			accountType = v2.UserTrait_ACCOUNT_TYPE_SYSTEM
+		default:
+			l.Warn("unexpected account type value in mapping, defaulting to human", zap.String("account_type", v))
+			accountType = v2.UserTrait_ACCOUNT_TYPE_HUMAN
+		}
+		opts = append(opts, sdkResource.WithAccountType(accountType))
+	}
+
+	if mappings.Login != "" {
+		primaryLogin, err := s.env.EvaluateString(ctx, mappings.Login, inputs)
+		if err != nil {
+			return err
+		}
+
+		aliases := make([]string, 0)
+		for _, a := range mappings.LoginAliases {
+			alias, err := s.env.EvaluateString(ctx, a, inputs)
+			if err != nil {
+				return err
+			}
+			if alias != "" {
+				aliases = append(aliases, alias)
+			}
+		}
+		opts = append(opts, sdkResource.WithUserLogin(primaryLogin, aliases...))
+	}
+
+	// TODO(jirwin): How do we want to deal with timestamps?
+	if mappings.LastLogin != "" {
+		//lastLogin, err := s.env.EvaluateString(ctx, mappings.LastLogin, inputs)
 		//if err != nil {
 		//	return err
 		//}
-		////opts = append(opts, sdkResource.WithStatus(v))
-		//
-		//if mappings.StatusDetails != "" {
-		//	v, err = s.env.EvaluateString(ctx, mappings.StatusDetails, inputs)
-		//	if err != nil {
-		//		return err
-		//	}
-		//	//opts = append(opts, sdkResource.WithDetailedStatus(v))
-		//}
+		//opts = append(opts, sdkResource.WithLastLogin(lastLogin))
 	}
-	// Profile
-	// AccountType
-	// Login
-	// LoginAliases
-	// CreatedAt
-	// LastLogin
-	// MfaStatus
-	// SsoStatus
+
+	// TODO(jirwin): should we have CEL that evaluates to true/false
+	if mappings.MfaEnabled != "" {
+		//mfaEnabled, err := s.env.EvaluateString(ctx, mappings.MfaEnabled, inputs)
+		//if err != nil {
+		//	return err
+		//}
+		//opts = append(opts, sdkResource.WithMFAStatus(mfaEnabled))
+	}
+
+	if mappings.SsoEnabled != "" {
+		//ssoEnabled, err := s.env.EvaluateString(ctx, mappings.SsoEnabled, inputs)
+		//if err != nil {
+		//	return err
+		//opts = append(opts, sdkResource.WithSSOStatus(ssoEnabled))
+	}
 
 	t, err := sdkResource.NewUserTrait(opts...)
 	if err != nil {
@@ -141,12 +235,35 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 }
 
 func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
-	//inputs, err := s.env.BaseInputs(rowMap)
-	//if err != nil {
-	//	return err
-	//}
+	inputs, err := s.env.BaseInputs(rowMap)
+	if err != nil {
+		return err
+	}
+
+	mappings := s.config.List.Map.Traits.App
 
 	var opts []sdkResource.AppTraitOption
+
+	if mappings.HelpUrl != "" {
+		v, err := s.env.EvaluateString(ctx, mappings.HelpUrl, inputs)
+		if err != nil {
+			return err
+		}
+		opts = append(opts, sdkResource.WithAppHelpURL(v))
+	}
+
+	profile := make(map[string]interface{})
+	for profile_key, profile_value := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+		if err != nil {
+			return err
+		}
+		profile[profile_key] = v
+	}
+
+	if len(profile) > 0 {
+		opts = append(opts, sdkResource.WithAppProfile(profile))
+	}
 
 	t, err := sdkResource.NewAppTrait(opts...)
 	if err != nil {
@@ -161,12 +278,26 @@ func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[
 }
 
 func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
-	//inputs, err := s.env.BaseInputs(rowMap)
-	//if err != nil {
-	//	return err
-	//}
+	inputs, err := s.env.BaseInputs(rowMap)
+	if err != nil {
+		return err
+	}
+
+	mappings := s.config.List.Map.Traits.Group
 
 	var opts []sdkResource.GroupTraitOption
+
+	profile := make(map[string]interface{})
+	for profile_key, profile_value := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+		if err != nil {
+			return err
+		}
+		profile[profile_key] = v
+	}
+	if len(profile) > 0 {
+		opts = append(opts, sdkResource.WithGroupProfile(profile))
+	}
 
 	t, err := sdkResource.NewGroupTrait(opts...)
 	if err != nil {
@@ -181,12 +312,26 @@ func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap ma
 }
 
 func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
-	//inputs, err := s.env.BaseInputs(rowMap)
-	//if err != nil {
-	//	return err
-	//}
+	inputs, err := s.env.BaseInputs(rowMap)
+	if err != nil {
+		return err
+	}
+
+	mappings := s.config.List.Map.Traits.Role
 
 	var opts []sdkResource.RoleTraitOption
+
+	profile := make(map[string]interface{})
+	for profile_key, profile_value := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profile_value, inputs)
+		if err != nil {
+			return err
+		}
+		profile[profile_key] = v
+	}
+	if len(profile) > 0 {
+		opts = append(opts, sdkResource.WithRoleProfile(profile))
+	}
 
 	t, err := sdkResource.NewRoleTrait(opts...)
 	if err != nil {
