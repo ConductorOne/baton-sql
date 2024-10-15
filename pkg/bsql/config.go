@@ -47,10 +47,36 @@ type Annotations struct {
 }
 
 type Traits struct {
-	App   *connector_v2.AppTrait   `yaml:"app" json:"app"`
-	Group *connector_v2.GroupTrait `yaml:"group" json:"group"`
-	Role  *connector_v2.RoleTrait  `yaml:"role" json:"role"`
-	User  *connector_v2.UserTrait  `yaml:"user" json:"user"`
+	App   *AppTraitMapping   `yaml:"app" json:"app"`
+	Group *GroupTraitMapping `yaml:"group" json:"group"`
+	Role  *RoleTraitMapping  `yaml:"role" json:"role"`
+	User  *UserTraitMapping  `yaml:"user" json:"user"`
+}
+
+type UserTraitMapping struct {
+	Emails        []string          `yaml:"emails" json:"emails"`
+	Status        string            `yaml:"status" json:"status"`
+	StatusDetails string            `yaml:"status_details" json:"status_details"`
+	Profile       map[string]string `yaml:"profile" json:"profile"`
+	AccountType   string            `yaml:"account_type" json:"account_type"`
+	Login         string            `yaml:"login" json:"login"`
+	LoginAliases  []string          `yaml:"login_aliases" json:"login_aliases"`
+	LastLogin     string            `yaml:"last_login" json:"last_login"`
+	MfaEnabled    string            `yaml:"mfa_enabled" json:"mfa_enabled"`
+	SsoEnabled    string            `yaml:"sso_enabled" json:"sso_enabled"`
+}
+
+type GroupTraitMapping struct {
+	Profile map[string]string `yaml:"profile" json:"profile"`
+}
+
+type AppTraitMapping struct {
+	HelpUrl string            `yaml:"help_url" json:"help_url"`
+	Profile map[string]string `yaml:"profile" json:"profile"`
+}
+
+type RoleTraitMapping struct {
+	Profile map[string]string `yaml:"profile" json:"profile"`
 }
 
 type Pagination struct {
