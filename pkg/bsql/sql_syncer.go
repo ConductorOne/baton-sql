@@ -207,31 +207,6 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		opts = append(opts, sdkResource.WithUserLogin(primaryLogin, aliases...))
 	}
 
-	// TODO(jirwin): How do we want to deal with timestamps?
-	if mappings.LastLogin != "" {
-		//lastLogin, err := s.env.EvaluateString(ctx, mappings.LastLogin, inputs)
-		//if err != nil {
-		//	return err
-		//}
-		//opts = append(opts, sdkResource.WithLastLogin(lastLogin))
-	}
-
-	// TODO(jirwin): should we have CEL that evaluates to true/false
-	if mappings.MfaEnabled != "" {
-		//mfaEnabled, err := s.env.EvaluateString(ctx, mappings.MfaEnabled, inputs)
-		//if err != nil {
-		//	return err
-		//}
-		//opts = append(opts, sdkResource.WithMFAStatus(mfaEnabled))
-	}
-
-	if mappings.SsoEnabled != "" {
-		//ssoEnabled, err := s.env.EvaluateString(ctx, mappings.SsoEnabled, inputs)
-		//if err != nil {
-		//	return err
-		//opts = append(opts, sdkResource.WithSSOStatus(ssoEnabled))
-	}
-
 	t, err := sdkResource.NewUserTrait(opts...)
 	if err != nil {
 		return err
