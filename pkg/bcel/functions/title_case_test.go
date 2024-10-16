@@ -3,7 +3,6 @@ package functions
 import "testing"
 
 func TestTitleCase(t *testing.T) {
-
 	tests := []struct {
 		name     string
 		input    string

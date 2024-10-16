@@ -50,6 +50,7 @@ resource_types:
         description: "'Wordpress role for user'"
         traits:
           role:
+            profile:
       pagination:
         strategy: "offset"
         primary_key: "meta_value"

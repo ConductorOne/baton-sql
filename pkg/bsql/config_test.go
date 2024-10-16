@@ -63,28 +63,25 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, roleResourceType.List)
 				require.Equal(t, "Role", roleResourceType.Name)
 				require.Equal(t, "A role within the wordpress system that can be assigned to a user", roleResourceType.Description)
-				require.Equal(t, normalizeQueryString(`SELECT
-          um.meta_value AS role_name,
-          u.user_login AS username
-        FROM wp_usermeta um
-        JOIN wp_users u ON um.user_id = u.ID
-        WHERE um.meta_key = 'wp_capabilities'
-        LIMIT ?<Limit> OFFSET ?<Offset>`), normalizeQueryString(roleResourceType.List.Query))
-				require.Equal(t, ".role_name", roleResourceType.List.Map.Id)
-				require.Equal(t, ".role_name", roleResourceType.List.Map.DisplayName)
+				require.Equal(t, normalizeQueryString(`SELECT DISTINCT
+um.meta_value AS role_name
+FROM wp_usermeta um
+WHERE um.meta_key = 'wp_capabilities' AND um.meta_value != 'a:0:{}'
+LIMIT ?<Limit> OFFSET ?<Offset>`), normalizeQueryString(roleResourceType.List.Query))
+				require.Equal(t, "phpDeserializeStringArray(string(.role_name))[0]", roleResourceType.List.Map.Id)
+				require.Equal(t, "titleCase(phpDeserializeStringArray(string(.role_name))[0])", roleResourceType.List.Map.DisplayName)
 				require.Equal(t, "'Wordpress role for user'", roleResourceType.List.Map.Description)
-				require.Equal(t, ".role_name", roleResourceType.List.Map.Traits.Role.Profile["name"])
 				require.Equal(t, "offset", roleResourceType.List.Pagination.Strategy)
 				require.Equal(t, "meta_value", roleResourceType.List.Pagination.PrimaryKey)
 
 				// Validate `roleResourceType` entitlements
-				require.NotNil(t, roleResourceType.Entitlements)
-				require.Equal(t, ".user_id", roleResourceType.Entitlements.Map.Id)
-				require.Equal(t, ".username", roleResourceType.Entitlements.Map.DisplayName)
-				require.Equal(t, "'Role entitlement for user'", roleResourceType.Entitlements.Map.Description)
-				require.Equal(t, []string{"user"}, roleResourceType.Entitlements.Map.GrantableTo)
-				require.Equal(t, "offset", roleResourceType.Entitlements.Pagination.Strategy)
-				require.Equal(t, "ID", roleResourceType.Entitlements.Pagination.PrimaryKey)
+				require.NotNil(t, roleResourceType.StaticEntitlements)
+				require.Len(t, roleResourceType.StaticEntitlements, 1)
+				require.Equal(t, "member", roleResourceType.StaticEntitlements[0].Id)
+				require.Equal(t, "resource.DisplayName + ' Role Member'", roleResourceType.StaticEntitlements[0].DisplayName)
+				require.Equal(t, "'Member of the ' + resource.DisplayName + ' role'", roleResourceType.StaticEntitlements[0].Description)
+				require.Len(t, roleResourceType.StaticEntitlements[0].GrantableTo, 1)
+				require.Equal(t, []string{"user"}, roleResourceType.StaticEntitlements[0].GrantableTo)
 
 				// Validate `roleResourceType` grants
 				require.NotNil(t, roleResourceType.Grants)
