@@ -21,14 +21,45 @@ func (s *SQLSyncer) Entitlements(ctx context.Context, resource *v2.Resource, pTo
 }
 
 func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+	inputs, err := s.env.BaseInputs(nil)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	inputs["resource"] = map[string]string{
+		"ID":             resource.Id.Resource,
+		"ResourceTypeID": resource.Id.ResourceType,
+		"DisplayName":    resource.DisplayName,
+	}
+
 	var ret []*v2.Entitlement
 	for _, e := range s.config.StaticEntitlements {
 		entitlement := &v2.Entitlement{
-			Id:          sdkEntitlement.NewEntitlementID(resource, e.Slug),
-			DisplayName: e.DisplayName,
-			Description: e.Description,
-			Resource:    resource,
-			Slug:        e.Slug,
+			Id:       sdkEntitlement.NewEntitlementID(resource, e.Id),
+			Resource: resource,
+		}
+
+		// If the slug isn't set, default it to be the same as the ID
+		if e.Slug == "" {
+			entitlement.Slug = e.Id
+		}
+
+		if e.DisplayName == "" {
+			return nil, "", nil, fmt.Errorf("static entitlements mapping display_name is required")
+		}
+
+		v, err := s.env.EvaluateString(ctx, e.DisplayName, inputs)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		entitlement.DisplayName = v
+
+		if e.Description != "" {
+			v, err := s.env.EvaluateString(ctx, e.Description, inputs)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			entitlement.Description = v
 		}
 
 		switch e.Purpose {
@@ -105,7 +136,7 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 			rowMap[colName] = values[i]
 		}
 
-		r, err := s.mapEntitlement(ctx, rowMap)
+		r, err := s.mapEntitlement(ctx, resource, rowMap)
 		if err != nil {
 			return nil, "", nil, err
 		}
@@ -120,12 +151,18 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 	return ret, "", nil, nil
 }
 
-func (s *SQLSyncer) mapEntitlement(ctx context.Context, rowMap map[string]any) (*v2.Entitlement, error) {
+func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, rowMap map[string]any) (*v2.Entitlement, error) {
 	ret := &v2.Entitlement{}
 
 	inputs, err := s.env.BaseInputs(rowMap)
 	if err != nil {
 		return nil, err
+	}
+
+	inputs["resource"] = map[string]string{
+		"ID":             resource.Id.Resource,
+		"ResourceTypeID": resource.Id.ResourceType,
+		"DisplayName":    resource.DisplayName,
 	}
 
 	mappings := s.config.Entitlements.Map

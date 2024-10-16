@@ -46,7 +46,7 @@ resource_types:
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
         id: "phpDeserializeStringArray(string(.role_name))[0]"
-        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0]) + ' Role'"
+        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0])"
         description: "'Wordpress role for user'"
         traits:
           role:
@@ -58,31 +58,9 @@ resource_types:
       - id: "member"
         display_name: "resource.DisplayName + ' Role Member'"
         description: "'Member of the ' + resource.DisplayName + ' role'"
-        slug: "member"
         purpose: "assignment"
         grantable_to:
           - "user"
-    entitlements:
-      query: |
-        SELECT
-          u.ID AS user_id,
-          u.user_login AS username,
-          um.meta_value AS role_name
-        FROM wp_users u
-        JOIN wp_usermeta um ON u.ID = um.user_id
-        WHERE um.meta_key = 'wp_capabilities'
-        LIMIT ?<Limit> OFFSET ?<Offset>
-      map:
-        id: ".user_id"            # Mapping user ID to entitlement ID
-        display_name: ".username"  # Using user_login as display name
-        description: "'Role entitlement for user'"
-        slug: "slug"
-        grantable_to:
-          - "user"
-        immutable: true
-      pagination:
-        strategy: "offset"
-        primary_key: "ID"
 
     grants:
       query: |
