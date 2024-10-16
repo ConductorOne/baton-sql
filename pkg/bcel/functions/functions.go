@@ -62,6 +62,7 @@ func GetAllFunctions() []*FunctionDefinition {
 	return []*FunctionDefinition{
 		ToUpperFunc(),
 		PHPDeserializeStringArrayFunc(),
+		TitleCaseFunc(),
 	}
 }
 
