@@ -157,6 +157,7 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, rowMap map[string]any) (
 	if mappings.Immutable {
 		annos.Update(&v2.EntitlementImmutable{})
 	}
+	ret.Annotations = annos
 
 	return ret, nil
 }
