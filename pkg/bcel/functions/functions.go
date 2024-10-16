@@ -61,6 +61,8 @@ func (fd *FunctionDefinition) GetOptions() []cel.EnvOption {
 func GetAllFunctions() []*FunctionDefinition {
 	return []*FunctionDefinition{
 		ToUpperFunc(),
+		PHPDeserializeStringArrayFunc(),
+		TitleCaseFunc(),
 	}
 }
 

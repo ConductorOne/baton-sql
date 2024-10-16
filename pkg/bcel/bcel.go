@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
 
 	"github.com/conductorone/baton-sql/pkg/bcel/functions"
 )
@@ -19,6 +20,7 @@ func NewEnv(ctx context.Context) (*Env, error) {
 	// CEL variables
 	celOpts = append(celOpts,
 		cel.Variable("cols", cel.MapType(cel.StringType, cel.AnyType)),
+		cel.Variable("resource", cel.MapType(types.StringType, types.StringType)),
 	)
 
 	// CEL functions

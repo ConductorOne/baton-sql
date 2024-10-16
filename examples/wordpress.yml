@@ -38,47 +38,30 @@ resource_types:
     description: "A role within the wordpress system that can be assigned to a user"
     list:
       query: |
-        SELECT
-          um.meta_value AS role_name,
-          u.user_login AS username
+        SELECT DISTINCT
+          um.meta_value AS role_name
         FROM wp_usermeta um
-        JOIN wp_users u ON um.user_id = u.ID
         WHERE um.meta_key = 'wp_capabilities'
+        AND um.meta_value != 'a:0:{}'
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
-        id: ".role_name"          # Using role_name as the ID
-        display_name: ".role_name" # Using role name as the display name
-        description: "'Wordpress role for user'" # Static description
+        id: "phpDeserializeStringArray(string(.role_name))[0]"
+        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0])"
+        description: "'Wordpress role for user'"
         traits:
           role:
             profile:
-              name: ".role_name"    # Mapping role name into traits
       pagination:
         strategy: "offset"
         primary_key: "meta_value"
 
-    entitlements:
-      query: |
-        SELECT
-          u.ID AS user_id,
-          u.user_login AS username,
-          um.meta_value AS role_name
-        FROM wp_users u
-        JOIN wp_usermeta um ON u.ID = um.user_id
-        WHERE um.meta_key = 'wp_capabilities'
-        LIMIT ?<Limit> OFFSET ?<Offset>
-      map:
-        id: ".user_id"            # Mapping user ID to entitlement ID
-        display_name: ".username"  # Using user_login as display name
-        description: "'Role entitlement for user'"
+    static_entitlements:
+      - id: "member"
+        display_name: "resource.DisplayName + ' Role Member'"
+        description: "'Member of the ' + resource.DisplayName + ' role'"
+        purpose: "assignment"
         grantable_to:
           - "user"
-        annotations:
-          entitlement_immutable:
-            value: true
-      pagination:
-        strategy: "offset"
-        primary_key: "ID"
 
     grants:
       query: |

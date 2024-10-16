@@ -19,12 +19,12 @@ type DatabaseConfig struct {
 }
 
 type ResourceType struct {
-	Name               string              `yaml:"name" json:"name"`
-	List               *ListQuery          `yaml:"list,omitempty" json:"list,omitempty"`
-	Entitlements       *EntitlementsQuery  `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
-	StaticEntitlements *EntitlementsStatic `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
-	Grants             *GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
-	Description        string              `yaml:"description,omitempty" json:"description,omitempty"`
+	Name               string                `yaml:"name" json:"name"`
+	List               *ListQuery            `yaml:"list,omitempty" json:"list,omitempty"`
+	Entitlements       *EntitlementsQuery    `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
+	StaticEntitlements []*EntitlementMapping `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
+	Grants             *GrantsQuery          `yaml:"grants,omitempty" json:"grants,omitempty"`
+	Description        string                `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 type ListQuery struct {
@@ -91,17 +91,13 @@ type EntitlementsQuery struct {
 }
 
 type EntitlementMapping struct {
-	Id          string       `yaml:"id" json:"id"`
-	DisplayName string       `yaml:"display_name" json:"display_name"`
-	Description string       `yaml:"description" json:"description"`
-	GrantableTo []string     `yaml:"grantable_to" json:"grantable_to"`
-	Annotations *Annotations `yaml:"annotations" json:"annotations"`
-	Purpose     string       `yaml:"purpose" json:"purpose"`
-	Slug        string       `yaml:"slug" json:"slug"`
-}
-
-type EntitlementsStatic struct {
-	// TODO(pquerna): figure this out
+	Id          string   `yaml:"id" json:"id"`
+	DisplayName string   `yaml:"display_name" json:"display_name"`
+	Description string   `yaml:"description" json:"description"`
+	GrantableTo []string `yaml:"grantable_to" json:"grantable_to"`
+	Purpose     string   `yaml:"purpose" json:"purpose"`
+	Slug        string   `yaml:"slug" json:"slug"`
+	Immutable   bool     `yaml:"immutable" json:"immutable"`
 }
 
 type GrantsQuery struct {
