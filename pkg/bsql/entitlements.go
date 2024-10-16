@@ -8,9 +8,50 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	sdkEntitlement "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 )
 
 func (s *SQLSyncer) Entitlements(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+	// If we have static entitlements defined, only return those, else return dynamic entitlements
+	if s.config.StaticEntitlements != nil {
+		return s.staticEntitlements(ctx, resource, pToken)
+	}
+
+	return s.dynamicEntitlements(ctx, resource, pToken)
+}
+
+func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+	var ret []*v2.Entitlement
+	for _, e := range s.config.StaticEntitlements {
+		entitlement := &v2.Entitlement{
+			Id:          sdkEntitlement.NewEntitlementID(resource, e.Slug),
+			DisplayName: e.DisplayName,
+			Description: e.Description,
+			Resource:    resource,
+			Slug:        e.Slug,
+		}
+
+		switch e.Purpose {
+		case "assignment":
+			entitlement.Purpose = v2.Entitlement_PURPOSE_VALUE_ASSIGNMENT
+		case "permission":
+			entitlement.Purpose = v2.Entitlement_PURPOSE_VALUE_PERMISSION
+		default:
+			entitlement.Purpose = v2.Entitlement_PURPOSE_VALUE_UNSPECIFIED
+		}
+
+		annos := annotations.Annotations(entitlement.Annotations)
+		if e.Immutable {
+			annos.Update(&v2.EntitlementImmutable{})
+		}
+		entitlement.Annotations = annos
+		ret = append(ret, entitlement)
+	}
+
+	return ret, "", nil, nil
+}
+
+func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	if s.config.Entitlements == nil {
 		return nil, "", nil, nil
 	}

@@ -46,7 +46,7 @@ resource_types:
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
         id: "phpDeserializeStringArray(string(.role_name))[0]"
-        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0])"
+        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0]) + ' Role'"
         description: "'Wordpress role for user'"
         traits:
           role:
@@ -54,6 +54,14 @@ resource_types:
         strategy: "offset"
         primary_key: "meta_value"
 
+    static_entitlements:
+      - id: "member"
+        display_name: "resource.DisplayName + ' Role Member'"
+        description: "'Member of the ' + resource.DisplayName + ' role'"
+        slug: "member"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
     entitlements:
       query: |
         SELECT
