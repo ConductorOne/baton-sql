@@ -64,22 +64,19 @@ resource_types:
           - "user"
 
     grants:
-      query: |
-        SELECT
-          u.ID AS user_id,
-          u.user_login AS username,
-          um.meta_value AS role_name
-        FROM wp_users u
-        JOIN wp_usermeta um ON u.ID = um.user_id
-        WHERE um.meta_key = 'wp_capabilities'
-        LIMIT ?<Limit> OFFSET ?<Offset>
-      map:
-        principal_id: ".user_id"       # User ID as principal ID
-        principal_type: "user"       # Static principal type (users)
-        entitlement_id: ".role_name"      # Role entitlement for user
-        annotations:
-          entitlement_immutable:
-            value: true
-      pagination:
-        strategy: "offset"
-        primary_key: "ID"
+      - query: |
+          SELECT
+            u.ID AS user_id,
+            um.meta_value AS role_name
+          FROM wp_users u
+          JOIN wp_usermeta um ON u.ID = um.user_id
+          WHERE um.meta_key = 'wp_capabilities'
+          LIMIT ?<Limit> OFFSET ?<Offset>
+        map:
+          skip_if: "phpDeserializeStringArray(string(.role_name))[0] == 'administrator'"
+          principal_id: ".user_id"
+          principal_type: "user"
+          entitlement_id: "member"
+        pagination:
+          strategy: "offset"
+          primary_key: "ID"

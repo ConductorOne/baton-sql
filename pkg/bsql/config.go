@@ -23,7 +23,7 @@ type ResourceType struct {
 	List               *ListQuery            `yaml:"list,omitempty" json:"list,omitempty"`
 	Entitlements       *EntitlementsQuery    `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
 	StaticEntitlements []*EntitlementMapping `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
-	Grants             *GrantsQuery          `yaml:"grants,omitempty" json:"grants,omitempty"`
+	Grants             []*GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
 	Description        string                `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
@@ -107,6 +107,7 @@ type GrantsQuery struct {
 }
 
 type GrantMapping struct {
+	SkipIf        string       `yaml:"skip_if" json:"skip_if"`
 	PrincipalId   string       `yaml:"principal_id" json:"principal_id"`
 	PrincipalType string       `yaml:"principal_type" json:"principal_type"`
 	Entitlement   string       `yaml:"entitlement_id" json:"entitlement_id"`
