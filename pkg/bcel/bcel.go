@@ -3,6 +3,7 @@ package bcel
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -73,6 +74,26 @@ func (t *Env) EvaluateString(ctx context.Context, expr string, inputs map[string
 		return ret, nil
 	default:
 		return fmt.Sprintf("%s", out), nil
+	}
+}
+
+func (t *Env) EvaluateBool(ctx context.Context, expr string, inputs map[string]any) (bool, error) {
+	out, err := t.Evaluate(ctx, expr, inputs)
+	if err != nil {
+		return false, err
+	}
+
+	switch ret := out.(type) {
+	case bool:
+		return ret, nil
+	case string:
+		parsed, err := strconv.ParseBool(ret)
+		if err != nil {
+			return false, fmt.Errorf("failed to parse bool from string %s: %w", ret, err)
+		}
+		return parsed, nil
+	default:
+		return false, fmt.Errorf("expected bool, got %T", out)
 	}
 }
 

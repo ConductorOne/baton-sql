@@ -73,7 +73,7 @@ resource_types:
           WHERE um.meta_key = 'wp_capabilities'
           LIMIT ?<Limit> OFFSET ?<Offset>
         map:
-          skip_if: "phpDeserializeStringArray(string(.role_name))[0] == 'administrator'"
+          skip_if: "(size(phpDeserializeStringArray(string(.role_name))) < 1 || phpDeserializeStringArray(string(.role_name))[0] != resource.ID)"
           principal_id: ".user_id"
           principal_type: "user"
           entitlement_id: "member"

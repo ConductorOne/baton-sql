@@ -18,6 +18,10 @@ func isAlphaNumeric(c byte) bool {
 // Example input: ".role_name == 'Admin'" -> "cols['role_name'] == 'Admin'".
 func preprocessExpressions(expr string) string {
 	if bareStringRegexp.MatchString(expr) {
+		if expr == "true" || expr == "false" {
+			return expr
+		}
+
 		return fmt.Sprintf(`"%s"`, expr)
 	}
 

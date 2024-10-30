@@ -85,11 +85,12 @@ LIMIT ?<Limit> OFFSET ?<Offset>`), normalizeQueryString(roleResourceType.List.Qu
 
 				// Validate `roleResourceType` grants
 				require.NotNil(t, roleResourceType.Grants)
-				require.Equal(t, ".user_id", roleResourceType.Grants.Map.PrincipalId)
-				require.Equal(t, "user", roleResourceType.Grants.Map.PrincipalType)
-				require.Equal(t, ".role_name", roleResourceType.Grants.Map.Entitlement)
-				require.Equal(t, "offset", roleResourceType.Grants.Pagination.Strategy)
-				require.Equal(t, "ID", roleResourceType.Grants.Pagination.PrimaryKey)
+				require.Len(t, roleResourceType.Grants, 1)
+				require.Equal(t, ".user_id", roleResourceType.Grants[0].Map.PrincipalId)
+				require.Equal(t, "user", roleResourceType.Grants[0].Map.PrincipalType)
+				require.Equal(t, "member", roleResourceType.Grants[0].Map.Entitlement)
+				require.Equal(t, "offset", roleResourceType.Grants[0].Pagination.Strategy)
+				require.Equal(t, "ID", roleResourceType.Grants[0].Pagination.PrimaryKey)
 			},
 		},
 	}

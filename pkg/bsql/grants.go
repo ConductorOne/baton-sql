@@ -81,11 +81,13 @@ func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToke
 			rowMap[colName] = values[i]
 		}
 
-		g, err := s.mapGrant(ctx, resource, grantConfig.Map, rowMap)
+		g, ok, err := s.mapGrant(ctx, resource, grantConfig.Map, rowMap)
 		if err != nil {
 			return nil, err
 		}
-		ret = append(ret, g)
+		if ok {
+			ret = append(ret, g)
+		}
 	}
 
 	if err := rows.Err(); err != nil {
@@ -94,28 +96,39 @@ func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToke
 	return ret, nil
 }
 
-func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping *GrantMapping, rowMap map[string]any) (*v2.Grant, error) {
+func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping *GrantMapping, rowMap map[string]any) (*v2.Grant, bool, error) {
 	if mapping == nil {
-		return nil, errors.New("error: missing grant mapping")
+		return nil, false, errors.New("error: missing grant mapping")
 	}
 
 	if mapping.PrincipalId == "" {
-		return nil, errors.New("error: missing principal ID mapping")
+		return nil, false, errors.New("error: missing principal ID mapping")
 	}
 
 	if mapping.PrincipalType == "" {
-		return nil, errors.New("error: missing principal type mapping")
+		return nil, false, errors.New("error: missing principal type mapping")
 	}
 
 	if mapping.Entitlement == "" {
-		return nil, errors.New("error: missing entitlement ID mapping")
+		return nil, false, errors.New("error: missing entitlement ID mapping")
 	}
 
 	inputs := s.env.BaseInputsWithResource(rowMap, resource)
 
+	if mapping.SkipIf != "" {
+		skip, err := s.env.EvaluateBool(ctx, mapping.SkipIf, inputs)
+		if err != nil {
+			return nil, false, err
+		}
+
+		if skip {
+			return nil, false, nil
+		}
+	}
+
 	principalID, err := s.env.EvaluateString(ctx, mapping.PrincipalId, inputs)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	principalType := mapping.PrincipalType
@@ -125,7 +138,5 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		Resource:     principalID,
 	}
 
-	ret := sdkGrant.NewGrant(resource, mapping.Entitlement, principal)
-
-	return ret, nil
+	return sdkGrant.NewGrant(resource, mapping.Entitlement, principal), true, nil
 }
