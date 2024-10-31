@@ -21,16 +21,7 @@ func (s *SQLSyncer) Entitlements(ctx context.Context, resource *v2.Resource, pTo
 }
 
 func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	inputs, err := s.env.BaseInputs(nil)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	inputs["resource"] = map[string]string{
-		"ID":             resource.Id.Resource,
-		"ResourceTypeID": resource.Id.ResourceType,
-		"DisplayName":    resource.DisplayName,
-	}
+	inputs := s.env.BaseInputsWithResource(nil, resource)
 
 	var ret []*v2.Entitlement
 	for _, e := range s.config.StaticEntitlements {
@@ -154,10 +145,7 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, rowMap map[string]any) (*v2.Entitlement, error) {
 	ret := &v2.Entitlement{}
 
-	inputs, err := s.env.BaseInputs(rowMap)
-	if err != nil {
-		return nil, err
-	}
+	inputs := s.env.BaseInputsWithResource(rowMap, resource)
 
 	inputs["resource"] = map[string]string{
 		"ID":             resource.Id.Resource,

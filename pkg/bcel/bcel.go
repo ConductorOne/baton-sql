@@ -3,10 +3,12 @@ package bcel
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sql/pkg/bcel/functions"
 )
 
@@ -75,9 +77,46 @@ func (t *Env) EvaluateString(ctx context.Context, expr string, inputs map[string
 	}
 }
 
-func (t *Env) BaseInputs(rowMap map[string]any) (map[string]any, error) {
-	ret := make(map[string]any)
-	ret["cols"] = rowMap
+func (t *Env) EvaluateBool(ctx context.Context, expr string, inputs map[string]any) (bool, error) {
+	out, err := t.Evaluate(ctx, expr, inputs)
+	if err != nil {
+		return false, err
+	}
 
-	return ret, nil
+	switch ret := out.(type) {
+	case bool:
+		return ret, nil
+	case string:
+		parsed, err := strconv.ParseBool(ret)
+		if err != nil {
+			return false, fmt.Errorf("failed to parse bool from string %s: %w", ret, err)
+		}
+		return parsed, nil
+	default:
+		return false, fmt.Errorf("expected bool, got %T", out)
+	}
+}
+
+func (t *Env) BaseInputs(rowMap map[string]any) map[string]any {
+	ret := make(map[string]any)
+
+	if rowMap != nil {
+		ret["cols"] = rowMap
+	}
+
+	return ret
+}
+
+func (t *Env) BaseInputsWithResource(rowMap map[string]any, resource *v2.Resource) map[string]any {
+	ret := t.BaseInputs(rowMap)
+
+	if resource != nil {
+		ret["resource"] = map[string]string{
+			"ID":             resource.Id.Resource,
+			"ResourceTypeID": resource.Id.ResourceType,
+			"DisplayName":    resource.DisplayName,
+		}
+	}
+
+	return ret
 }
