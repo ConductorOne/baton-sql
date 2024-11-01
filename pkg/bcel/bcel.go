@@ -72,8 +72,10 @@ func (t *Env) EvaluateString(ctx context.Context, expr string, inputs map[string
 	switch ret := out.(type) {
 	case string:
 		return ret, nil
+	case int64, int32, int, uint64, uint32, uint:
+		return fmt.Sprintf("%d", ret), nil
 	default:
-		return fmt.Sprintf("%s", out), nil
+		return fmt.Sprintf("%s", ret), nil
 	}
 }
 
@@ -86,6 +88,8 @@ func (t *Env) EvaluateBool(ctx context.Context, expr string, inputs map[string]a
 	switch ret := out.(type) {
 	case bool:
 		return ret, nil
+	case int64, int32, int, uint64, uint32, uint:
+		return ret != 0, nil
 	case string:
 		parsed, err := strconv.ParseBool(ret)
 		if err != nil {
