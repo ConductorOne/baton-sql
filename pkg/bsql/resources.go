@@ -3,6 +3,7 @@ package bsql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -16,29 +17,14 @@ import (
 )
 
 func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	limit := pToken.Size
-	if limit == 0 {
-		limit = 100
-	}
-
-	qCtx := map[string]string{
-		"limit": strconv.Itoa(limit),
-	}
-
-	if pToken.Token != "" {
-		qCtx["offset"] = pToken.Token
-	} else {
-		qCtx["offset"] = "0"
-	}
-
 	var ret []*v2.Resource
 
-	q, err := parseQueryOpts(ctx, s.config.List.Query, qCtx)
+	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	rows, err := s.db.QueryContext(ctx, q)
+	rows, err := s.db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -55,14 +41,34 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 		scanArgs[i] = &values[i]
 	}
 
+	pageSize := int(pCtx.Limit)
+	var lastRowID interface{}
+	rowCount := 0
 	for rows.Next() {
+		rowCount++
+
+		// If we have fetched more than the page size, break out of the loop
+		if rowCount > int(pageSize) {
+			break
+		}
 		if err := rows.Scan(scanArgs...); err != nil {
 			return nil, "", nil, err
 		}
 
+		foundPaginationKey := false
 		rowMap := make(map[string]interface{})
 		for i, colName := range columns {
 			rowMap[colName] = values[i]
+			if s.config.List.Pagination != nil {
+				if s.config.List.Pagination.PrimaryKey == colName {
+					lastRowID = values[i]
+					foundPaginationKey = true
+				}
+			}
+		}
+
+		if !foundPaginationKey {
+			return nil, "", nil, errors.New("primary key not found in query result")
 		}
 
 		r, err := s.mapResource(ctx, rowMap)
@@ -76,7 +82,47 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 		return nil, "", nil, err
 	}
 
-	return ret, "", nil, nil
+	nextPageToken := ""
+	// If we fetched more than the page size, set the next page token
+	if rowCount > pageSize {
+		switch s.config.List.Pagination.Strategy {
+		case "offset":
+			nextPageToken = strconv.Itoa(int(pCtx.Offset)*pageSize + pageSize)
+		case "cursor":
+			switch l := lastRowID.(type) {
+			case string:
+				nextPageToken = l
+			case []byte:
+				nextPageToken = string(l)
+			case int64:
+				nextPageToken = strconv.FormatInt(l, 10)
+			case int:
+				nextPageToken = strconv.Itoa(l)
+			case int32:
+				nextPageToken = strconv.FormatInt(int64(l), 10)
+			case int16:
+				nextPageToken = strconv.FormatInt(int64(l), 10)
+			case int8:
+				nextPageToken = strconv.FormatInt(int64(l), 10)
+			case uint64:
+				nextPageToken = strconv.FormatUint(l, 10)
+			case uint:
+				nextPageToken = strconv.FormatUint(uint64(l), 10)
+			case uint32:
+				nextPageToken = strconv.FormatUint(uint64(l), 10)
+			case uint16:
+				nextPageToken = strconv.FormatUint(uint64(l), 10)
+			case uint8:
+				nextPageToken = strconv.FormatUint(uint64(l), 10)
+			default:
+				return nil, "", nil, errors.New("unexpected type for primary key")
+			}
+		default:
+			return nil, "", nil, fmt.Errorf("unexpected pagination strategy: %s", s.config.List.Pagination.Strategy)
+		}
+	}
+
+	return ret, nextPageToken, nil, nil
 }
 
 func (s *SQLSyncer) fetchTraits(ctx context.Context) map[string]bool {

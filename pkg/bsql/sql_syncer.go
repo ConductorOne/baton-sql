@@ -3,10 +3,6 @@ package bsql
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt"
-	"regexp"
-	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
@@ -20,29 +16,10 @@ const (
 	roleTraitType  = "role"
 )
 
-var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)\>`)
-
-func parseQueryOpts(ctx context.Context, query string, values map[string]string) (string, error) {
-	var parseErr error
-	updatedQuery := queryOptRegex.ReplaceAllStringFunc(query, func(token string) string {
-		key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(token, "?<"), ">"))
-
-		if v, ok := values[key]; ok {
-			return v
-		}
-
-		parseErr = errors.Join(parseErr, fmt.Errorf("missing value for token %s", token))
-		return token
-	})
-	if parseErr != nil {
-		return "", parseErr
-	}
-	return updatedQuery, nil
-}
-
 type SQLSyncer struct {
 	resourceType *v2.ResourceType
 	db           *sql.DB
+	dbType       string
 	config       ResourceType
 	env          *bcel.Env
 	fullConfig   Config
@@ -52,7 +29,7 @@ func (s *SQLSyncer) ResourceType(ctx context.Context) *v2.ResourceType {
 	return s.resourceType
 }
 
-func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
+func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbType string, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
 	var ret []connectorbuilder.ResourceSyncer
 	for rtID, rtConfig := range c.ResourceTypes {
 		rt, err := c.GetResourceType(ctx, rtID)
@@ -64,6 +41,7 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, celEnv *bcel.Env)
 			resourceType: rt,
 			config:       rtConfig,
 			db:           db,
+			dbType:       dbType,
 			env:          celEnv,
 			fullConfig:   c,
 		}

@@ -34,21 +34,25 @@ func updateDSNFromEnv(ctx context.Context, dsn string) (string, error) {
 	return result, nil
 }
 
-func Connect(ctx context.Context, dsn string) (*sql.DB, error) {
+func Connect(ctx context.Context, dsn string) (*sql.DB, string, error) {
 	populatedDSN, err := updateDSNFromEnv(ctx, dsn)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	parsedDsn, err := url.Parse(populatedDSN)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	switch parsedDsn.Scheme {
 	case "mysql":
-		return mysql.Connect(ctx, populatedDSN)
+		db, err := mysql.Connect(ctx, populatedDSN)
+		if err != nil {
+			return nil, "", err
+		}
+		return db, "mysql", nil
 	default:
-		return nil, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
+		return nil, "", fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
 }

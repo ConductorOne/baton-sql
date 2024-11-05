@@ -3,7 +3,6 @@ package bsql
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -78,29 +77,14 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 		return nil, "", nil, nil
 	}
 
-	limit := pToken.Size
-	if limit == 0 {
-		limit = 100
-	}
-
-	qCtx := map[string]string{
-		"limit": strconv.Itoa(limit),
-	}
-
-	if pToken.Token != "" {
-		qCtx["offset"] = pToken.Token
-	} else {
-		qCtx["offset"] = "0"
-	}
-
-	var ret []*v2.Entitlement
-
-	q, err := parseQueryOpts(ctx, s.config.Entitlements.Query, qCtx)
+	q, qArgs, _, err := s.prepareQuery(ctx, pToken)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	rows, err := s.db.QueryContext(ctx, q)
+	var ret []*v2.Entitlement
+
+	rows, err := s.db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
 		return nil, "", nil, err
 	}

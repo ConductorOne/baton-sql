@@ -18,6 +18,7 @@ import (
 type Connector struct {
 	config *bsql.Config
 	db     *sql.DB
+	dbType string
 	celEnv *bcel.Env
 }
 
@@ -34,7 +35,7 @@ func (c *Connector) Close() error {
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.celEnv)
+	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbType, c.celEnv)
 	if err != nil {
 		return nil
 	}
@@ -73,7 +74,7 @@ func New(ctx context.Context, configFilePath string) (*Connector, error) {
 }
 
 func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
-	db, err := database.Connect(ctx, c.Connect.DSN)
+	db, dbType, err := database.Connect(ctx, c.Connect.DSN)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +87,7 @@ func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
 	return &Connector{
 		config: c,
 		db:     db,
+		dbType: dbType,
 		celEnv: celEnv,
 	}, nil
 }

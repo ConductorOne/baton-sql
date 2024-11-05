@@ -3,7 +3,6 @@ package bsql
 import (
 	"context"
 	"errors"
-	"strconv"
 
 	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 
@@ -34,27 +33,12 @@ func (s *SQLSyncer) Grants(ctx context.Context, resource *v2.Resource, pToken *p
 func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token, grantConfig *GrantsQuery) ([]*v2.Grant, error) {
 	var ret []*v2.Grant
 
-	limit := pToken.Size
-	if limit == 0 {
-		limit = 100
-	}
-
-	qCtx := map[string]string{
-		"limit": strconv.Itoa(limit),
-	}
-
-	if pToken.Token != "" {
-		qCtx["offset"] = pToken.Token
-	} else {
-		qCtx["offset"] = "0"
-	}
-
-	q, err := parseQueryOpts(ctx, grantConfig.Query, qCtx)
+	q, qArgs, _, err := s.prepareQuery(ctx, pToken)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := s.db.QueryContext(ctx, q)
+	rows, err := s.db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
 		return nil, err
 	}
