@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
-
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 )
 
@@ -40,15 +38,15 @@ func (s *SQLSyncer) getNextPlaceholder(ctx context.Context, qArgs []interface{})
 	}
 }
 
-func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext) (string, []interface{}, error) {
+func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext, query string) (string, []interface{}, error) {
 	if pCtx == nil {
-		return s.config.List.Query, nil, nil
+		return query, nil, nil
 	}
 
 	var qArgs []interface{}
 
 	var parseErr error
-	updatedQuery := queryOptRegex.ReplaceAllStringFunc(s.config.List.Query, func(token string) string {
+	updatedQuery := queryOptRegex.ReplaceAllStringFunc(query, func(token string) string {
 		key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(token, "?<"), ">"))
 
 		switch key {
@@ -82,39 +80,32 @@ func clampPageSize(pageSize int) int64 {
 	return int64(pageSize)
 }
 
-func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token) (string, []interface{}, *paginationContext, error) {
-	if s.config.List == nil {
-		return "", nil, nil, errors.New("missing list configuration")
-	}
-
-	pCtx, err := s.setupPagination(ctx, pToken)
+func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token, query string, pOpts *Pagination) (string, []interface{}, *paginationContext, error) {
+	pCtx, err := s.setupPagination(ctx, pToken, pOpts)
 	if err != nil {
 		return "", nil, nil, err
 	}
 
-	q, qArgs, err := s.parseQueryOpts(ctx, pCtx)
+	q, qArgs, err := s.parseQueryOpts(ctx, pCtx, query)
 	if err != nil {
 		return "", nil, nil, err
 	}
-
-	spew.Dump(q, qArgs, pCtx, pToken)
 
 	return q, qArgs, pCtx, nil
 }
 
-func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Token) (*paginationContext, error) {
-	if s.config.List.Pagination == nil {
+func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Token, pOpts *Pagination) (*paginationContext, error) {
+	if pOpts == nil {
 		return nil, nil
 	}
-	pConfig := s.config.List.Pagination
 
 	ret := &paginationContext{
-		Strategy: pConfig.Strategy,
+		Strategy: pOpts.Strategy,
 	}
 
 	ret.Limit = clampPageSize(pToken.Size)
 
-	switch pConfig.Strategy {
+	switch pOpts.Strategy {
 	case "offset":
 		if pToken.Token != "" {
 			offset, err := strconv.ParseInt(pToken.Token, 10, 64)
@@ -130,7 +121,7 @@ func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Toke
 		ret.Cursor = pToken.Token
 
 	default:
-		return nil, fmt.Errorf("unknown pagination strategy %s", pConfig.Strategy)
+		return nil, fmt.Errorf("unknown pagination strategy %s", pOpts.Strategy)
 	}
 
 	return ret, nil

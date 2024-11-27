@@ -77,7 +77,7 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 		return nil, "", nil, nil
 	}
 
-	q, qArgs, _, err := s.prepareQuery(ctx, pToken)
+	q, qArgs, _, err := s.prepareQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination)
 	if err != nil {
 		return nil, "", nil, err
 	}

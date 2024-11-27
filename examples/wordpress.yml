@@ -83,4 +83,4 @@ resource_types:
           entitlement_id: "member"
         pagination:
           strategy: "offset"
-          primary_key: "ID"
+          primary_key: "user_id"

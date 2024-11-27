@@ -19,7 +19,11 @@ import (
 func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
 	var ret []*v2.Resource
 
-	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken)
+	if s.config.List == nil {
+		return nil, "", nil, errors.New("no resource list configuration provided")
+	}
+
+	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination)
 	if err != nil {
 		return nil, "", nil, err
 	}
