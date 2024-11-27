@@ -3,8 +3,6 @@ package bsql
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -23,110 +21,19 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 		return nil, "", nil, errors.New("no resource list configuration provided")
 	}
 
-	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	rows, err := s.db.QueryContext(ctx, q, qArgs...)
-	if err != nil {
-		return nil, "", nil, err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	values := make([]interface{}, len(columns))
-	scanArgs := make([]interface{}, len(values))
-	for i := range values {
-		scanArgs[i] = &values[i]
-	}
-
-	pageSize := int(pCtx.Limit)
-	var lastRowID interface{}
-	rowCount := 0
-	for rows.Next() {
-		rowCount++
-
-		// If we have fetched more than the page size, break out of the loop
-		if rowCount > int(pageSize) {
-			break
-		}
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, "", nil, err
-		}
-
-		foundPaginationKey := false
-		rowMap := make(map[string]interface{})
-		for i, colName := range columns {
-			rowMap[colName] = values[i]
-			if s.config.List.Pagination != nil {
-				if s.config.List.Pagination.PrimaryKey == colName {
-					lastRowID = values[i]
-					foundPaginationKey = true
-				}
-			}
-		}
-
-		if !foundPaginationKey {
-			return nil, "", nil, errors.New("primary key not found in query result")
-		}
-
+	npt, err := s.runQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		r, err := s.mapResource(ctx, rowMap)
 		if err != nil {
-			return nil, "", nil, err
+			return false, err
 		}
 		ret = append(ret, r)
-	}
-
-	if err := rows.Err(); err != nil {
+		return true, nil
+	})
+	if err != nil {
 		return nil, "", nil, err
 	}
 
-	nextPageToken := ""
-	// If we fetched more than the page size, set the next page token
-	if rowCount > pageSize {
-		switch s.config.List.Pagination.Strategy {
-		case "offset":
-			nextPageToken = strconv.Itoa(int(pCtx.Offset)*pageSize + pageSize)
-		case "cursor":
-			switch l := lastRowID.(type) {
-			case string:
-				nextPageToken = l
-			case []byte:
-				nextPageToken = string(l)
-			case int64:
-				nextPageToken = strconv.FormatInt(l, 10)
-			case int:
-				nextPageToken = strconv.Itoa(l)
-			case int32:
-				nextPageToken = strconv.FormatInt(int64(l), 10)
-			case int16:
-				nextPageToken = strconv.FormatInt(int64(l), 10)
-			case int8:
-				nextPageToken = strconv.FormatInt(int64(l), 10)
-			case uint64:
-				nextPageToken = strconv.FormatUint(l, 10)
-			case uint:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			case uint32:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			case uint16:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			case uint8:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			default:
-				return nil, "", nil, errors.New("unexpected type for primary key")
-			}
-		default:
-			return nil, "", nil, fmt.Errorf("unexpected pagination strategy: %s", s.config.List.Pagination.Strategy)
-		}
-	}
-
-	return ret, nextPageToken, nil, nil
+	return ret, npt, nil, nil
 }
 
 func (s *SQLSyncer) fetchTraits(ctx context.Context) map[string]bool {

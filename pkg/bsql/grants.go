@@ -3,8 +3,6 @@ package bsql
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strconv"
 
 	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 
@@ -34,115 +32,27 @@ func (s *SQLSyncer) Grants(ctx context.Context, resource *v2.Resource, pToken *p
 }
 
 func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token, grantConfig *GrantsQuery) ([]*v2.Grant, string, error) {
-	var ret []*v2.Grant
-
 	if grantConfig == nil {
 		return nil, "", errors.New("error: missing grants query")
 	}
 
-	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, grantConfig.Query, grantConfig.Pagination)
-	if err != nil {
-		return nil, "", err
-	}
+	var ret []*v2.Grant
 
-	rows, err := s.db.QueryContext(ctx, q, qArgs...)
-	if err != nil {
-		return nil, "", err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, "", err
-	}
-
-	values := make([]interface{}, len(columns))
-	scanArgs := make([]interface{}, len(values))
-	for i := range values {
-		scanArgs[i] = &values[i]
-	}
-
-	pageSize := int(pCtx.Limit)
-	var lastRowID interface{}
-	rowCount := 0
-	for rows.Next() {
-		rowCount++
-
-		if rowCount > pageSize {
-			break
-		}
-
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, "", err
-		}
-
-		foundPaginationKey := false
-		rowMap := make(map[string]interface{})
-		for i, colName := range columns {
-			rowMap[colName] = values[i]
-			if grantConfig.Pagination.PrimaryKey == colName {
-				lastRowID = values[i]
-				foundPaginationKey = true
-			}
-		}
-
-		if !foundPaginationKey {
-			return nil, "", errors.New("primary key not found in query result")
-		}
-
+	npt, err := s.runQuery(ctx, pToken, grantConfig.Query, grantConfig.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		g, ok, err := s.mapGrant(ctx, resource, grantConfig.Map, rowMap)
 		if err != nil {
-			return nil, "", err
+			return false, err
 		}
 		if ok {
 			ret = append(ret, g)
 		}
-	}
-
-	if err := rows.Err(); err != nil {
+		return true, nil
+	})
+	if err != nil {
 		return nil, "", err
 	}
 
-	nextPageToken := ""
-	if rowCount > pageSize {
-		switch grantConfig.Pagination.Strategy {
-		case "offset":
-			nextPageToken = strconv.Itoa(int(pCtx.Offset)*pageSize + pageSize)
-		case "cursor":
-			switch l := lastRowID.(type) {
-			case string:
-				nextPageToken = l
-			case []byte:
-				nextPageToken = string(l)
-			case int64:
-				nextPageToken = strconv.FormatInt(l, 10)
-			case int:
-				nextPageToken = strconv.Itoa(l)
-			case int32:
-				nextPageToken = strconv.FormatInt(int64(l), 10)
-			case int16:
-				nextPageToken = strconv.FormatInt(int64(l), 10)
-			case int8:
-				nextPageToken = strconv.FormatInt(int64(l), 10)
-			case uint64:
-				nextPageToken = strconv.FormatUint(l, 10)
-			case uint:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			case uint32:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			case uint16:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			case uint8:
-				nextPageToken = strconv.FormatUint(uint64(l), 10)
-			default:
-				return nil, "", errors.New("unexpected type for primary key")
-			}
-		default:
-			return nil, "", fmt.Errorf("unexpected pagination strategy: %s", grantConfig.Pagination.Strategy)
-		}
-	}
-
-	return ret, nextPageToken, nil
+	return ret, npt, nil
 }
 
 func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping *GrantMapping, rowMap map[string]any) (*v2.Grant, bool, error) {

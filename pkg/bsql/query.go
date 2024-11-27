@@ -17,10 +17,11 @@ const (
 )
 
 type paginationContext struct {
-	Strategy string
-	Limit    int64
-	Offset   int64
-	Cursor   string
+	Strategy   string
+	Limit      int64
+	Offset     int64
+	Cursor     string
+	PrimaryKey string
 }
 
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)\>`)
@@ -94,13 +95,62 @@ func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token, 
 	return q, qArgs, pCtx, nil
 }
 
+func (s *SQLSyncer) nextPageToken(ctx context.Context, pCtx *paginationContext, lastRowID any) (string, error) {
+	if pCtx == nil {
+		return "", nil
+	}
+
+	var ret string
+
+	pageSize := int(pCtx.Limit)
+
+	switch pCtx.Strategy {
+	case "offset":
+		ret = strconv.Itoa(int(pCtx.Offset)*pageSize + pageSize)
+	case "cursor":
+		switch l := lastRowID.(type) {
+		case string:
+			ret = l
+		case []byte:
+			ret = string(l)
+		case int64:
+			ret = strconv.FormatInt(l, 10)
+		case int:
+			ret = strconv.Itoa(l)
+		case int32:
+			ret = strconv.FormatInt(int64(l), 10)
+		case int16:
+			ret = strconv.FormatInt(int64(l), 10)
+		case int8:
+			ret = strconv.FormatInt(int64(l), 10)
+		case uint64:
+			ret = strconv.FormatUint(l, 10)
+		case uint:
+			ret = strconv.FormatUint(uint64(l), 10)
+		case uint32:
+			ret = strconv.FormatUint(uint64(l), 10)
+		case uint16:
+			ret = strconv.FormatUint(uint64(l), 10)
+		case uint8:
+			ret = strconv.FormatUint(uint64(l), 10)
+		default:
+			return "", errors.New("unexpected type for primary key")
+		}
+	default:
+		return "", fmt.Errorf("unexpected pagination strategy: %s", pCtx.Strategy)
+	}
+
+	return ret, nil
+}
+
 func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Token, pOpts *Pagination) (*paginationContext, error) {
 	if pOpts == nil {
 		return nil, nil
 	}
 
 	ret := &paginationContext{
-		Strategy: pOpts.Strategy,
+		Strategy:   pOpts.Strategy,
+		PrimaryKey: pOpts.PrimaryKey,
 	}
 
 	ret.Limit = clampPageSize(pToken.Size)
@@ -125,4 +175,85 @@ func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Toke
 	}
 
 	return ret, nil
+}
+
+func (s *SQLSyncer) runQuery(
+	ctx context.Context,
+	pToken *pagination.Token,
+	query string,
+	pOpts *Pagination,
+	rowCallback func(context.Context, map[string]interface{}) (bool, error),
+) (string, error) {
+	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, query, pOpts)
+	if err != nil {
+		return "", err
+	}
+
+	rows, err := s.db.QueryContext(ctx, q, qArgs...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return "", err
+	}
+
+	values := make([]interface{}, len(columns))
+	scanArgs := make([]interface{}, len(values))
+	for i := range values {
+		scanArgs[i] = &values[i]
+	}
+
+	pageSize := int(pCtx.Limit)
+	var lastRowID any
+	rowCount := 0
+	for rows.Next() {
+		rowCount++
+
+		if rowCount > pageSize {
+			break
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return "", err
+		}
+
+		foundPaginationKey := false
+		rowMap := make(map[string]interface{})
+		for i, colName := range columns {
+			rowMap[colName] = values[i]
+			if pCtx.PrimaryKey == colName {
+				lastRowID = values[i]
+				foundPaginationKey = true
+			}
+		}
+
+		if !foundPaginationKey {
+			return "", errors.New("primary key not found in query results")
+		}
+
+		ok, err := rowCallback(ctx, rowMap)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			break
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	nextPageToken := ""
+	if rowCount > pageSize {
+		nextPageToken, err = s.nextPageToken(ctx, pCtx, lastRowID)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	return nextPageToken, nil
 }

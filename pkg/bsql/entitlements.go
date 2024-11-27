@@ -77,53 +77,22 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 		return nil, "", nil, nil
 	}
 
-	q, qArgs, _, err := s.prepareQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination)
-	if err != nil {
-		return nil, "", nil, err
-	}
-
 	var ret []*v2.Entitlement
 
-	rows, err := s.db.QueryContext(ctx, q, qArgs...)
-	if err != nil {
-		return nil, "", nil, err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	values := make([]interface{}, len(columns))
-	scanArgs := make([]interface{}, len(values))
-	for i := range values {
-		scanArgs[i] = &values[i]
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, "", nil, err
-		}
-
-		rowMap := make(map[string]interface{})
-		for i, colName := range columns {
-			rowMap[colName] = values[i]
-		}
-
+	npt, err := s.runQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		r, err := s.mapEntitlement(ctx, resource, rowMap)
 		if err != nil {
-			return nil, "", nil, err
+			return false, err
 		}
 		r.Resource = resource
 		ret = append(ret, r)
-	}
-
-	if err := rows.Err(); err != nil {
+		return true, nil
+	})
+	if err != nil {
 		return nil, "", nil, err
 	}
 
-	return ret, "", nil, nil
+	return ret, npt, nil, nil
 }
 
 func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, rowMap map[string]any) (*v2.Entitlement, error) {
