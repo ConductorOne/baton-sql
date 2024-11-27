@@ -3,6 +3,7 @@ package bsql
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 
@@ -18,17 +19,53 @@ func (s *SQLSyncer) Grants(ctx context.Context, resource *v2.Resource, pToken *p
 
 	var ret []*v2.Grant
 
-	// TODO(jirwin): Better pagination support for multiple grants
-	//for _, g := range s.config.Grants {
-	grants, npt, err := s.listGrants(ctx, resource, pToken, s.config.Grants[0])
+	b := &pagination.Bag{}
+	err := b.Unmarshal(pToken.Token)
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	ret = append(ret, grants...)
-	//}
+	if b.Current() == nil {
+		for ii := range s.config.Grants {
+			b.Push(pagination.PageState{
+				ResourceTypeID: "grant-query",
+				ResourceID:     strconv.Itoa(ii),
+			})
+		}
+	}
 
-	return ret, npt, nil, nil
+	current := b.Current()
+	switch current.ResourceTypeID {
+	case "grant-query":
+		grantIi, err := strconv.ParseInt(current.ResourceID, 10, 64)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		grants, npt, err := s.listGrants(ctx, resource, &pagination.Token{
+			Size:  pToken.Size,
+			Token: current.Token,
+		}, s.config.Grants[grantIi])
+		if err != nil {
+			return nil, "", nil, err
+		}
+		err = b.Next(npt)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		ret = append(ret, grants...)
+
+	default:
+		return nil, "", nil, errors.New("invalid page token")
+	}
+
+	nextPageToken, err := b.Marshal()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return ret, nextPageToken, nil, nil
 }
 
 func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token, grantConfig *GrantsQuery) ([]*v2.Grant, string, error) {
