@@ -36,13 +36,13 @@ func (s *SQLSyncer) getNextPlaceholder(ctx context.Context, qArgs []interface{})
 	case database.MySQL:
 		return "?"
 	case database.PostgreSQL:
-		return fmt.Sprintf("$%d", len(qArgs)+1)
+		return fmt.Sprintf("$%d", len(qArgs))
 	case database.SQLite:
 		return "?"
 	case database.MSSQL:
-		return fmt.Sprintf("@p%d", len(qArgs)+1)
+		return fmt.Sprintf("@p%d", len(qArgs))
 	case database.Oracle:
-		return fmt.Sprintf(":%d", len(qArgs)+1)
+		return fmt.Sprintf(":%d", len(qArgs))
 	default:
 		return "?"
 	}
