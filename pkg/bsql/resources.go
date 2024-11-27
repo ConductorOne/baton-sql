@@ -3,7 +3,6 @@ package bsql
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -16,67 +15,25 @@ import (
 )
 
 func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	limit := pToken.Size
-	if limit == 0 {
-		limit = 100
-	}
-
-	qCtx := map[string]string{
-		"limit": strconv.Itoa(limit),
-	}
-
-	if pToken.Token != "" {
-		qCtx["offset"] = pToken.Token
-	} else {
-		qCtx["offset"] = "0"
-	}
-
 	var ret []*v2.Resource
 
-	q, err := parseQueryOpts(ctx, s.config.List.Query, qCtx)
-	if err != nil {
-		return nil, "", nil, err
+	if s.config.List == nil {
+		return nil, "", nil, errors.New("no resource list configuration provided")
 	}
 
-	rows, err := s.db.QueryContext(ctx, q)
-	if err != nil {
-		return nil, "", nil, err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	values := make([]interface{}, len(columns))
-	scanArgs := make([]interface{}, len(values))
-	for i := range values {
-		scanArgs[i] = &values[i]
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, "", nil, err
-		}
-
-		rowMap := make(map[string]interface{})
-		for i, colName := range columns {
-			rowMap[colName] = values[i]
-		}
-
+	npt, err := s.runQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		r, err := s.mapResource(ctx, rowMap)
 		if err != nil {
-			return nil, "", nil, err
+			return false, err
 		}
 		ret = append(ret, r)
-	}
-
-	if err := rows.Err(); err != nil {
+		return true, nil
+	})
+	if err != nil {
 		return nil, "", nil, err
 	}
 
-	return ret, "", nil, nil
+	return ret, npt, nil, nil
 }
 
 func (s *SQLSyncer) fetchTraits(ctx context.Context) map[string]bool {

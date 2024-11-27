@@ -46,6 +46,7 @@ func TestParse(t *testing.T) {
           u.user_email AS email,
           u.user_registered AS created_at
         FROM wp_users u
+		ORDER BY user_id ASC
         LIMIT ?<Limit> OFFSET ?<Offset>`), normalizeQueryString(userResourceType.List.Query))
 				require.Equal(t, ".user_id", userResourceType.List.Map.Id)
 				require.Equal(t, ".username", userResourceType.List.Map.DisplayName)
@@ -56,7 +57,7 @@ func TestParse(t *testing.T) {
 				require.Equal(t, ".username", userResourceType.List.Map.Traits.User.Login)
 
 				require.Equal(t, "offset", userResourceType.List.Pagination.Strategy)
-				require.Equal(t, "ID", userResourceType.List.Pagination.PrimaryKey)
+				require.Equal(t, "user_id", userResourceType.List.Pagination.PrimaryKey)
 
 				// Validate `role` resource type
 				roleResourceType := c.ResourceTypes["role"]
@@ -64,15 +65,21 @@ func TestParse(t *testing.T) {
 				require.Equal(t, "Role", roleResourceType.Name)
 				require.Equal(t, "A role within the wordpress system that can be assigned to a user", roleResourceType.Description)
 				require.Equal(t, normalizeQueryString(`SELECT DISTINCT
-um.meta_value AS role_name
-FROM wp_usermeta um
-WHERE um.meta_key = 'wp_capabilities' AND um.meta_value != 'a:0:{}'
-LIMIT ?<Limit> OFFSET ?<Offset>`), normalizeQueryString(roleResourceType.List.Query))
+		um.umeta_id AS row_id,
+		um.meta_value AS role_name
+		FROM wp_usermeta um 
+		WHERE
+			um.meta_key = 'wp_capabilities' AND
+			um.meta_value != 'a:0:{}' AND
+			um.umeta_id > ?<Cursor>
+		ORDER BY row_id ASC
+		LIMIT ?<Limit>
+`), normalizeQueryString(roleResourceType.List.Query))
 				require.Equal(t, "phpDeserializeStringArray(string(.role_name))[0]", roleResourceType.List.Map.Id)
 				require.Equal(t, "titleCase(phpDeserializeStringArray(string(.role_name))[0])", roleResourceType.List.Map.DisplayName)
 				require.Equal(t, "'Wordpress role for user'", roleResourceType.List.Map.Description)
-				require.Equal(t, "offset", roleResourceType.List.Pagination.Strategy)
-				require.Equal(t, "meta_value", roleResourceType.List.Pagination.PrimaryKey)
+				require.Equal(t, "cursor", roleResourceType.List.Pagination.Strategy)
+				require.Equal(t, "row_id", roleResourceType.List.Pagination.PrimaryKey)
 
 				// Validate `roleResourceType` entitlements
 				require.NotNil(t, roleResourceType.StaticEntitlements)
@@ -90,7 +97,7 @@ LIMIT ?<Limit> OFFSET ?<Offset>`), normalizeQueryString(roleResourceType.List.Qu
 				require.Equal(t, "user", roleResourceType.Grants[0].Map.PrincipalType)
 				require.Equal(t, "member", roleResourceType.Grants[0].Map.Entitlement)
 				require.Equal(t, "offset", roleResourceType.Grants[0].Pagination.Strategy)
-				require.Equal(t, "ID", roleResourceType.Grants[0].Pagination.PrimaryKey)
+				require.Equal(t, "user_id", roleResourceType.Grants[0].Pagination.PrimaryKey)
 			},
 		},
 	}

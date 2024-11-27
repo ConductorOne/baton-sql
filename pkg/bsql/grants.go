@@ -19,81 +19,77 @@ func (s *SQLSyncer) Grants(ctx context.Context, resource *v2.Resource, pToken *p
 
 	var ret []*v2.Grant
 
-	for _, g := range s.config.Grants {
-		grants, err := s.listGrants(ctx, resource, pToken, g)
+	b := &pagination.Bag{}
+	err := b.Unmarshal(pToken.Token)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	if b.Current() == nil {
+		for ii := range s.config.Grants {
+			b.Push(pagination.PageState{
+				ResourceTypeID: "grant-query",
+				ResourceID:     strconv.Itoa(ii),
+			})
+		}
+	}
+
+	current := b.Current()
+	switch current.ResourceTypeID {
+	case "grant-query":
+		grantIi, err := strconv.ParseInt(current.ResourceID, 10, 64)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		grants, npt, err := s.listGrants(ctx, resource, &pagination.Token{
+			Size:  pToken.Size,
+			Token: current.Token,
+		}, s.config.Grants[grantIi])
+		if err != nil {
+			return nil, "", nil, err
+		}
+		err = b.Next(npt)
 		if err != nil {
 			return nil, "", nil, err
 		}
 
 		ret = append(ret, grants...)
+
+	default:
+		return nil, "", nil, errors.New("invalid page token")
 	}
 
-	return ret, "", nil, nil
+	nextPageToken, err := b.Marshal()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	return ret, nextPageToken, nil, nil
 }
 
-func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token, grantConfig *GrantsQuery) ([]*v2.Grant, error) {
+func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token, grantConfig *GrantsQuery) ([]*v2.Grant, string, error) {
+	if grantConfig == nil {
+		return nil, "", errors.New("error: missing grants query")
+	}
+
 	var ret []*v2.Grant
 
-	limit := pToken.Size
-	if limit == 0 {
-		limit = 100
-	}
-
-	qCtx := map[string]string{
-		"limit": strconv.Itoa(limit),
-	}
-
-	if pToken.Token != "" {
-		qCtx["offset"] = pToken.Token
-	} else {
-		qCtx["offset"] = "0"
-	}
-
-	q, err := parseQueryOpts(ctx, grantConfig.Query, qCtx)
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := s.db.QueryContext(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-
-	values := make([]interface{}, len(columns))
-	scanArgs := make([]interface{}, len(values))
-	for i := range values {
-		scanArgs[i] = &values[i]
-	}
-
-	for rows.Next() {
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, err
-		}
-
-		rowMap := make(map[string]interface{})
-		for i, colName := range columns {
-			rowMap[colName] = values[i]
-		}
-
+	npt, err := s.runQuery(ctx, pToken, grantConfig.Query, grantConfig.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		g, ok, err := s.mapGrant(ctx, resource, grantConfig.Map, rowMap)
 		if err != nil {
-			return nil, err
+			return false, err
 		}
 		if ok {
 			ret = append(ret, g)
 		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, "", err
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return ret, nil
+	return ret, npt, nil
 }
 
 func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping *GrantMapping, rowMap map[string]any) (*v2.Grant, bool, error) {
