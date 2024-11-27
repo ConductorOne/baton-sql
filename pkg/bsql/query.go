@@ -8,12 +8,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+
 	"github.com/conductorone/baton-sdk/pkg/pagination"
+	"github.com/conductorone/baton-sql/pkg/database"
 )
 
 const (
-	maxPageSize = 1000
-	minPageSize = 1
+	maxPageSize     = 1000
+	minPageSize     = 1
+	defaultPageSize = 100
 )
 
 type paginationContext struct {
@@ -27,26 +32,31 @@ type paginationContext struct {
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)\>`)
 
 func (s *SQLSyncer) getNextPlaceholder(ctx context.Context, qArgs []interface{}) string {
-	switch s.dbType {
-	case "mysql":
+	switch s.dbEngine {
+	case database.MySQL:
 		return "?"
-	case "postgres":
+	case database.PostgreSQL:
 		return fmt.Sprintf("$%d", len(qArgs)+1)
-	case "oracle":
+	case database.SQLite:
+		return "?"
+	case database.MSSQL:
+		return fmt.Sprintf("@p%d", len(qArgs)+1)
+	case database.Oracle:
 		return fmt.Sprintf(":%d", len(qArgs)+1)
 	default:
 		return "?"
 	}
 }
 
-func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext, query string) (string, []interface{}, error) {
+func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext, query string) (string, []interface{}, bool, error) {
 	if pCtx == nil {
-		return query, nil, nil
+		return query, nil, false, nil
 	}
 
 	var qArgs []interface{}
 
 	var parseErr error
+	paginationOptSet := false
 	updatedQuery := queryOptRegex.ReplaceAllStringFunc(query, func(token string) string {
 		key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(token, "?<"), ">"))
 
@@ -54,10 +64,13 @@ func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext,
 		case "limit":
 			// Always request 1 more than the specified limit, so we can see if there are additional results.
 			qArgs = append(qArgs, pCtx.Limit+1)
+			paginationOptSet = true
 		case "offset":
 			qArgs = append(qArgs, pCtx.Offset)
+			paginationOptSet = true
 		case "cursor":
 			qArgs = append(qArgs, pCtx.Cursor)
+			paginationOptSet = true
 		default:
 			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
 			return token
@@ -66,12 +79,16 @@ func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext,
 		return s.getNextPlaceholder(ctx, qArgs)
 	})
 	if parseErr != nil {
-		return "", nil, parseErr
+		return "", nil, false, parseErr
 	}
-	return updatedQuery, qArgs, nil
+	return updatedQuery, qArgs, paginationOptSet, nil
 }
 
 func clampPageSize(pageSize int) int64 {
+	if pageSize == 0 {
+		return defaultPageSize
+	}
+
 	if pageSize > maxPageSize {
 		return maxPageSize
 	}
@@ -87,9 +104,13 @@ func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token, 
 		return "", nil, nil, err
 	}
 
-	q, qArgs, err := s.parseQueryOpts(ctx, pCtx, query)
+	q, qArgs, paginationUsed, err := s.parseQueryOpts(ctx, pCtx, query)
 	if err != nil {
 		return "", nil, nil, err
+	}
+
+	if !paginationUsed {
+		pCtx = nil
 	}
 
 	return q, qArgs, pCtx, nil
@@ -184,10 +205,14 @@ func (s *SQLSyncer) runQuery(
 	pOpts *Pagination,
 	rowCallback func(context.Context, map[string]interface{}) (bool, error),
 ) (string, error) {
+	l := ctxzap.Extract(ctx)
+
 	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, query, pOpts)
 	if err != nil {
 		return "", err
 	}
+
+	l.Debug("running query", zap.String("query", q), zap.Any("args", qArgs))
 
 	rows, err := s.db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
@@ -206,13 +231,12 @@ func (s *SQLSyncer) runQuery(
 		scanArgs[i] = &values[i]
 	}
 
-	pageSize := int(pCtx.Limit)
 	var lastRowID any
 	rowCount := 0
 	for rows.Next() {
 		rowCount++
 
-		if rowCount > pageSize {
+		if pCtx != nil && rowCount > int(pCtx.Limit) {
 			break
 		}
 
@@ -224,13 +248,13 @@ func (s *SQLSyncer) runQuery(
 		rowMap := make(map[string]interface{})
 		for i, colName := range columns {
 			rowMap[colName] = values[i]
-			if pCtx.PrimaryKey == colName {
+			if pCtx != nil && pCtx.PrimaryKey == colName {
 				lastRowID = values[i]
 				foundPaginationKey = true
 			}
 		}
 
-		if !foundPaginationKey {
+		if pCtx != nil && !foundPaginationKey {
 			return "", errors.New("primary key not found in query results")
 		}
 
@@ -248,7 +272,7 @@ func (s *SQLSyncer) runQuery(
 	}
 
 	nextPageToken := ""
-	if rowCount > pageSize {
+	if pCtx != nil && rowCount > int(pCtx.Limit) {
 		nextPageToken, err = s.nextPageToken(ctx, pCtx, lastRowID)
 		if err != nil {
 			return "", err

@@ -14,6 +14,17 @@ import (
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
+type DbEngine uint8
+
+const (
+	Unknown DbEngine = iota
+	MySQL
+	PostgreSQL
+	SQLite
+	MSSQL
+	Oracle
+)
+
 func updateDSNFromEnv(ctx context.Context, dsn string) (string, error) {
 	var err error
 
@@ -34,25 +45,25 @@ func updateDSNFromEnv(ctx context.Context, dsn string) (string, error) {
 	return result, nil
 }
 
-func Connect(ctx context.Context, dsn string) (*sql.DB, string, error) {
+func Connect(ctx context.Context, dsn string) (*sql.DB, DbEngine, error) {
 	populatedDSN, err := updateDSNFromEnv(ctx, dsn)
 	if err != nil {
-		return nil, "", err
+		return nil, Unknown, err
 	}
 
 	parsedDsn, err := url.Parse(populatedDSN)
 	if err != nil {
-		return nil, "", err
+		return nil, Unknown, err
 	}
 
 	switch parsedDsn.Scheme {
 	case "mysql":
 		db, err := mysql.Connect(ctx, populatedDSN)
 		if err != nil {
-			return nil, "", err
+			return nil, Unknown, err
 		}
-		return db, "mysql", nil
+		return db, MySQL, nil
 	default:
-		return nil, "", fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
+		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
 }
