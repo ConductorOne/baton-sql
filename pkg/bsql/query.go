@@ -19,6 +19,9 @@ const (
 	maxPageSize     = 1000
 	minPageSize     = 1
 	defaultPageSize = 100
+	offsetKey       = "offset"
+	cursorKey       = "cursor"
+	limitKey        = "limit"
 )
 
 type paginationContext struct {
@@ -61,14 +64,14 @@ func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext,
 		key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(token, "?<"), ">"))
 
 		switch key {
-		case "limit":
+		case limitKey:
 			// Always request 1 more than the specified limit, so we can see if there are additional results.
 			qArgs = append(qArgs, pCtx.Limit+1)
 			paginationOptSet = true
-		case "offset":
+		case offsetKey:
 			qArgs = append(qArgs, pCtx.Offset)
 			paginationOptSet = true
-		case "cursor":
+		case cursorKey:
 			qArgs = append(qArgs, pCtx.Cursor)
 			paginationOptSet = true
 		default:
@@ -126,9 +129,9 @@ func (s *SQLSyncer) nextPageToken(ctx context.Context, pCtx *paginationContext, 
 	pageSize := int(pCtx.Limit)
 
 	switch pCtx.Strategy {
-	case "offset":
+	case offsetKey:
 		ret = strconv.Itoa(int(pCtx.Offset)*pageSize + pageSize)
-	case "cursor":
+	case cursorKey:
 		switch l := lastRowID.(type) {
 		case string:
 			ret = l
@@ -177,7 +180,7 @@ func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Toke
 	ret.Limit = clampPageSize(pToken.Size)
 
 	switch pOpts.Strategy {
-	case "offset":
+	case offsetKey:
 		if pToken.Token != "" {
 			offset, err := strconv.ParseInt(pToken.Token, 10, 64)
 			if err != nil {
@@ -188,7 +191,7 @@ func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Toke
 			ret.Offset = 0
 		}
 
-	case "cursor":
+	case cursorKey:
 		ret.Cursor = pToken.Token
 
 	default:
