@@ -1,0 +1,37 @@
+---
+app_name: Oracle Test
+connect:
+  dsn: "oracle://HR:password@localhost:1521/FREEPDB1"
+resource_types:
+  user:
+    name: "User"
+    description: "A user within the oracle test database"
+    list:
+      query: |
+        select
+          EMPLOYEE_ID,
+          FIRST_NAME,
+          LAST_NAME,
+          EMAIL,
+          HIRE_DATE,
+          JOB_ID,
+          MANAGER_ID,
+          DEPARTMENT_ID
+        from EMPLOYEES
+      map:
+        id: ".EMPLOYEE_ID"
+        display_name: ".FIRST_NAME + ' ' + .LAST_NAME"
+        description: ""
+        traits:
+          user:
+            emails:
+              - ".EMAIL"
+            status: "active"
+            status_details: "'detailed status'"
+            login: ".EMAIL"
+            profile:
+              hire_date: ".HIRE_DATE"
+              manager_id: ".MANAGER_ID"
+              department_id: ".DEPARTMENT_ID"
+              job_id: ".JOB_ID"
+
