@@ -8,6 +8,7 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/cel-go v0.21.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
+	github.com/sijms/go-ora/v2 v2.8.22
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/zap v1.27.0

@@ -10,6 +10,7 @@ import (
 	"regexp"
 
 	"github.com/conductorone/baton-sql/pkg/database/mysql"
+	"github.com/conductorone/baton-sql/pkg/database/oracle"
 )
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
@@ -63,6 +64,13 @@ func Connect(ctx context.Context, dsn string) (*sql.DB, DbEngine, error) {
 			return nil, Unknown, err
 		}
 		return db, MySQL, nil
+
+	case "oracle":
+		db, err := oracle.Connect(ctx, populatedDSN)
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, Oracle, nil
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
