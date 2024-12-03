@@ -1,11 +1,14 @@
 package functions
 
 import (
+	"sort"
+
 	"github.com/elliotchance/phpserialize"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 )
 
+// PHPDeserializeStringArray deserializes a PHP serialized string into a list of sorted strings.
 func PHPDeserializeStringArray(s string) ([]string, error) {
 	results := make(map[any]any)
 	err := phpserialize.Unmarshal([]byte(s), &results)
@@ -19,6 +22,8 @@ func PHPDeserializeStringArray(s string) ([]string, error) {
 			ret = append(ret, kStr)
 		}
 	}
+
+	sort.Strings(ret)
 
 	return ret, nil
 }
@@ -53,11 +58,11 @@ func PHPDeserializeStringArrayFunc() *FunctionDefinition {
 					},
 					{
 						Expr:     `phpDeserializeStringArray('a:2:{s:3:"foo";s:3:"bar";s:3:"baz";s:3:"qux";}')[0]`,
-						Expected: `foo`,
+						Expected: `baz`,
 					},
 					{
 						Expr:     `phpDeserializeStringArray('a:2:{s:3:"foo";s:3:"bar";s:3:"baz";s:3:"qux";}')[1]`,
-						Expected: `baz`,
+						Expected: `foo`,
 					},
 				},
 			},
