@@ -63,6 +63,8 @@ func GetAllFunctions() []*FunctionDefinition {
 		ToUpperFunc(),
 		PHPDeserializeStringArrayFunc(),
 		TitleCaseFunc(),
+		ToLowerFunc(),
+		SlugifyFunc(),
 	}
 }
 
