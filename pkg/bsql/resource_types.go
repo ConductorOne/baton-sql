@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 )
 
 func (c Config) extractTraits(rtID string) ([]v2.ResourceType_Trait, error) {
@@ -54,12 +55,19 @@ func (c Config) GetResourceTypes(ctx context.Context) ([]*v2.ResourceType, error
 			return nil, err
 		}
 
-		resourceTypes = append(resourceTypes, &v2.ResourceType{
+		resourceType := &v2.ResourceType{
 			Id:          rtID,
 			DisplayName: rt.Name,
 			Description: rt.Description,
 			Traits:      traits,
-		})
+		}
+
+		if rt.SkipEntitlementsAndGrants {
+			annos := annotations.Annotations(resourceType.Annotations)
+			annos.Update(&v2.SkipEntitlementsAndGrants{})
+			resourceType.Annotations = annos
+		}
+		resourceTypes = append(resourceTypes, resourceType)
 	}
 	return resourceTypes, nil
 }
@@ -75,10 +83,18 @@ func (c Config) GetResourceType(ctx context.Context, rtID string) (*v2.ResourceT
 		return nil, fmt.Errorf("resource type %s not found in config", rtID)
 	}
 
-	return &v2.ResourceType{
+	ret := &v2.ResourceType{
 		Id:          rtID,
 		DisplayName: rt.Name,
 		Description: rt.Description,
 		Traits:      traits,
-	}, nil
+	}
+
+	if rt.SkipEntitlementsAndGrants {
+		annos := annotations.Annotations(ret.Annotations)
+		annos.Update(&v2.SkipEntitlementsAndGrants{})
+		ret.Annotations = annos
+	}
+
+	return ret, nil
 }
