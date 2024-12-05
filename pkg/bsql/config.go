@@ -98,6 +98,7 @@ type EntitlementMapping struct {
 	Purpose     string   `yaml:"purpose" json:"purpose"`
 	Slug        string   `yaml:"slug" json:"slug"`
 	Immutable   bool     `yaml:"immutable" json:"immutable"`
+	SkipIf      string   `yaml:"skip_if" json:"skip_if"`
 }
 
 type GrantsQuery struct {

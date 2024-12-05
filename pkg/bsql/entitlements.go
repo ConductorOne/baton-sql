@@ -84,6 +84,11 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 		if err != nil {
 			return false, err
 		}
+		// No error and no entitlement means we should skip this row
+		if r == nil {
+			return true, nil
+		}
+
 		r.Resource = resource
 		ret = append(ret, r)
 		return true, nil
@@ -107,6 +112,17 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, r
 	}
 
 	mappings := s.config.Entitlements.Map
+
+	if mappings.SkipIf != "" {
+		skip, err := s.env.EvaluateBool(ctx, mappings.SkipIf, inputs)
+		if err != nil {
+			return nil, err
+		}
+
+		if skip {
+			return nil, nil
+		}
+	}
 
 	if mappings.Id == "" {
 		return nil, fmt.Errorf("entitlements mapping id is required")
