@@ -19,12 +19,13 @@ type DatabaseConfig struct {
 }
 
 type ResourceType struct {
-	Name               string                `yaml:"name" json:"name"`
-	List               *ListQuery            `yaml:"list,omitempty" json:"list,omitempty"`
-	Entitlements       *EntitlementsQuery    `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
-	StaticEntitlements []*EntitlementMapping `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
-	Grants             []*GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
-	Description        string                `yaml:"description,omitempty" json:"description,omitempty"`
+	Name                      string                `yaml:"name" json:"name"`
+	List                      *ListQuery            `yaml:"list,omitempty" json:"list,omitempty"`
+	Entitlements              *EntitlementsQuery    `yaml:"entitlements,omitempty" json:"entitlements,omitempty"`
+	StaticEntitlements        []*EntitlementMapping `yaml:"static_entitlements,omitempty" json:"static_entitlements,omitempty"`
+	Grants                    []*GrantsQuery        `yaml:"grants,omitempty" json:"grants,omitempty"`
+	Description               string                `yaml:"description,omitempty" json:"description,omitempty"`
+	SkipEntitlementsAndGrants bool                  `yaml:"skip_entitlements_and_grants,omitempty" json:"skip_entitlements_and_grants,omitempty"`
 }
 
 type ListQuery struct {
