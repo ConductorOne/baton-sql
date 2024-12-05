@@ -64,6 +64,7 @@ func GetAllFunctions() []*FunctionDefinition {
 		PHPDeserializeStringArrayFunc(),
 		TitleCaseFunc(),
 		ToLowerFunc(),
+		SlugifyFunc(),
 	}
 }
 
