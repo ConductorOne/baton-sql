@@ -134,5 +134,10 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		Resource:     principalID,
 	}
 
-	return sdkGrant.NewGrant(resource, mapping.Entitlement, principal), true, nil
+	entitlementID, err := s.env.EvaluateString(ctx, mapping.Entitlement, inputs)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return sdkGrant.NewGrant(resource, entitlementID, principal), true, nil
 }
