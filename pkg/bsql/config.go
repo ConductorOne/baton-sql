@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	AppName       string                  `yaml:"app_name" json:"app_name"`
-	Connect       DatabaseConfig          `yaml:"connect" json:"connect"`
-	ResourceTypes map[string]ResourceType `yaml:"resource_types" json:"resource_types"`
+	AppName        string                  `yaml:"app_name" json:"app_name"`
+	AppDescription string                  `yaml:"app_description" json:"app_description"`
+	Connect        DatabaseConfig          `yaml:"connect" json:"connect"`
+	ResourceTypes  map[string]ResourceType `yaml:"resource_types" json:"resource_types"`
 }
 
 type DatabaseConfig struct {

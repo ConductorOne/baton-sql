@@ -51,10 +51,19 @@ func (c *Connector) Asset(ctx context.Context, asset *v2.AssetRef) (string, io.R
 
 // Metadata returns metadata about the connector.
 func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
-	return &v2.ConnectorMetadata{
+	md := &v2.ConnectorMetadata{
 		DisplayName: "Generic SQL Connector",
 		Description: "A baton connector that allows you to sync from an arbitrary SQL database",
-	}, nil
+	}
+
+	if c.config.AppName != "" {
+		md.DisplayName = c.config.AppName
+	}
+
+	if c.config.AppDescription != "" {
+		md.Description = c.config.AppDescription
+	}
+	return md, nil
 }
 
 // Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
