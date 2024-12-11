@@ -9,9 +9,10 @@ import (
 )
 
 type Config struct {
-	AppName       string                  `yaml:"app_name" json:"app_name"`
-	Connect       DatabaseConfig          `yaml:"connect" json:"connect"`
-	ResourceTypes map[string]ResourceType `yaml:"resource_types" json:"resource_types"`
+	AppName        string                  `yaml:"app_name" json:"app_name"`
+	AppDescription string                  `yaml:"app_description" json:"app_description"`
+	Connect        DatabaseConfig          `yaml:"connect" json:"connect"`
+	ResourceTypes  map[string]ResourceType `yaml:"resource_types" json:"resource_types"`
 }
 
 type DatabaseConfig struct {
@@ -86,9 +87,9 @@ type Pagination struct {
 }
 
 type EntitlementsQuery struct {
-	Query      string              `yaml:"query" json:"query"`
-	Pagination *Pagination         `yaml:"pagination" json:"pagination"`
-	Map        *EntitlementMapping `yaml:"map" json:"map"`
+	Query      string                `yaml:"query" json:"query"`
+	Pagination *Pagination           `yaml:"pagination" json:"pagination"`
+	Map        []*EntitlementMapping `yaml:"map" json:"map"`
 }
 
 type EntitlementMapping struct {
@@ -103,9 +104,9 @@ type EntitlementMapping struct {
 }
 
 type GrantsQuery struct {
-	Query      string        `yaml:"query" json:"query"`
-	Pagination *Pagination   `yaml:"pagination" json:"pagination"`
-	Map        *GrantMapping `yaml:"map" json:"map"`
+	Query      string          `yaml:"query" json:"query"`
+	Pagination *Pagination     `yaml:"pagination" json:"pagination"`
+	Map        []*GrantMapping `yaml:"map" json:"map"`
 }
 
 type GrantMapping struct {
