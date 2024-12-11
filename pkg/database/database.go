@@ -11,6 +11,7 @@ import (
 
 	"github.com/conductorone/baton-sql/pkg/database/mysql"
 	"github.com/conductorone/baton-sql/pkg/database/oracle"
+	"github.com/conductorone/baton-sql/pkg/database/sqlserver"
 )
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
@@ -71,6 +72,13 @@ func Connect(ctx context.Context, dsn string) (*sql.DB, DbEngine, error) {
 			return nil, Unknown, err
 		}
 		return db, Oracle, nil
+
+	case "sqlserver":
+		db, err := sqlserver.Connect(ctx, populatedDSN)
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, MSSQL, nil
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
