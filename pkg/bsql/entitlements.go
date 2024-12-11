@@ -131,7 +131,7 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, r
 	if err != nil {
 		return nil, err
 	}
-	ret.Id = v
+	ret.Id = sdkEntitlement.NewEntitlementID(resource, v)
 
 	if mappings.DisplayName == "" {
 		return nil, fmt.Errorf("entitlements mapping display_name is required")
