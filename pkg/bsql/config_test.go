@@ -93,9 +93,9 @@ func TestParse(t *testing.T) {
 				// Validate `roleResourceType` grants
 				require.NotNil(t, roleResourceType.Grants)
 				require.Len(t, roleResourceType.Grants, 1)
-				require.Equal(t, ".user_id", roleResourceType.Grants[0].Map.PrincipalId)
-				require.Equal(t, "user", roleResourceType.Grants[0].Map.PrincipalType)
-				require.Equal(t, "member", roleResourceType.Grants[0].Map.Entitlement)
+				require.Equal(t, ".user_id", roleResourceType.Grants[0].Map[0].PrincipalId)
+				require.Equal(t, "user", roleResourceType.Grants[0].Map[0].PrincipalType)
+				require.Equal(t, "member", roleResourceType.Grants[0].Map[0].Entitlement)
 				require.Equal(t, "offset", roleResourceType.Grants[0].Pagination.Strategy)
 				require.Equal(t, "user_id", roleResourceType.Grants[0].Pagination.PrimaryKey)
 			},

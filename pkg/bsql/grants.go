@@ -76,12 +76,15 @@ func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToke
 	var ret []*v2.Grant
 
 	npt, err := s.runQuery(ctx, pToken, grantConfig.Query, grantConfig.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		g, ok, err := s.mapGrant(ctx, resource, grantConfig.Map, rowMap)
-		if err != nil {
-			return false, err
-		}
-		if ok {
-			ret = append(ret, g)
+		for _, mapping := range grantConfig.Map {
+			g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
+			if err != nil {
+				return false, err
+			}
+
+			if ok {
+				ret = append(ret, g)
+			}
 		}
 		return true, nil
 	})

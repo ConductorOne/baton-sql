@@ -80,17 +80,17 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 	var ret []*v2.Entitlement
 
 	npt, err := s.runQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		r, err := s.mapEntitlement(ctx, resource, rowMap)
-		if err != nil {
-			return false, err
-		}
-		// No error and no entitlement means we should skip this row
-		if r == nil {
-			return true, nil
-		}
+		for _, mapping := range s.config.Entitlements.Map {
+			r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
+			if err != nil {
+				return false, err
+			}
 
-		r.Resource = resource
-		ret = append(ret, r)
+			if ok {
+				r.Resource = resource
+				ret = append(ret, r)
+			}
+		}
 		return true, nil
 	})
 	if err != nil {
@@ -100,7 +100,7 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 	return ret, npt, nil, nil
 }
 
-func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, rowMap map[string]any) (*v2.Entitlement, error) {
+func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, mappings *EntitlementMapping, rowMap map[string]any) (*v2.Entitlement, bool, error) {
 	ret := &v2.Entitlement{}
 
 	inputs := s.env.BaseInputsWithResource(rowMap, resource)
@@ -111,48 +111,46 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, r
 		"DisplayName":    resource.DisplayName,
 	}
 
-	mappings := s.config.Entitlements.Map
-
 	if mappings.SkipIf != "" {
 		skip, err := s.env.EvaluateBool(ctx, mappings.SkipIf, inputs)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		if skip {
-			return nil, nil
+			return nil, false, nil
 		}
 	}
 
 	if mappings.Id == "" {
-		return nil, fmt.Errorf("entitlements mapping id is required")
+		return nil, false, fmt.Errorf("entitlements mapping id is required")
 	}
 	v, err := s.env.EvaluateString(ctx, mappings.Id, inputs)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ret.Id = sdkEntitlement.NewEntitlementID(resource, v)
 
 	if mappings.DisplayName == "" {
-		return nil, fmt.Errorf("entitlements mapping display_name is required")
+		return nil, false, fmt.Errorf("entitlements mapping display_name is required")
 	}
 	v, err = s.env.EvaluateString(ctx, mappings.DisplayName, inputs)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ret.DisplayName = v
 
 	if mappings.Description != "" {
 		v, err = s.env.EvaluateString(ctx, mappings.Description, inputs)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		ret.Description = v
 	}
 
 	resourceTypes, err := s.fullConfig.GetResourceTypes(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for _, rt := range mappings.GrantableTo {
 		for _, r := range resourceTypes {
@@ -164,11 +162,11 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, r
 
 	// TODO(jirwin): Should entitlement slugs be required?
 	if mappings.Slug == "" {
-		return nil, fmt.Errorf("entitlements mapping slug is required")
+		return nil, false, fmt.Errorf("entitlements mapping slug is required")
 	}
 	v, err = s.env.EvaluateString(ctx, mappings.Slug, inputs)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ret.Slug = v
 
@@ -176,7 +174,7 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, r
 	if mappings.Purpose != "" {
 		purpose, err = s.env.EvaluateString(ctx, mappings.Purpose, inputs)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	switch purpose {
@@ -194,5 +192,5 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, r
 	}
 	ret.Annotations = annos
 
-	return ret, nil
+	return ret, true, nil
 }
