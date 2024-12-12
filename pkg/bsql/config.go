@@ -16,7 +16,9 @@ type Config struct {
 }
 
 type DatabaseConfig struct {
-	DSN string `yaml:"dsn" json:"dsn"` // DSN connection string
+	DSN      string `yaml:"dsn" json:"dsn"` // DSN connection string
+	User     string `yaml:"user" json:"user"`
+	Password string `yaml:"password" json:"password"`
 }
 
 type ResourceType struct {
