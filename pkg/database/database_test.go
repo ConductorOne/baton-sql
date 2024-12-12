@@ -68,13 +68,13 @@ func Test_updateDSNFromEnv(t *testing.T) {
 					t.Fatalf("failed to set env var %s: %v", k, err)
 				}
 			}
-			got, err := updateDSNFromEnv(tt.args.ctx, tt.args.dsn)
+			got, err := updateFromEnv(tt.args.ctx, tt.args.dsn)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("updateDSNFromEnv() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("updateFromEnv() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("updateDSNFromEnv() got = %v, want %v", got, tt.want)
+				t.Errorf("updateFromEnv() got = %v, want %v", got, tt.want)
 			}
 			for k := range tt.env {
 				if err := os.Unsetenv(k); err != nil {

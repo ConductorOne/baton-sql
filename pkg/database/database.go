@@ -27,7 +27,7 @@ const (
 	Oracle
 )
 
-func updateDSNFromEnv(ctx context.Context, dsn string) (string, error) {
+func updateFromEnv(ctx context.Context, dsn string) (string, error) {
 	var err error
 
 	result := DSNREnvRegex.ReplaceAllStringFunc(dsn, func(match string) string {
@@ -47,8 +47,8 @@ func updateDSNFromEnv(ctx context.Context, dsn string) (string, error) {
 	return result, nil
 }
 
-func Connect(ctx context.Context, dsn string) (*sql.DB, DbEngine, error) {
-	populatedDSN, err := updateDSNFromEnv(ctx, dsn)
+func Connect(ctx context.Context, dsn string, user string, password string) (*sql.DB, DbEngine, error) {
+	populatedDSN, err := updateFromEnv(ctx, dsn)
 	if err != nil {
 		return nil, Unknown, err
 	}
@@ -58,23 +58,41 @@ func Connect(ctx context.Context, dsn string) (*sql.DB, DbEngine, error) {
 		return nil, Unknown, err
 	}
 
+	if parsedDsn.User == nil {
+		if user == "" || password == "" {
+			return nil, Unknown, errors.New("user and password must be set in DSN or in the configuration")
+		}
+
+		populatedUser, err := updateFromEnv(ctx, user)
+		if err != nil {
+			return nil, Unknown, err
+		}
+
+		populatedPassword, err := updateFromEnv(ctx, password)
+		if err != nil {
+			return nil, Unknown, err
+		}
+
+		parsedDsn.User = url.UserPassword(populatedUser, populatedPassword)
+	}
+
 	switch parsedDsn.Scheme {
 	case "mysql":
-		db, err := mysql.Connect(ctx, populatedDSN)
+		db, err := mysql.Connect(ctx, parsedDsn.String())
 		if err != nil {
 			return nil, Unknown, err
 		}
 		return db, MySQL, nil
 
 	case "oracle":
-		db, err := oracle.Connect(ctx, populatedDSN)
+		db, err := oracle.Connect(ctx, parsedDsn.String())
 		if err != nil {
 			return nil, Unknown, err
 		}
 		return db, Oracle, nil
 
 	case "sqlserver":
-		db, err := sqlserver.Connect(ctx, populatedDSN)
+		db, err := sqlserver.Connect(ctx, parsedDsn.String())
 		if err != nil {
 			return nil, Unknown, err
 		}
