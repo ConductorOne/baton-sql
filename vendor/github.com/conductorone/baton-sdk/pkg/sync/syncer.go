@@ -688,6 +688,8 @@ func (s *syncer) validateResourceTraits(ctx context.Context, r *v2.Resource) err
 			trait = &v2.UserTrait{}
 		case v2.ResourceType_TRAIT_ROLE:
 			trait = &v2.RoleTrait{}
+		case v2.ResourceType_TRAIT_SECRET:
+			trait = &v2.SecretTrait{}
 		default:
 		}
 
@@ -972,7 +974,7 @@ func (s *syncer) SyncAssets(ctx context.Context) error {
 }
 
 // SyncGrantExpansion
-// TODO(morgabra) Docs
+// TODO(morgabra) Docs.
 func (s *syncer) SyncGrantExpansion(ctx context.Context) error {
 	l := ctxzap.Extract(ctx)
 	entitlementGraph := s.state.EntitlementGraph(ctx)
@@ -1367,7 +1369,6 @@ func (s *syncer) runGrantExpandActions(ctx context.Context) (bool, error) {
 
 	graph := s.state.EntitlementGraph(ctx)
 	l = l.With(zap.Int("depth", graph.Depth))
-	l.Debug("runGrantExpandActions: start", zap.Any("graph", graph))
 
 	// Peek the next action on the stack
 	if len(graph.Actions) == 0 {
