@@ -61,7 +61,7 @@ func (s *SQLSyncer) fetchTraits(ctx context.Context) map[string]bool {
 func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
 	l := ctxzap.Extract(ctx)
 
-	inputs := s.env.BaseInputs(rowMap)
+	inputs := s.env.SyncInputs(rowMap)
 
 	mappings := s.config.List.Map.Traits.User
 
@@ -198,7 +198,7 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 }
 
 func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
-	inputs := s.env.BaseInputs(rowMap)
+	inputs := s.env.SyncInputs(rowMap)
 
 	mappings := s.config.List.Map.Traits.App
 
@@ -238,7 +238,7 @@ func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[
 }
 
 func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
-	inputs := s.env.BaseInputs(rowMap)
+	inputs := s.env.SyncInputs(rowMap)
 
 	mappings := s.config.List.Map.Traits.Group
 
@@ -269,7 +269,7 @@ func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap ma
 }
 
 func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
-	inputs := s.env.BaseInputs(rowMap)
+	inputs := s.env.SyncInputs(rowMap)
 
 	mappings := s.config.List.Map.Traits.Role
 
@@ -355,7 +355,7 @@ func (s *SQLSyncer) getMappedResource(ctx context.Context, r *v2.Resource, rowMa
 		return errors.New("no mapping configuration provided")
 	}
 
-	inputs := s.env.BaseInputs(rowMap)
+	inputs := s.env.SyncInputs(rowMap)
 
 	// Map ID
 	if mapping.Id == "" {

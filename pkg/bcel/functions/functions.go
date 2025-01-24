@@ -1,8 +1,14 @@
 package functions
 
 import (
+	"reflect"
+
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/functions"
+)
+
+var (
+	stringListType = reflect.TypeOf([]string{})
 )
 
 type FunctionDefinition struct {
@@ -62,6 +68,7 @@ func GetAllFunctions() []*FunctionDefinition {
 	return []*FunctionDefinition{
 		ToUpperFunc(),
 		PHPDeserializeStringArrayFunc(),
+		PHPSerializeStringArrayFunc(),
 		TitleCaseFunc(),
 		ToLowerFunc(),
 		SlugifyFunc(),

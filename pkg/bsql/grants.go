@@ -112,7 +112,7 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		return nil, false, errors.New("error: missing entitlement ID mapping")
 	}
 
-	inputs := s.env.BaseInputsWithResource(rowMap, resource)
+	inputs := s.env.SyncInputsWithResource(rowMap, resource)
 
 	if mapping.SkipIf != "" {
 		skip, err := s.env.EvaluateBool(ctx, mapping.SkipIf, inputs)

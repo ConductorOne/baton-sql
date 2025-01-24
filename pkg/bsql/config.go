@@ -95,14 +95,21 @@ type EntitlementsQuery struct {
 }
 
 type EntitlementMapping struct {
-	Id          string   `yaml:"id" json:"id"`
-	DisplayName string   `yaml:"display_name" json:"display_name"`
-	Description string   `yaml:"description" json:"description"`
-	GrantableTo []string `yaml:"grantable_to" json:"grantable_to"`
-	Purpose     string   `yaml:"purpose" json:"purpose"`
-	Slug        string   `yaml:"slug" json:"slug"`
-	Immutable   bool     `yaml:"immutable" json:"immutable"`
-	SkipIf      string   `yaml:"skip_if" json:"skip_if"`
+	Id           string                   `yaml:"id" json:"id"`
+	DisplayName  string                   `yaml:"display_name" json:"display_name"`
+	Description  string                   `yaml:"description" json:"description"`
+	GrantableTo  []string                 `yaml:"grantable_to" json:"grantable_to"`
+	Purpose      string                   `yaml:"purpose" json:"purpose"`
+	Slug         string                   `yaml:"slug" json:"slug"`
+	Immutable    bool                     `yaml:"immutable" json:"immutable"`
+	SkipIf       string                   `yaml:"skip_if" json:"skip_if"`
+	Provisioning *EntitlementProvisioning `yaml:"provisioning,omitempty" json:"provisioning,omitempty"`
+}
+
+type EntitlementProvisioning struct {
+	Grant  []string          `yaml:"grant,omitempty" json:"grant,omitempty"`
+	Revoke []string          `yaml:"revoke,omitempty" json:"revoke,omitempty"`
+	Vars   map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
 }
 
 type GrantsQuery struct {
