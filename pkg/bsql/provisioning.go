@@ -42,7 +42,7 @@ func (s *SQLSyncer) getProvisioningConfig(ctx context.Context, entitlementID str
 func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
-	l.Info("granting entitlement", zap.String("entitlement_id", entitlement.GetId()))
+	l.Debug("granting entitlement", zap.String("entitlement_id", entitlement.GetId()))
 
 	_, _, entitlementID, err := helpers.SplitEntitlementID(entitlement)
 	if err != nil {
@@ -68,7 +68,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		return nil, err
 	}
 
-	l.Info(
+	l.Debug(
 		"granted entitlement",
 		zap.String("principal_id", principal.GetId().GetResource()),
 		zap.String("entitlement_id", entitlement.GetId()),
@@ -79,7 +79,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
-	l.Info(
+	l.Debug(
 		"revoking entitlement",
 		zap.String("grant_id", grant.GetId()),
 	)
@@ -108,7 +108,7 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 		return nil, err
 	}
 
-	l.Info("revoking grant", zap.String("grant_id", grant.GetId()))
+	l.Debug("revoked grant", zap.String("grant_id", grant.GetId()))
 	return nil, nil
 }
 
