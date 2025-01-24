@@ -230,9 +230,13 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 	if err != nil {
 		return err
 	}
+
+	committed := false
 	defer func() {
-		if err := tx.Rollback(); err != nil {
-			l.Error("failed to rollback provisioning queries", zap.Error(err))
+		if !committed {
+			if err := tx.Rollback(); err != nil {
+				l.Error("failed to rollback provisioning queries", zap.Error(err))
+			}
 		}
 	}()
 
@@ -252,12 +256,17 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 			l.Error("failed to get rows affected", zap.Error(err))
 		}
 
+		if rowsAffected > 1 {
+			return errors.New("query affected more than one row, ending and rolling back")
+		}
+
 		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected))
 	}
 	err = tx.Commit()
 	if err != nil {
 		return err
 	}
+	committed = true
 
 	return nil
 }
