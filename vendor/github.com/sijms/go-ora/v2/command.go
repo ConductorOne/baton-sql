@@ -365,7 +365,7 @@ func (stmt *Stmt) writePars() error {
 		if !par.isLongType() {
 			if par.DataType == REFCURSOR {
 				session.WriteBytes(&buffer, 1, 0)
-			} else if par.Direction == Input && par.isLobType() {
+			} else if (par.Direction == Input || par.Direction == InOut) && par.isLobType() {
 				if len(par.BValue) > 0 {
 					session.WriteUint(&buffer, len(par.BValue), 2, true, true)
 				}
@@ -1407,10 +1407,7 @@ func (stmt *Stmt) structPar(parValue driver.Value, parIndex int) (processedPars 
 				fieldType = fieldType.Elem()
 			}
 		}
-		// if field is empty ptr create type
-		//if field.Kind() == reflect.Ptr  && field.IsNil() {
-		//	field.Set(reflect.New(fieldType))
-		//}
+
 		// if type mentioned so driver should create a temporary type and then update the current value
 		typeErr := fmt.Errorf("error passing filed %s as type %s", tempType.Field(fieldIndex).Name, _type)
 		switch _type {
