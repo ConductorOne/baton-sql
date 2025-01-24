@@ -230,7 +230,11 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			l.Error("failed to rollback provisioning queries", zap.Error(err))
+		}
+	}()
 
 	for _, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(ctx, q, vars)
