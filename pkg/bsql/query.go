@@ -34,7 +34,7 @@ type paginationContext struct {
 
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)\>`)
 
-func (s *SQLSyncer) getNextPlaceholder(ctx context.Context, qArgs []interface{}) string {
+func (s *SQLSyncer) getNextPlaceholder(qArgs []interface{}) string {
 	switch s.dbEngine {
 	case database.MySQL:
 		return "?"
@@ -79,7 +79,7 @@ func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext,
 			return token
 		}
 
-		return s.getNextPlaceholder(ctx, qArgs)
+		return s.getNextPlaceholder(qArgs)
 	})
 	if parseErr != nil {
 		return "", nil, false, parseErr
@@ -199,6 +199,76 @@ func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Toke
 	}
 
 	return ret, nil
+}
+
+func (s *SQLSyncer) prepareProvisioningQuery(ctx context.Context, query string, vars map[string]any) (string, []interface{}, error) {
+	var qArgs []interface{}
+
+	var parseErr error
+	updatedQuery := queryOptRegex.ReplaceAllStringFunc(query, func(token string) string {
+		key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(token, "?<"), ">"))
+
+		if v, ok := vars[key]; ok {
+			qArgs = append(qArgs, v)
+		} else {
+			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
+			return token
+		}
+
+		return s.getNextPlaceholder(qArgs)
+	})
+	if parseErr != nil {
+		return "", nil, parseErr
+	}
+	return updatedQuery, qArgs, nil
+}
+
+func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string, vars map[string]any) error {
+	l := ctxzap.Extract(ctx)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			if err := tx.Rollback(); err != nil {
+				l.Error("failed to rollback provisioning queries", zap.Error(err))
+			}
+		}
+	}()
+
+	for _, q := range queries {
+		q, qArgs, err := s.prepareProvisioningQuery(ctx, q, vars)
+		if err != nil {
+			return err
+		}
+
+		result, err := tx.ExecContext(ctx, q, qArgs...)
+		if err != nil {
+			return err
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			l.Error("failed to get rows affected", zap.Error(err))
+		}
+
+		if rowsAffected > 1 {
+			return errors.New("query affected more than one row, ending and rolling back")
+		}
+
+		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected))
+	}
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	committed = true
+
+	return nil
 }
 
 func (s *SQLSyncer) runQuery(

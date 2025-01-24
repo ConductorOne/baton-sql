@@ -2,6 +2,7 @@ package bcel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -10,6 +11,7 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sql/pkg/bcel/functions"
+	"github.com/conductorone/baton-sql/pkg/helpers"
 )
 
 type Env struct {
@@ -23,6 +25,8 @@ func NewEnv(ctx context.Context) (*Env, error) {
 	celOpts = append(celOpts,
 		cel.Variable("cols", cel.MapType(cel.StringType, cel.AnyType)),
 		cel.Variable("resource", cel.MapType(types.StringType, types.StringType)),
+		cel.Variable("principal", cel.MapType(types.StringType, types.StringType)),
+		cel.Variable("entitlement", cel.MapType(types.StringType, types.StringType)),
 	)
 
 	// CEL functions
@@ -101,7 +105,7 @@ func (t *Env) EvaluateBool(ctx context.Context, expr string, inputs map[string]a
 	}
 }
 
-func (t *Env) BaseInputs(rowMap map[string]any) map[string]any {
+func (t *Env) SyncInputs(rowMap map[string]any) map[string]any {
 	ret := make(map[string]any)
 
 	if rowMap != nil {
@@ -111,16 +115,49 @@ func (t *Env) BaseInputs(rowMap map[string]any) map[string]any {
 	return ret
 }
 
-func (t *Env) BaseInputsWithResource(rowMap map[string]any, resource *v2.Resource) map[string]any {
-	ret := t.BaseInputs(rowMap)
+func (t *Env) SyncInputsWithResource(rowMap map[string]any, resource *v2.Resource) map[string]any {
+	ret := t.SyncInputs(rowMap)
 
 	if resource != nil {
 		ret["resource"] = map[string]string{
-			"ID":             resource.Id.Resource,
-			"ResourceTypeID": resource.Id.ResourceType,
-			"DisplayName":    resource.DisplayName,
+			"ID":          resource.Id.Resource,
+			"Type":        resource.Id.ResourceType,
+			"DisplayName": resource.DisplayName,
 		}
 	}
 
 	return ret
+}
+
+func (t *Env) ProvisioningInputs(principal *v2.Resource, entitlement *v2.Entitlement) (map[string]any, error) {
+	if principal == nil {
+		return nil, errors.New("principal is required")
+	}
+
+	if entitlement == nil {
+		return nil, errors.New("entitlement is required")
+	}
+
+	ret := make(map[string]any)
+
+	ret["principal"] = map[string]string{
+		"ID":   principal.Id.Resource,
+		"Type": principal.Id.ResourceType,
+	}
+
+	resourceType, resourceID, entitlementID, err := helpers.SplitEntitlementID(entitlement)
+	if err != nil {
+		return nil, err
+	}
+
+	ret["entitlement"] = map[string]string{
+		"ID": entitlementID,
+	}
+
+	ret["resource"] = map[string]string{
+		"ID":   resourceID,
+		"Type": resourceType,
+	}
+
+	return ret, nil
 }
