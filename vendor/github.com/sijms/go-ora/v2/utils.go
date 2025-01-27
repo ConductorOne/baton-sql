@@ -276,7 +276,7 @@ func getBool(col interface{}) (bool, error) {
 }
 
 // func getNumber(col interface{}) (*Number, error) {
-// 
+//
 // }
 
 // get prim float64 from supported types
@@ -410,7 +410,7 @@ func getLob(col interface{}, conn *Connection) (*Lob, error) {
 	if col == nil {
 		return nil, nil
 	}
-	charsetID := conn.tcpNego.ServerCharset
+	charsetID := conn.getDefaultCharsetID()
 	charsetForm := 1
 	stringVar := ""
 	var byteVar []byte
@@ -670,7 +670,7 @@ func setUDTObject(value reflect.Value, cust *customType, input []ParameterInfo) 
 	if value.Kind() == reflect.Slice || value.Kind() == reflect.Array {
 		return setArray(value, input)
 		// if cust.isRegularArray() {
-		// 
+		//
 		// } else {
 		// 	arrayObj := reflect.MakeSlice(reflect.SliceOf(cust.typ), 0, len(input))
 		// 	for _, par := range input {
@@ -1237,7 +1237,7 @@ func decodeObject(conn *Connection, parent *ParameterInfo, temporaryLobs *[][]by
 			for x := 0; x < itemsLen; x++ {
 				tempPar := parent.cusType.attribs[0]
 				// if parent.cusType.isRegularArray() {
-				// 
+				//
 				// } else {
 				// 	tempPar = parent.clone()
 				// }
@@ -1277,6 +1277,40 @@ func decodeObject(conn *Connection, parent *ParameterInfo, temporaryLobs *[][]by
 				pars = append(pars, tempPar)
 			}
 			parent.oPrimValue = pars
+		case 0x85: // xmltype
+			_, err = session.GetByte() // represent 1
+			if err != nil {
+				return err
+			}
+			dataType, err := session.GetInt(4, false, true) // represent 0x14
+			if err != nil {
+				return err
+			}
+			value, err := session.GetBytes(len(parent.BValue) - 8)
+			if err != nil {
+				return err
+			}
+			switch dataType {
+			case 0x14:
+				conv, err := conn.getDefaultStrConv()
+				if err != nil {
+					return err
+				}
+				parent.oPrimValue = conv.Decode(value)
+			case 0x11:
+				lob := Lob{
+					sourceLocator: value,
+					sourceLen:     len(value),
+					connection:    conn,
+					charsetID:     conn.getDefaultCharsetID(),
+				}
+				var strValue string
+				err = setLob(reflect.ValueOf(&strValue), lob)
+				if err != nil {
+					return err
+				}
+				parent.oPrimValue = strValue
+			}
 		case 0x84:
 			// pars := make([]ParameterInfo, 0, len(parent.cusType.attribs))
 			// collect all attributes in one list

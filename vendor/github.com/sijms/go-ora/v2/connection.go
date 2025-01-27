@@ -298,6 +298,15 @@ func (conn *Connection) Ping(ctx context.Context) error {
 	}).exec()
 }
 
+func (conn *Connection) getDefaultCharsetID() int {
+	if conn.cStrConv != nil {
+		return conn.cStrConv.GetLangID()
+	}
+	return conn.tcpNego.ServerCharset
+}
+func (conn *Connection) getDefaultStrConv() (converters.IStringConverter, error) {
+	return conn.getStrConv(conn.getDefaultCharsetID())
+}
 func (conn *Connection) getStrConv(charsetID int) (converters.IStringConverter, error) {
 	if conn.cStrConv != nil && charsetID == conn.cStrConv.GetLangID() {
 		return conn.cStrConv, nil

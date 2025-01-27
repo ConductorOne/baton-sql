@@ -8,13 +8,22 @@ import (
 type OracleError struct {
 	ErrCode int
 	ErrMsg  string
+	errPos  int
 }
 
 func (err *OracleError) Error() string {
 	if len(err.ErrMsg) == 0 {
 		err.translate()
 	}
-	return err.ErrMsg
+	var output string
+	output = err.ErrMsg + "error occur at position(column) " + strconv.Itoa(err.errPos)
+	//return err.ErrMsg
+	return output
+}
+
+// ErrPos return sql error position。
+func (err *OracleError) ErrPos() int {
+	return err.errPos
 }
 
 func (err *OracleError) translate() {
