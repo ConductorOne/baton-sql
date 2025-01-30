@@ -22,6 +22,7 @@ const (
 	offsetKey       = "offset"
 	cursorKey       = "cursor"
 	limitKey        = "limit"
+	unquotedKey     = "unquoted"
 )
 
 type paginationContext struct {
@@ -32,7 +33,12 @@ type paginationContext struct {
 	PrimaryKey string
 }
 
-var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)\>`)
+type queryTokenOpts struct {
+	Key      string
+	Unquoted bool
+}
+
+var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)(?:\|([a-zA-Z0-9_]+))?\>`)
 
 func (s *SQLSyncer) getNextPlaceholder(qArgs []interface{}) string {
 	switch s.dbEngine {
@@ -51,6 +57,39 @@ func (s *SQLSyncer) getNextPlaceholder(qArgs []interface{}) string {
 	}
 }
 
+func parseToken(token string) (*queryTokenOpts, error) {
+	matches := queryOptRegex.FindStringSubmatch(token)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("invalid token format: %s", token)
+	}
+
+	key := strings.ToLower(matches[1])
+	opts := &queryTokenOpts{
+		Key: key,
+	}
+
+	if len(matches) < 3 {
+		return opts, nil
+	}
+
+	optStr := strings.ToLower(matches[2])
+	if optStr == "" {
+		return opts, nil
+	}
+
+	for _, opt := range strings.Split(optStr, ",") {
+		opt = strings.TrimSpace(strings.ToLower(opt))
+		switch opt {
+		case unquotedKey:
+			opts.Unquoted = true
+		default:
+			return nil, fmt.Errorf("unknown option %s", opt)
+		}
+	}
+
+	return opts, nil
+}
+
 func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext, query string) (string, []interface{}, bool, error) {
 	if pCtx == nil {
 		return query, nil, false, nil
@@ -61,24 +100,35 @@ func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext,
 	var parseErr error
 	paginationOptSet := false
 	updatedQuery := queryOptRegex.ReplaceAllStringFunc(query, func(token string) string {
-		key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(token, "?<"), ">"))
+		opts, err := parseToken(token)
+		if err != nil {
+			parseErr = errors.Join(parseErr, fmt.Errorf("in token %s: %w", token, err))
+			return token
+		}
 
-		switch key {
+		var val interface{}
+		switch opts.Key {
 		case limitKey:
 			// Always request 1 more than the specified limit, so we can see if there are additional results.
-			qArgs = append(qArgs, pCtx.Limit+1)
+			val = pCtx.Limit + 1
 			paginationOptSet = true
 		case offsetKey:
-			qArgs = append(qArgs, pCtx.Offset)
+			val = pCtx.Offset
 			paginationOptSet = true
 		case cursorKey:
-			qArgs = append(qArgs, pCtx.Cursor)
+			val = pCtx.Cursor
 			paginationOptSet = true
 		default:
 			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
 			return token
 		}
 
+		// If the value is unquoted, directly insert the value as a string
+		if opts.Unquoted {
+			return fmt.Sprintf("%v", val)
+		}
+
+		qArgs = append(qArgs, val)
 		return s.getNextPlaceholder(qArgs)
 	})
 	if parseErr != nil {
@@ -206,15 +256,23 @@ func (s *SQLSyncer) prepareProvisioningQuery(ctx context.Context, query string, 
 
 	var parseErr error
 	updatedQuery := queryOptRegex.ReplaceAllStringFunc(query, func(token string) string {
-		key := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(token, "?<"), ">"))
+		opts, err := parseToken(token)
+		if err != nil {
+			parseErr = errors.Join(parseErr, fmt.Errorf("in token %s: %w", token, err))
+			return token
+		}
 
-		if v, ok := vars[key]; ok {
-			qArgs = append(qArgs, v)
-		} else {
+		v, ok := vars[opts.Key]
+		if !ok {
 			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
 			return token
 		}
 
+		if opts.Unquoted {
+			return fmt.Sprintf("%v", v)
+		}
+
+		qArgs = append(qArgs, v)
 		return s.getNextPlaceholder(qArgs)
 	})
 	if parseErr != nil {
