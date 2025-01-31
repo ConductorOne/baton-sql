@@ -8,6 +8,77 @@ import (
 	"github.com/conductorone/baton-sql/pkg/database"
 )
 
+func Test_parseToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		token   string
+		want    *queryTokenOpts
+		wantErr bool
+	}{
+		{
+			name:  "Basic token without options",
+			token: "?<limit>",
+			want: &queryTokenOpts{
+				Key:      "limit",
+				Unquoted: false,
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Token with unquoted option",
+			token: "?<limit|unquoted>",
+			want: &queryTokenOpts{
+				Key:      "limit",
+				Unquoted: true,
+			},
+			wantErr: false,
+		},
+		{
+			name:  "Token with mixed case",
+			token: "?<LIMIT|UNQUOTED>",
+			want: &queryTokenOpts{
+				Key:      "limit",
+				Unquoted: true,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "Invalid token format",
+			token:   "invalid",
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "Token with unknown option",
+			token:   "?<limit|unknown>",
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:  "Token with empty options",
+			token: "?<limit|>",
+			want: &queryTokenOpts{
+				Key:      "limit",
+				Unquoted: false,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseToken(tt.token)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseToken() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseToken() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_parseQueryOpts(t *testing.T) {
 	type args struct {
 		ctx   context.Context
@@ -155,6 +226,82 @@ func Test_parseQueryOpts(t *testing.T) {
 				&paginationContext{
 					Limit:  10,
 					Offset: 0,
+				},
+			},
+			"",
+			nil,
+			false,
+			true,
+		},
+		{
+			"Test valid query with unquoted limit",
+			database.MySQL,
+			args{
+				context.Background(),
+				"SELECT * FROM table LIMIT ?<limit|unquoted>",
+				&paginationContext{
+					Limit: 10,
+				},
+			},
+			"SELECT * FROM table LIMIT 11",
+			nil,
+			true,
+			false,
+		},
+		{
+			"Test valid query with unquoted offset",
+			database.MySQL,
+			args{
+				context.Background(),
+				"SELECT * FROM table OFFSET ?<offset|unquoted>",
+				&paginationContext{
+					Offset: 123,
+				},
+			},
+			"SELECT * FROM table OFFSET 123",
+			nil,
+			true,
+			false,
+		},
+		{
+			"Test valid query with unquoted cursor",
+			database.MySQL,
+			args{
+				context.Background(),
+				"SELECT * FROM table WHERE id > ?<cursor|unquoted>",
+				&paginationContext{
+					Cursor: "abc123",
+				},
+			},
+			"SELECT * FROM table WHERE id > abc123",
+			nil,
+			true,
+			false,
+		},
+		{
+			"Test valid query with mixed quoted and unquoted options",
+			database.MySQL,
+			args{
+				context.Background(),
+				"SELECT * FROM table WHERE id > ?<cursor> LIMIT ?<limit|unquoted>",
+				&paginationContext{
+					Cursor: "abc123",
+					Limit:  10,
+				},
+			},
+			"SELECT * FROM table WHERE id > ? LIMIT 11",
+			[]interface{}{"abc123"},
+			true,
+			false,
+		},
+		{
+			"Test invalid unquoted option",
+			database.MySQL,
+			args{
+				context.Background(),
+				"SELECT * FROM table LIMIT ?<limit|invalid>",
+				&paginationContext{
+					Limit: 10,
 				},
 			},
 			"",
