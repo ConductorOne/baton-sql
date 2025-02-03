@@ -3,7 +3,7 @@ module github.com/conductorone/baton-sql
 go 1.23.4
 
 require (
-	github.com/conductorone/baton-sdk v0.2.65
+	github.com/conductorone/baton-sdk v0.2.66
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/cel-go v0.23.0
