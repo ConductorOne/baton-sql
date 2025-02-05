@@ -107,9 +107,14 @@ type EntitlementMapping struct {
 }
 
 type EntitlementProvisioning struct {
-	Grant  []string          `yaml:"grant,omitempty" json:"grant,omitempty"`
-	Revoke []string          `yaml:"revoke,omitempty" json:"revoke,omitempty"`
-	Vars   map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+	Grant  *EntitlementProvisioningQueries `yaml:"grant,omitempty" json:"grant,omitempty"`
+	Revoke *EntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
+	Vars   map[string]string               `yaml:"vars,omitempty" json:"vars,omitempty"`
+}
+
+type EntitlementProvisioningQueries struct {
+	NoTransaction bool     `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
+	Queries       []string `yaml:"queries,omitempty" json:"queries,omitempty"`
 }
 
 type GrantsQuery struct {

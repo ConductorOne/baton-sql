@@ -2,6 +2,7 @@ package bsql
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
@@ -24,6 +25,10 @@ const (
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
 )
+
+type executor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
 
 type paginationContext struct {
 	Strategy   string
@@ -281,22 +286,27 @@ func (s *SQLSyncer) prepareProvisioningQuery(ctx context.Context, query string, 
 	return updatedQuery, qArgs, nil
 }
 
-func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string, vars map[string]any) error {
+func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string, vars map[string]any, useTx bool) error {
 	l := ctxzap.Extract(ctx)
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
+	var committed bool
+	var executor executor = s.db
 
-	committed := false
-	defer func() {
-		if !committed {
-			if err := tx.Rollback(); err != nil {
-				l.Error("failed to rollback provisioning queries", zap.Error(err))
-			}
+	if useTx {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
 		}
-	}()
+		executor = tx
+
+		defer func() {
+			if !committed {
+				if err := tx.Rollback(); err != nil {
+					l.Error("failed to rollback provisioning queries", zap.Error(err))
+				}
+			}
+		}()
+	}
 
 	for _, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(ctx, q, vars)
@@ -304,7 +314,7 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 			return err
 		}
 
-		result, err := tx.ExecContext(ctx, q, qArgs...)
+		result, err := executor.ExecContext(ctx, q, qArgs...)
 		if err != nil {
 			return err
 		}
@@ -318,13 +328,20 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 			return errors.New("query affected more than one row, ending and rolling back")
 		}
 
-		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected))
+		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
 	}
-	err = tx.Commit()
-	if err != nil {
-		return err
+
+	if useTx {
+		tx, ok := executor.(*sql.Tx)
+		if !ok {
+			return errors.New("transactional executor required")
+		}
+		err := tx.Commit()
+		if err != nil {
+			return err
+		}
+		committed = true
 	}
-	committed = true
 
 	return nil
 }

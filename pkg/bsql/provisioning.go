@@ -54,7 +54,11 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		return nil, errors.New("provisioning is not enabled for this connector")
 	}
 
-	if len(provisioningConfig.Grant) == 0 {
+	if provisioningConfig.Grant == nil {
+		return nil, errors.New("no grant config found for entitlement")
+	}
+
+	if len(provisioningConfig.Grant.Queries) == 0 {
 		return nil, errors.New("no grant config found for entitlement")
 	}
 
@@ -63,7 +67,11 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		return nil, err
 	}
 
-	err = s.runProvisioningQueries(ctx, provisioningConfig.Grant, provisioningVars)
+	useTx := true
+	if provisioningConfig.Grant.NoTransaction {
+		useTx = false
+	}
+	err = s.runProvisioningQueries(ctx, provisioningConfig.Grant.Queries, provisioningVars, useTx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +102,11 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 		return nil, errors.New("provisioning is not enabled for this connector")
 	}
 
-	if len(provisioningConfig.Revoke) == 0 {
+	if provisioningConfig.Revoke == nil {
+		return nil, errors.New("no revoke config found for entitlement")
+	}
+
+	if len(provisioningConfig.Revoke.Queries) == 0 {
 		return nil, errors.New("no revoke config found for entitlement")
 	}
 
@@ -103,7 +115,12 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 		return nil, err
 	}
 
-	err = s.runProvisioningQueries(ctx, provisioningConfig.Revoke, provisioningVars)
+	useTx := true
+	if provisioningConfig.Revoke.NoTransaction {
+		useTx = false
+	}
+
+	err = s.runProvisioningQueries(ctx, provisioningConfig.Revoke.Queries, provisioningVars, useTx)
 	if err != nil {
 		return nil, err
 	}
