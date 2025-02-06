@@ -1,25 +1,32 @@
-![Baton Logo](./docs/images/baton-logo.png)
-
 # `baton-sql` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-sql.svg)](https://pkg.go.dev/github.com/conductorone/baton-sql) ![main ci](https://github.com/conductorone/baton-sql/actions/workflows/main.yaml/badge.svg)
 
 `baton-sql` is a connector for built using the [Baton SDK](https://github.com/conductorone/baton-sdk).
 
-Check out [Baton](https://github.com/conductorone/baton) to learn more the project in general.
+## Overview
 
-# Contributing, Support and Issues
+`baton-sql` is a connector that enables you to sync identities, resources, and permissions from SQL databases. It provides a flexible configuration system that allows you to map the results of database queries to resources and entitlements.
 
-We started Baton because we were tired of taking screenshots and manually
-building spreadsheets. We welcome contributions, and ideas, no matter how
-small&mdash;our goal is to make identity and permissions sprawl less painful for
-everyone. If you have questions, problems, or ideas: Please open a GitHub Issue!
+## Supported Database Engines
 
-See [CONTRIBUTING.md](https://github.com/ConductorOne/baton/blob/main/CONTRIBUTING.md) for more details.
+- MySQL
+- Microsoft SQL Server
+- Oracle
+- PostgreSQL (soon)
+- SQLite (soon)
 
-# `baton-sql` Command Line Usage
+## Configuration
 
+The connector is configured using a YAML file that defines:
+
+- Database connection details via DSN or individual connection parameters
+- Resource types (e.g. users, groups, roles) mapped to database tables/queries
+- Entitlements that can be granted to resources
+- Provisioning actions for granting/revoking entitlements
+
+See examples in the [examples](https://github.com/ConductorOne/baton-sql/tree/main/examples) directory.
+
+## `baton-sql` Command Line Usage
 ```
-baton-sql
-
 Usage:
   baton-sql [flags]
   baton-sql [command]
@@ -44,3 +51,14 @@ Flags:
 
 Use "baton-sql [command] --help" for more information about a command.
 ```
+
+# Contributing, Support and Issues
+
+We started Baton because we were tired of taking screenshots and manually
+building spreadsheets. We welcome contributions, and ideas, no matter how
+small&mdash;our goal is to make identity and permissions sprawl less painful for
+everyone. If you have questions, problems, or ideas: Please open a GitHub Issue!
+
+Check out [Baton](https://github.com/conductorone/baton) to learn more the project in general.
+
+See [CONTRIBUTING.md](https://github.com/ConductorOne/baton/blob/main/CONTRIBUTING.md) for more details.

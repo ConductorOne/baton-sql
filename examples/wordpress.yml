@@ -1,12 +1,19 @@
 ---
+# Application name for the Wordpress connector.
 app_name: Wordpress
+
+# Connection configuration using a MySQL DSN.
+# This DSN string is constructed with environment variables to supply the necessary connection parameters.
 connect:
   dsn: "mysql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?charset=utf8mb4&parseTime=True&loc=Local"
+
 resource_types:
   user:
     name: "User"
     description: "A user within the wordpress system"
     list:
+      # SQL query to fetch user details from the WordPress database.
+      # Tokens ?<Limit> and ?<Offset> are placeholders for pagination values.
       query: |
         SELECT
           u.ID AS user_id,
@@ -17,27 +24,34 @@ resource_types:
         ORDER BY user_id ASC
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
-        id: ".user_id"
-        display_name: ".username"
-        description: ".email"
+        # Mapping configuration using CEL (Common Expression Language).
+        # CEL is a lightweight, expressive language used here to transform and reference data.
+        # The dot syntax, such as ".user_id", is used to reference a specific column from the SQL query results.
+        id: ".user_id" # CEL: Retrieves the value from the "user_id" column of the query result.
+        display_name: ".username" # CEL: Retrieves the username from the "username" column.
+        description: ".email" # CEL: Uses the "email" column value for the description.
         traits:
           user:
             emails:
-            - ".email"
-            status: "active"
-            status_details: "'detailed status'"
-            login: ".username"
+            - ".email" # CEL: References the "email" column; the dot indicates direct column access.
+            status: "active" # A static value indicating the user's status.
+            status_details: "'detailed status'" # Static string; FIXME: Confirm if this should dynamically adjust based on data.
+            login: ".username" # CEL: References the "username" column for the login field.
             profile:
-              name: ".username"
-              created_at: ".created_at"
+              name: ".username" # CEL: Uses the "username" column value to assign a profile name.
+              created_at: ".created_at" # CEL: Uses the "created_at" column value from the SQL result.
       pagination:
-        strategy: "offset"
+        strategy: "offset" # Offset-based pagination: retrieves records by skipping a specified number.
         primary_key: "user_id"
+          # The key column used to uniquely identify records for pagination.
+          # FIXME: Verify that 'user_id' is indeed the intended primary key.
 
   role:
     name: "Role"
     description: "A role within the wordpress system that can be assigned to a user"
     list:
+      # SQL query to fetch distinct role records from the wp_usermeta table.
+      # Token ?<Cursor> is used for cursor-based pagination and will be replaced with the value of the last row_id from the previous page.
       query: |
         SELECT DISTINCT
           um.umeta_id AS row_id,
@@ -49,38 +63,43 @@ resource_types:
         ORDER BY row_id ASC
         LIMIT ?<Limit>
       map:
-        id: "phpDeserializeStringArray(string(.role_name))[0]"
-        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0])"
-        description: "'Wordpress role for user'"
+        # CEL expressions are used to process the query results.
+        # The dot syntax (e.g., ".role_name") references the corresponding column from the SQL row.
+        id: "phpDeserializeStringArray(string(.role_name))[0]" # CEL: Deserializes the 'role_name' column and selects the first element.
+        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0])" # CEL: Formats the deserialized role name into title case.
+        description: "'Wordpress role for user'" # Static description for the role.
         traits:
           role:
-            profile:
+            profile: # Placeholder for further role profile details if needed.
       pagination:
-        strategy: "cursor"
-        primary_key: "row_id"
+        strategy: "cursor" # Cursor-based pagination: uses a token to mark the position for fetching subsequent records.
+        primary_key: "row_id" # Unique column used for maintaining pagination state.
 
     static_entitlements:
     - id: "member"
-      display_name: "resource.DisplayName + ' Role Member'"
-      description: "'Member of the ' + resource.DisplayName + ' role'"
+      # Display name and description are constructed via CEL expressions to incorporate resource details.
+      display_name: "resource.DisplayName + ' Role Member'" # CEL: Concatenates the resource's display name with ' Role Member'.
+      description: "'Member of the ' + resource.DisplayName + ' role'" # CEL: Dynamically builds a description using the resource's display name.
       purpose: "assignment"
       grantable_to:
-      - "user"
+      - "user" # This entitlement is applicable to resources of type 'user'.
       provisioning:
         vars:
-          principal_id: principal.ID
-          role_string: "phpSerializeStringArray([resource.ID])"
+          principal_id: principal.ID # CEL: Extracts the principal's ID for use in SQL queries.
+          role_string: "phpSerializeStringArray([resource.ID])" # CEL: Serializes the resource's ID into an array format suitable for SQL operations.
         grant:
-        - |
-          DELETE FROM wp_usermeta
-          WHERE user_id = ?<principal_id> AND meta_key = 'wp_capabilities'
-        - |
-          INSERT INTO wp_usermeta (user_id, meta_key, meta_value)
-          VALUES (?<principal_id>, 'wp_capabilities', ?<role_string>)
+          queries:
+          - |
+            DELETE FROM wp_usermeta
+            WHERE user_id = ?<principal_id> AND meta_key = 'wp_capabilities'
+          - |
+            INSERT INTO wp_usermeta (user_id, meta_key, meta_value)
+            VALUES (?<principal_id>, 'wp_capabilities', ?<role_string>)
         revoke:
-        - |
-          DELETE FROM wp_usermeta
-          WHERE user_id = ?<principal_id> AND meta_key = 'wp_capabilities'
+          queries:
+          - |
+            DELETE FROM wp_usermeta
+            WHERE user_id = ?<principal_id> AND meta_key = 'wp_capabilities'
 
     grants:
     - query: |
@@ -93,9 +112,16 @@ resource_types:
         LIMIT ?<Limit> OFFSET ?<Offset>
       map:
       - skip_if: "(size(phpDeserializeStringArray(string(.role_name))) < 1 || phpDeserializeStringArray(string(.role_name))[0] != resource.ID)"
-        principal_id: ".user_id"
-        principal_type: "user"
-        entitlement_id: "member"
+        # CEL Expression Explanation:
+        # This condition uses CEL to determine whether to skip processing the record.
+        # It checks if the deserialized array from the "role_name" column is empty or if its first element does not match the resource's ID.
+        # The dot syntax (e.g., ".role_name") is used to pull the value of the "role_name" column from the SQL result directly.
+        # FIXME: Review the CEL logic to ensure it filters roles as intended.
+        principal_id: ".user_id" # CEL: Retrieves the "user_id" value from the SQL result.
+        principal_type: "user" # Specifies that the principal type is 'user'.
+        entitlement_id: "member" # Associates this grant with the 'member' entitlement.
       pagination:
-        strategy: "offset"
+        strategy: "offset" # Uses offset-based pagination for processing grants.
         primary_key: "user_id"
+          # Pagination key referencing the unique user identifier.
+          # FIXME: Confirm that 'user_id' is the appropriate key for grants pagination.

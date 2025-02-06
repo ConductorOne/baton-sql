@@ -1,0 +1,159 @@
+---
+# Connector Configuration Reference
+# ===============================
+# This is a reference configuration demonstrating all available options
+# and their purposes in a connector configuration file.
+
+# The application name that identifies this connector
+app_name: Example Application
+
+# Connection Configuration
+# ----------------------
+# Specifies how to connect to the data source. Supports various connection methods.
+connect:
+  # Database connection string (DSN) with environment variable interpolation
+  dsn: "mysql://${DB_USER}:${DB_PASS}@${DB_HOST}:3306/${DB_NAME}?parseTime=true"
+# If your database username or password includes characters that require URL encoding,
+# you can specify them as separate options instead of embedding them directly in the DSN.
+# Environment variables are expanded.
+# For example, you might include:
+#   username: my_username
+#   password: my_secure_password
+#
+# This allows the connector to handle proper URL encoding during DSN construction.
+
+# Resource Types
+# -------------
+# Defines the resources that can be synchronized from the data source.
+# Each resource type represents a distinct entity type (e.g., users, groups, roles).
+resource_types:
+
+  # Example User Resource
+  # -------------------
+  user:
+    name: "User" # Display name for this resource type
+    description: "Represents a user account in the system"
+
+    # List Configuration
+    # ----------------
+    # Defines how to retrieve a list of resources
+    list:
+      # SQL query to fetch resources. Supports multiple query types:
+      # - Direct SQL queries
+      # - Stored procedure calls
+      # - Complex joins and subqueries
+      query: |
+        SELECT 
+          id,
+          username,
+          email,
+          created_at,
+          status,
+          department
+        FROM users
+        WHERE status = 'active'
+        AND id > ?<Cursor>
+        ORDER BY id ASC
+        LIMIT ?<Limit>
+
+      # Mapping Configuration
+      # -------------------
+      # Defines how to transform raw data into standardized resource objects
+      map:
+        # Required Fields
+        # --------------
+        # These fields are required for all resources
+        id: ".id" # Maps the 'id' column to the resource ID
+        display_name: ".username" # Human-readable name
+        description: "string(.department) + ' department user'" # Can use CEL expressions
+
+        # Optional Traits
+        # --------------
+        # Custom attributes specific to this resource type
+        traits:
+          user:
+            # The trait name defines the schema
+            emails:
+            # Array fields
+            - ".email" # Direct field mapping
+            - "lowercase(.email)" # CEL transformation
+            status: ".status" # Simple field mapping
+            profile:
+              department: ".department"
+              joined_date: ".created_at"
+              # Complex CEL transformation example
+              full_name: "titleCase(.first_name) + ' ' + titleCase(.last_name)"
+
+      # Pagination Configuration
+      # ----------------------
+      # Defines how to handle large result sets
+      pagination:
+        strategy: "cursor" # Options: "cursor", "offset"
+        primary_key: "id" # Column used for pagination tracking
+
+    # Static Entitlements
+    # ------------------
+    # Pre-defined permissions that can be granted
+    static_entitlements:
+    - id: "access" # Unique identifier for this entitlement
+      display_name: "Basic Access"
+      description: "Provides basic access to the application"
+      purpose: "access" # Purpose: "access", "assignment", "permission"
+      grantable_to:
+      # Resource types that can receive this entitlement
+      - "user"
+      - "service_account"
+      # Provisioning Configuration
+      # ------------------------
+      # Defines how to implement entitlement changes
+      provisioning:
+        vars:
+          # Variables available in provisioning queries
+          user_id: "principal.ID"
+          access_level: "'basic'"
+
+        # Grant Operations
+        # ---------------
+        grant:
+          # SQL statements to execute when granting
+          queries:
+          - |
+            INSERT INTO user_access (user_id, level)
+            VALUES (?<user_id>, ?<access_level>)
+
+        # Revoke Operations
+        # ----------------
+        revoke:
+          # SQL statements to execute when revoking
+          queries:
+          - |
+            DELETE FROM user_access
+            WHERE user_id = ?<user_id>
+    # Grants Query Configuration
+    # ------------------------
+    # Defines how to discover existing entitlements
+    grants:
+    - query: |
+        SELECT 
+          user_id,
+          access_level,
+          granted_at
+        FROM user_access
+        LIMIT ?<Limit> OFFSET ?<Offset>
+
+      # Grant Mapping
+      # ------------
+      # Defines how to interpret grant query results
+      map:
+      - skip_if: ".access_level != 'basic'" # CEL condition to filter results
+        principal_id: ".user_id"
+        principal_type: "user"
+        entitlement_id: "access"
+      # Grants Pagination
+      # ----------------
+      pagination:
+        strategy: "offset"
+        primary_key: "user_id"
+
+# Additional resource types would follow the same pattern
+# Example: groups, roles, applications, etc.
