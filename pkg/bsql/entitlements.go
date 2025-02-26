@@ -79,7 +79,14 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 
 	var ret []*v2.Entitlement
 
-	npt, err := s.runQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+	inputs := s.env.SyncInputsWithResource(nil, resource)
+
+	queryVars, err := s.prepareQueryVars(ctx, inputs, s.config.Entitlements.Vars)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	npt, err := s.runQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		for _, mapping := range s.config.Entitlements.Map {
 			r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
 			if err != nil {
