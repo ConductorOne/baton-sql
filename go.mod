@@ -5,10 +5,12 @@ go 1.23
 require (
 	github.com/conductorone/baton-sdk v0.2.65
 	github.com/elliotchance/phpserialize v1.4.0
+	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/cel-go v0.23.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/microsoft/go-mssqldb v1.8.0
+	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/sijms/go-ora/v2 v2.8.23
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
@@ -95,7 +97,7 @@ require (
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/oauth2 v0.25.0 // indirect
-	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250124145028-65684f501c47 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250124145028-65684f501c47 // indirect
