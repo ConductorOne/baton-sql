@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/spf13/cobra"
@@ -23,16 +25,36 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/field"
 	"github.com/conductorone/baton-sdk/pkg/logging"
 	"github.com/conductorone/baton-sdk/pkg/types"
+	"github.com/conductorone/baton-sdk/pkg/uotel"
 )
 
-type GetConnectorFunc func(context.Context, *viper.Viper) (types.ConnectorServer, error)
+type GetConnectorFunc[T any] func(context.Context, *T) (types.ConnectorServer, error)
 
-func MakeMainCommand(
+func makeGenericConfiguration[T any](v *viper.Viper) (*T, error) {
+	// Create an instance of the struct type T using reflection
+	var config T // Create a zero-value instance of T
+	// Ensure T is a struct (or pointer to struct)
+	tType := reflect.TypeOf(config)
+	if tType == reflect.TypeOf(viper.Viper{}) {
+		return any(v).(*T), nil
+	}
+	if tType.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("T must be a struct, but got %s", tType.Kind())
+	}
+	// Unmarshal into the config struct
+	err := v.Unmarshal(&config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+	return &config, nil
+}
+
+func MakeMainCommand[T any](
 	ctx context.Context,
 	name string,
 	v *viper.Viper,
 	confschema field.Configuration,
-	getconnector GetConnectorFunc,
+	getconnector GetConnectorFunc[T],
 	opts ...connectorrunner.Option,
 ) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
@@ -57,6 +79,17 @@ func MakeMainCommand(
 
 		l := ctxzap.Extract(runCtx)
 
+		otelShutdown, err := uotel.InitOtel(context.Background(), v.GetString("otel-collector-endpoint"), name)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			err := otelShutdown(context.Background())
+			if err != nil {
+				l.Error("error shutting down otel", zap.Error(err))
+			}
+		}()
+
 		if isService() {
 			l.Debug("running as service", zap.String("name", name))
 			runCtx, err = runService(runCtx, name)
@@ -68,11 +101,6 @@ func MakeMainCommand(
 
 		// validate required fields and relationship constraints
 		if err := field.Validate(confschema, v); err != nil {
-			return err
-		}
-
-		c, err := getconnector(runCtx, v)
-		if err != nil {
 			return err
 		}
 
@@ -176,6 +204,16 @@ func MakeMainCommand(
 			opts = append(opts, connectorrunner.WithTempDir(v.GetString("c1z-temp-dir")))
 		}
 
+		t, err := makeGenericConfiguration[T](v)
+		if err != nil {
+			return fmt.Errorf("failed to make configuration: %w", err)
+		}
+
+		c, err := getconnector(runCtx, t)
+		if err != nil {
+			return err
+		}
+
 		// NOTE(shackra): top-most in the execution flow for connectors
 		r, err := connectorrunner.NewConnectorRunner(runCtx, c, opts...)
 		if err != nil {
@@ -194,12 +232,12 @@ func MakeMainCommand(
 	}
 }
 
-func MakeGRPCServerCommand(
+func MakeGRPCServerCommand[T any](
 	ctx context.Context,
 	name string,
 	v *viper.Viper,
 	confschema field.Configuration,
-	getconnector GetConnectorFunc,
+	getconnector GetConnectorFunc[T],
 ) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		// NOTE(shackra): bind all the flags (persistent and
@@ -221,12 +259,32 @@ func MakeGRPCServerCommand(
 			return err
 		}
 
+		l := ctxzap.Extract(runCtx)
+
+		otelShutdown, err := uotel.InitOtel(
+			context.Background(),
+			v.GetString("otel-collector-endpoint"),
+			fmt.Sprintf("%s-server", name),
+		)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			err := otelShutdown(context.Background())
+			if err != nil {
+				l.Error("error shutting down otel", zap.Error(err))
+			}
+		}()
+
 		// validate required fields and relationship constraints
 		if err := field.Validate(confschema, v); err != nil {
 			return err
 		}
-
-		c, err := getconnector(runCtx, v)
+		t, err := makeGenericConfiguration[T](v)
+		if err != nil {
+			return fmt.Errorf("failed to make configuration: %w", err)
+		}
+		c, err := getconnector(runCtx, t)
 		if err != nil {
 			return err
 		}
@@ -312,12 +370,12 @@ func MakeGRPCServerCommand(
 	}
 }
 
-func MakeCapabilitiesCommand(
+func MakeCapabilitiesCommand[T any](
 	ctx context.Context,
 	name string,
 	v *viper.Viper,
 	confschema field.Configuration,
-	getconnector GetConnectorFunc,
+	getconnector GetConnectorFunc[T],
 ) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		// NOTE(shackra): bind all the flags (persistent and
@@ -343,8 +401,12 @@ func MakeCapabilitiesCommand(
 		if err := field.Validate(confschema, v); err != nil {
 			return err
 		}
+		t, err := makeGenericConfiguration[T](v)
+		if err != nil {
+			return fmt.Errorf("failed to make configuration: %w", err)
+		}
 
-		c, err := getconnector(runCtx, v)
+		c, err := getconnector(runCtx, t)
 		if err != nil {
 			return err
 		}
@@ -379,6 +441,26 @@ func MakeCapabilitiesCommand(
 			return err
 		}
 
+		return nil
+	}
+}
+
+func MakeConfigSchemaCommand[T any](
+	ctx context.Context,
+	name string,
+	v *viper.Viper,
+	confschema field.Configuration,
+	getconnector GetConnectorFunc[T],
+) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		pb, err := json.Marshal(&confschema)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprint(os.Stdout, string(pb))
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 }
