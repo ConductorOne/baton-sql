@@ -221,6 +221,9 @@ github.com/dustin/go-humanize
 # github.com/elliotchance/phpserialize v1.4.0
 ## explicit
 github.com/elliotchance/phpserialize
+# github.com/ennyjfrick/ruleguard-logfatal v0.0.2
+## explicit; go 1.23
+github.com/ennyjfrick/ruleguard-logfatal
 # github.com/envoyproxy/protoc-gen-validate v1.2.1
 ## explicit; go 1.21.1
 github.com/envoyproxy/protoc-gen-validate/validate
@@ -382,6 +385,10 @@ github.com/power-devops/perfstat
 # github.com/pquerna/xjwt v0.3.0
 ## explicit; go 1.23
 github.com/pquerna/xjwt
+# github.com/quasilyte/go-ruleguard/dsl v0.3.22
+## explicit; go 1.15
+github.com/quasilyte/go-ruleguard/dsl
+github.com/quasilyte/go-ruleguard/dsl/types
 # github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec
 ## explicit; go 1.12
 github.com/remyoudompheng/bigfft
@@ -533,7 +540,7 @@ golang.org/x/oauth2/clientcredentials
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
-# golang.org/x/sync v0.10.0
+# golang.org/x/sync v0.11.0
 ## explicit; go 1.18
 golang.org/x/sync/semaphore
 # golang.org/x/sys v0.29.0
