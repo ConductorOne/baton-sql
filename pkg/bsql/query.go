@@ -273,6 +273,14 @@ func (s *SQLSyncer) prepareProvisioningQuery(ctx context.Context, query string, 
 		}
 
 		v, ok := vars[opts.Key]
+
+		// If not found, check if it's in the input map
+		if !ok && vars["input"] != nil {
+			if inputMap, isMap := vars["input"].(map[string]any); isMap {
+				v, ok = inputMap[opts.Key]
+			}
+		}
+
 		if !ok {
 			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
 			return token
@@ -359,6 +367,14 @@ func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any,
 	}
 
 	for k, v := range vars {
+		// Check if the value is a direct reference to an input field
+		// TODO: (bema) This feels like a temp fix because I am not sure if the Evaluate works properly or not
+		if inputVal, exists := inputs[v]; exists {
+			ret[k] = inputVal
+			continue
+		}
+
+		// Otherwise, evaluate it as a CEL expression
 		out, err := s.env.Evaluate(ctx, v, inputs)
 		if err != nil {
 			return nil, err

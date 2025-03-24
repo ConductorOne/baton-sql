@@ -38,13 +38,21 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 			return nil, err
 		}
 
-		rv := &SQLSyncer{
-			resourceType: rt,
-			config:       rtConfig,
-			db:           db,
-			dbEngine:     dbEngine,
-			env:          celEnv,
-			fullConfig:   c,
+		var rv connectorbuilder.ResourceSyncer
+
+		// userSyncer contains CreateAccount && CreateAccountCapabilityDetails functions
+		// we need this so that baton-sdk can properly set up AccountManager
+		if rt.Traits[0] == v2.ResourceType_TRAIT_USER {
+			rv = newUserSyncer(rt, rtConfig, db, dbEngine, celEnv, c)
+		} else {
+			rv = &SQLSyncer{
+				resourceType: rt,
+				config:       rtConfig,
+				db:           db,
+				dbEngine:     dbEngine,
+				env:          celEnv,
+				fullConfig:   c,
+			}
 		}
 		ret = append(ret, rv)
 	}

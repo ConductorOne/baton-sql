@@ -64,7 +64,7 @@ resource_types:
           disallowed_characters: "!@#$%^&*()_+"
       validate:
         vars:
-          email: "input.email"
+          email: "email"
         query: |
           SELECT
             u.ID AS user_id,
