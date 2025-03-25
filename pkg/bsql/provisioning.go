@@ -224,7 +224,6 @@ func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *Ac
 
 		ret = r
 		return false, nil
-
 	})
 	if err != nil {
 		return nil, false, err
