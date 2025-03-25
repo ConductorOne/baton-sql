@@ -85,11 +85,11 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, userResourceType.AccountProvisioning.Credentials.NoPassword)
 				require.True(t, userResourceType.AccountProvisioning.Credentials.NoPassword.Preferred)
 
-				//// Validate random_password config
-				//require.NotNil(t, userResourceType.AccountProvisioning.Credentials.RandomPassword)
-				//require.Equal(t, 128, userResourceType.AccountProvisioning.Credentials.RandomPassword.MaxLength)
-				//require.Equal(t, 12, userResourceType.AccountProvisioning.Credentials.RandomPassword.MinLength)
-				//require.Equal(t, "!@#$%^&*()_+", userResourceType.AccountProvisioning.Credentials.RandomPassword.DisallowedCharacters)
+				// Validate random_password config
+				// require.NotNil(t, userResourceType.AccountProvisioning.Credentials.RandomPassword)
+				// require.Equal(t, 128, userResourceType.AccountProvisioning.Credentials.RandomPassword.MaxLength)
+				// require.Equal(t, 12, userResourceType.AccountProvisioning.Credentials.RandomPassword.MinLength)
+				// require.Equal(t, "!@#$%^&*()_+", userResourceType.AccountProvisioning.Credentials.RandomPassword.DisallowedCharacters)
 
 				// Validate account creation configuration
 				require.NotNil(t, userResourceType.AccountProvisioning.Create)
@@ -99,7 +99,7 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, userResourceType.AccountProvisioning.Create.Vars)
 				require.Equal(t, "input.username", userResourceType.AccountProvisioning.Create.Vars["username"])
 				require.Equal(t, "input.email", userResourceType.AccountProvisioning.Create.Vars["email"])
-				//require.Equal(t, "credentials.password", userResourceType.AccountProvisioning.Create.Vars["password"])
+				// require.Equal(t, "credentials.password", userResourceType.AccountProvisioning.Create.Vars["password"])
 
 				// Validate creation queries
 				require.Len(t, userResourceType.AccountProvisioning.Create.Queries, 1)

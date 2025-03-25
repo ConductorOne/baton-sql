@@ -121,6 +121,11 @@ func (s *userSyncer) CreateAccount(
 
 	var ptds []*v2.PlaintextData
 
+	inputs, err := s.prepareSchemaVars(ctx, accountProvisioning, accountInfo)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	// only support no password for now
 	switch credentialOptions.Options.(type) {
 	case *v2.CredentialOptions_NoPassword_:
@@ -128,22 +133,12 @@ func (s *userSyncer) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("unsupported credential options %v", credentialOptions)
 	}
 
-	inputs, err := s.prepareSchemaVars(ctx, accountProvisioning, accountInfo)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	provisioningVars, err := s.env.AccountProvisioningInputs(inputs)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
 	useTx := true
 	if accountProvisioning.Create.NoTransaction {
 		useTx = false
 	}
 
-	err = s.SQLSyncer.runProvisioningQueries(ctx, accountProvisioning.Create.Queries, provisioningVars, useTx)
+	err = s.SQLSyncer.runProvisioningQueries(ctx, accountProvisioning.Create.Queries, inputs, useTx)
 	if err != nil {
 		return nil, nil, nil, err
 	}

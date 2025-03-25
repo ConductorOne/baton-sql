@@ -274,13 +274,6 @@ func (s *SQLSyncer) prepareProvisioningQuery(ctx context.Context, query string, 
 
 		v, ok := vars[opts.Key]
 
-		// If not found, check if it's in the input map
-		if !ok && vars["input"] != nil {
-			if inputMap, isMap := vars["input"].(map[string]any); isMap {
-				v, ok = inputMap[opts.Key]
-			}
-		}
-
 		if !ok {
 			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
 			return token
