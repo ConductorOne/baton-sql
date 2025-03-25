@@ -9,7 +9,6 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
-	"github.com/conductorone/baton-sdk/pkg/crypto"
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -116,33 +115,23 @@ func (s *userSyncer) CreateAccount(
 
 	l.Debug("creating account", zap.String("resource_type_id", resourceTypeID))
 
-	// TODO: Implement account creation
-	// 1. Validate inputs
-	// 2. Read schema
-	// 3. Parse account info inputs using schema
-	// 4. Prepare account provisioning vars
-	// 5. Run provisioning queries
-	// 6. Return account info and credentials
-
 	if accountInfo == nil || accountInfo.Profile == nil {
 		return nil, nil, nil, errors.New("account info and profile are required")
+	}
+
+	var ptds []*v2.PlaintextData
+
+	// only support no password for now
+	switch credentialOptions.Options.(type) {
+	case *v2.CredentialOptions_NoPassword_:
+	default:
+		return nil, nil, nil, fmt.Errorf("unsupported credential options %v", credentialOptions)
 	}
 
 	inputs, err := s.prepareSchemaVars(ctx, accountProvisioning, accountInfo)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	plainTextPassword, err := crypto.GeneratePassword(credentialOptions)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	ptd := &v2.PlaintextData{
-		Name:  "password",
-		Bytes: []byte(plainTextPassword),
-	}
-
-	inputs["password"] = []byte("")
 
 	provisioningVars, err := s.env.AccountProvisioningInputs(inputs)
 	if err != nil {
@@ -172,5 +161,5 @@ func (s *userSyncer) CreateAccount(
 		Resource: accountResource,
 	}
 
-	return car, []*v2.PlaintextData{ptd}, nil, nil
+	return car, ptds, nil, nil
 }

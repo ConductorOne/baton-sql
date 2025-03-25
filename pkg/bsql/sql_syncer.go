@@ -40,9 +40,8 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 
 		var rv connectorbuilder.ResourceSyncer
 
-		// userSyncer contains CreateAccount && CreateAccountCapabilityDetails functions
-		// we need this so that baton-sdk can properly set up AccountManager
-		if rt.Traits[0] == v2.ResourceType_TRAIT_USER {
+		// If the resource type has account provisioning, use for account provisioning
+		if rtConfig.AccountProvisioning != nil {
 			rv = newUserSyncer(rt, rtConfig, db, dbEngine, celEnv, c)
 		} else {
 			rv = &SQLSyncer{
