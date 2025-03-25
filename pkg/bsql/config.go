@@ -298,19 +298,19 @@ type GrantMapping struct {
 	Annotations *Annotations `yaml:"annotations" json:"annotations"`
 }
 
-// AccountProvisioning defines the configuration for provisioning new accounts
+// AccountProvisioning defines the configuration for provisioning new accounts.
 type AccountProvisioning struct {
-	// Schema defines the required fields for account creation
+	// Schema defines the required fields for account creation.
 	Schema []*AccountProvisioningField `yaml:"schema" json:"schema"`
-	// Credentials defines the supported credential handlers
+	// Credentials defines the supported credential handlers.
 	Credentials *AccountCredentials `yaml:"credentials" json:"credentials"`
-	// Create defines the SQL queries and configuration for creating new accounts
+	// Create defines the SQL queries and configuration for creating new accounts.
 	Create *AccountCreationConfig `yaml:"create" json:"create"`
-	// Validate defines the SQL queries and configuration for validating new accounts
+	// Validate defines the SQL queries and configuration for validating new accounts.
 	Validate *AccountValidationConfig `yaml:"validate" json:"validate"`
 }
 
-// AccountProvisioningField defines a field required for account provisioning
+// AccountProvisioningField defines a field required for account provisioning.
 type AccountProvisioningField struct {
 	Name        string `yaml:"name" json:"name"`
 	Description string `yaml:"description" json:"description"`
@@ -319,23 +319,23 @@ type AccountProvisioningField struct {
 	Required    bool   `yaml:"required" json:"required"`
 }
 
-// AccountCredentials defines the supported credential handlers and their configurations
+// AccountCredentials defines the supported credential handlers and their configurations.
 type AccountCredentials struct {
 	NoPassword     *NoPasswordConfig     `yaml:"no_password,omitempty" json:"no_password,omitempty"`
 	RandomPassword *RandomPasswordConfig `yaml:"random_password,omitempty" json:"random_password,omitempty"`
 }
 
-// BaseCredentialConfig contains fields common to all credential handlers
+// BaseCredentialConfig contains fields common to all credential handlers.
 type BaseCredentialConfig struct {
 	Preferred bool `yaml:"preferred" json:"preferred"`
 }
 
-// NoPasswordConfig defines configuration for accounts that don't require passwords
+// NoPasswordConfig defines configuration for accounts that don't require passwords.
 type NoPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
 }
 
-// RandomPasswordConfig defines configuration for random password generation
+// RandomPasswordConfig defines configuration for random password generation.
 type RandomPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
 	MaxLength            int    `yaml:"max_length" json:"max_length"`
@@ -343,22 +343,22 @@ type RandomPasswordConfig struct {
 	DisallowedCharacters string `yaml:"disallowed_characters" json:"disallowed_characters"`
 }
 
-// AccountValidationConfig defines the configuration for validating new accounts
+// AccountValidationConfig defines the configuration for validating new accounts.
 type AccountValidationConfig struct {
-	// Vars provides variables that can be used within account validation SQL queries
+	// Vars provides variables that can be used within account validation SQL queries.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
-	// Queries is a list of SQL statements to execute for account validation
+	// Queries is a list of SQL statements to execute for account validation.
 	Query string `yaml:"query" json:"queries"`
 }
 
-// AccountCreationConfig defines the configuration for creating new accounts
+// AccountCreationConfig defines the configuration for creating new accounts.
 type AccountCreationConfig struct {
-	// Vars provides variables that can be used within account creation SQL queries
-	// Variables can reference input fields via 'input.fieldname' and credential data via 'credentials.fieldname'
+	// Vars provides variables that can be used within account creation SQL queries.
+	// Variables can reference input fields via 'input.fieldname' and credential data via 'credentials.fieldname'.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
-	// Queries is a list of SQL statements to execute for account creation
+	// Queries is a list of SQL statements to execute for account creation.
 	Queries []string `yaml:"queries" json:"queries"`
-	// NoTransaction indicates whether the creation queries should be executed without a transaction
+	// NoTransaction indicates whether the creation queries should be executed without a transaction.
 	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
 }
 
@@ -398,7 +398,7 @@ func LoadConfigFromFile(path string) (*Config, error) {
 	return config, nil
 }
 
-// GetAccountCreationSchema returns the account creation schema for the connector metadata
+// GetAccountCreationSchema returns the account creation schema for the connector metadata.
 func (c *Config) GetAccountCreationSchema(ctx context.Context) (*v2.ConnectorAccountCreationSchema, error) {
 	_, accountProvisioning, err := c.ExtractAccountProvisioning()
 	if err != nil {
