@@ -39,7 +39,7 @@ resource_types:
             login: ".username" # CEL: References the "username" column for the login field.
             profile:
               name: ".username" # CEL: Uses the "username" column value to assign a profile name.
-              created_at: ".created_at" # CEL: Uses the "created_at" column value from the SQL result.
+#              created_at: ".created_at" # CEL: Uses the "created_at" column value from the SQL result.
       pagination:
         strategy: "offset" # Offset-based pagination: retrieves records by skipping a specified number.
         primary_key: "user_id" # The key column used to uniquely identify records for pagination.
@@ -58,10 +58,12 @@ resource_types:
       credentials:
         no_password:
           preferred: true
-        random_password:
-          max_length: 128
-          min_length: 12
-          disallowed_characters: "!@#$%^&*()_+"
+#        random_password:
+#          max_length: 128
+#          min_length: 12
+#          disallowed_characters: "!@#$%^&*()_+"
+#          preferred: true
+      # this option can be added after we add support for passwords
       validate:
         vars:
           email: "email"

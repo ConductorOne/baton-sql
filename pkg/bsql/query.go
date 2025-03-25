@@ -368,7 +368,6 @@ func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any,
 
 	for k, v := range vars {
 		// Check if the value is a direct reference to an input field
-		// TODO: (bema) This feels like a temp fix because I am not sure if the Evaluate works properly or not
 		if inputVal, exists := inputs[v]; exists {
 			ret[k] = inputVal
 			continue

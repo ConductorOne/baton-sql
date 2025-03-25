@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/conductorone/baton-sdk/pkg/crypto"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
-	"github.com/conductorone/baton-sdk/pkg/crypto"
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -110,9 +110,6 @@ func (s *userSyncer) CreateAccount(
 		return nil, nil, nil, err
 	}
 
-	// check credentialOptions here (return random-password if specified)
-	// use config from yaml for random password generation
-
 	if accountProvisioning == nil {
 		return nil, nil, nil, errors.New("no account provisioning defined")
 	}
@@ -136,7 +133,6 @@ func (s *userSyncer) CreateAccount(
 		return nil, nil, nil, err
 	}
 
-	// generate password
 	plainTextPassword, err := crypto.GeneratePassword(credentialOptions)
 	if err != nil {
 		return nil, nil, nil, err
@@ -146,8 +142,7 @@ func (s *userSyncer) CreateAccount(
 		Bytes: []byte(plainTextPassword),
 	}
 
-	// not sure if this is a right way to pass in password
-	//inputs["password"] = []byte(plainTextPassword)
+	inputs["password"] = []byte("")
 
 	provisioningVars, err := s.env.AccountProvisioningInputs(inputs)
 	if err != nil {
