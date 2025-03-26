@@ -2,10 +2,15 @@ package bsql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+)
+
+var (
+	ErrNoAccountProvisioningDefined = errors.New("no account provisioning defined")
 )
 
 func (c Config) extractTraits(rtID string) ([]v2.ResourceType_Trait, error) {

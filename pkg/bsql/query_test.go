@@ -84,6 +84,7 @@ func Test_parseQueryOpts(t *testing.T) {
 		ctx   context.Context
 		query string
 		pCtx  *paginationContext
+		vars  map[string]any
 	}
 	tests := []struct {
 		name           string
@@ -101,6 +102,7 @@ func Test_parseQueryOpts(t *testing.T) {
 				context.Background(),
 				"SELECT * FROM table",
 				nil,
+				nil,
 			},
 			"SELECT * FROM table",
 			nil,
@@ -116,6 +118,7 @@ func Test_parseQueryOpts(t *testing.T) {
 				&paginationContext{
 					Limit: 10,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT ?",
 			[]interface{}{int64(11)},
@@ -131,6 +134,7 @@ func Test_parseQueryOpts(t *testing.T) {
 				&paginationContext{
 					Limit: 10,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT ?",
 			[]interface{}{int64(11)},
@@ -147,6 +151,7 @@ func Test_parseQueryOpts(t *testing.T) {
 					Limit:  10,
 					Offset: 123,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT ? OFFSET ?",
 			[]interface{}{int64(11), int64(123)},
@@ -163,6 +168,7 @@ func Test_parseQueryOpts(t *testing.T) {
 					Limit:  10,
 					Offset: 123,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT $1 OFFSET $2",
 			[]interface{}{int64(11), int64(123)},
@@ -179,6 +185,7 @@ func Test_parseQueryOpts(t *testing.T) {
 					Limit:  10,
 					Offset: 123,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT ? OFFSET ?",
 			[]interface{}{int64(11), int64(123)},
@@ -195,6 +202,7 @@ func Test_parseQueryOpts(t *testing.T) {
 					Limit:  10,
 					Offset: 123,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT @p1 OFFSET @p2",
 			[]interface{}{int64(11), int64(123)},
@@ -211,6 +219,7 @@ func Test_parseQueryOpts(t *testing.T) {
 					Limit:  10,
 					Offset: 123,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT :1 OFFSET :2",
 			[]interface{}{int64(11), int64(123)},
@@ -227,6 +236,7 @@ func Test_parseQueryOpts(t *testing.T) {
 					Limit:  10,
 					Offset: 0,
 				},
+				nil,
 			},
 			"",
 			nil,
@@ -242,6 +252,7 @@ func Test_parseQueryOpts(t *testing.T) {
 				&paginationContext{
 					Limit: 10,
 				},
+				nil,
 			},
 			"SELECT * FROM table LIMIT 11",
 			nil,
@@ -257,6 +268,7 @@ func Test_parseQueryOpts(t *testing.T) {
 				&paginationContext{
 					Offset: 123,
 				},
+				nil,
 			},
 			"SELECT * FROM table OFFSET 123",
 			nil,
@@ -272,6 +284,7 @@ func Test_parseQueryOpts(t *testing.T) {
 				&paginationContext{
 					Cursor: "abc123",
 				},
+				nil,
 			},
 			"SELECT * FROM table WHERE id > abc123",
 			nil,
@@ -288,6 +301,7 @@ func Test_parseQueryOpts(t *testing.T) {
 					Cursor: "abc123",
 					Limit:  10,
 				},
+				nil,
 			},
 			"SELECT * FROM table WHERE id > ? LIMIT 11",
 			[]interface{}{"abc123"},
@@ -303,11 +317,46 @@ func Test_parseQueryOpts(t *testing.T) {
 				&paginationContext{
 					Limit: 10,
 				},
+				nil,
 			},
 			"",
 			nil,
 			false,
 			true,
+		},
+		{
+			"Test valid query with var substitution",
+			database.MySQL,
+			args{
+				context.Background(),
+				"SELECT * FROM table WHERE test = ?<foo> and answer = ?<bar>",
+				nil,
+				map[string]any{
+					"foo": "test",
+					"bar": 42,
+				},
+			},
+			"SELECT * FROM table WHERE test = ? and answer = ?",
+			[]interface{}{"test", 42},
+			false,
+			false,
+		},
+		{
+			"Test valid query with unquoted table name var substitution",
+			database.MySQL,
+			args{
+				context.Background(),
+				"SELECT * FROM ?<table_name|unquoted> WHERE test = ?<foo>",
+				nil,
+				map[string]any{
+					"table_name": "example_table",
+					"foo":        "test example",
+				},
+			},
+			"SELECT * FROM example_table WHERE test = ?",
+			[]interface{}{"test example"},
+			false,
+			false,
 		},
 	}
 	for _, tt := range tests {
@@ -315,7 +364,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			ss := &SQLSyncer{
 				dbEngine: tt.dbEngine,
 			}
-			query, queryArgs, paginationUsed, err := ss.parseQueryOpts(tt.args.ctx, tt.args.pCtx, tt.args.query)
+			query, queryArgs, paginationUsed, err := ss.parseQueryOpts(tt.args.ctx, tt.args.pCtx, tt.args.query, tt.args.vars)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseQueryOpts() error = %v, wantErr %v", err, tt.wantErr)
 				return

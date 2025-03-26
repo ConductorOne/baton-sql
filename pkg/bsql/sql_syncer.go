@@ -38,13 +38,20 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 			return nil, err
 		}
 
-		rv := &SQLSyncer{
-			resourceType: rt,
-			config:       rtConfig,
-			db:           db,
-			dbEngine:     dbEngine,
-			env:          celEnv,
-			fullConfig:   c,
+		var rv connectorbuilder.ResourceSyncer
+
+		// If the resource type has account provisioning, use for account provisioning
+		if rtConfig.AccountProvisioning != nil {
+			rv = newUserSyncer(rt, rtConfig, db, dbEngine, celEnv, c)
+		} else {
+			rv = &SQLSyncer{
+				resourceType: rt,
+				config:       rtConfig,
+				db:           db,
+				dbEngine:     dbEngine,
+				env:          celEnv,
+				fullConfig:   c,
+			}
 		}
 		ret = append(ret, rv)
 	}

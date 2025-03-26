@@ -1,11 +1,15 @@
 package bsql
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
 
 	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
 // Config represents the overall connector configuration.
@@ -60,10 +64,17 @@ type ResourceType struct {
 
 	// SkipEntitlementsAndGrants indicates if entitlement and grant processing should be bypassed.
 	SkipEntitlementsAndGrants bool `yaml:"skip_entitlements_and_grants,omitempty" json:"skip_entitlements_and_grants,omitempty"`
+
+	// AccountProvisioning defines the configuration for provisioning new accounts
+	AccountProvisioning *AccountProvisioning `yaml:"account_provisioning,omitempty" json:"account_provisioning,omitempty"`
 }
 
 // ListQuery defines the structure for configuring resource list queries.
 type ListQuery struct {
+	// Vars provides variables that can be used within the list query.
+	// Variables can reference input fields via 'input.fieldname' and credential data via 'credentials.fieldname'
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+
 	// Query is the SQL statement used to fetch a list of resources.
 	Query string `yaml:"query" json:"query"`
 
@@ -187,6 +198,10 @@ type Pagination struct {
 
 // EntitlementsQuery defines the structure for querying dynamic entitlements.
 type EntitlementsQuery struct {
+	// Vars provides variables that can be used within the entitlements query.
+	// Variables can reference input fields via 'input.fieldname' and credential data via 'credentials.fieldname'
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+
 	// Query is the SQL statement used to fetch dynamic entitlements.
 	Query string `yaml:"query" json:"query"`
 
@@ -251,6 +266,10 @@ type EntitlementProvisioningQueries struct {
 
 // GrantsQuery defines the structure for querying existing entitlement grants.
 type GrantsQuery struct {
+	// Vars provides variables that can be used within the grants query.
+	// Variables can reference input fields via 'input.fieldname' and credential data via 'credentials.fieldname'
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+
 	// Query is the SQL statement used to retrieve existing entitlement grants.
 	Query string `yaml:"query" json:"query"`
 
@@ -279,6 +298,79 @@ type GrantMapping struct {
 	Annotations *Annotations `yaml:"annotations" json:"annotations"`
 }
 
+// AccountProvisioning defines the configuration for provisioning new accounts.
+type AccountProvisioning struct {
+	// Schema defines the required fields for account creation.
+	Schema []*AccountProvisioningField `yaml:"schema" json:"schema"`
+	// Credentials defines the supported credential handlers.
+	Credentials *AccountCredentials `yaml:"credentials" json:"credentials"`
+	// Create defines the SQL queries and configuration for creating new accounts.
+	Create *AccountCreationConfig `yaml:"create" json:"create"`
+	// Validate defines the SQL queries and configuration for validating new accounts.
+	Validate *AccountValidationConfig `yaml:"validate" json:"validate"`
+}
+
+// AccountProvisioningField defines a field required for account provisioning.
+type AccountProvisioningField struct {
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+	Type        string `yaml:"type" json:"type"`
+	Placeholder string `yaml:"placeholder,omitempty" json:"placeholder,omitempty"`
+	Required    bool   `yaml:"required" json:"required"`
+}
+
+// AccountCredentials defines the supported credential handlers and their configurations.
+type AccountCredentials struct {
+	NoPassword     *NoPasswordConfig     `yaml:"no_password,omitempty" json:"no_password,omitempty"`
+	RandomPassword *RandomPasswordConfig `yaml:"random_password,omitempty" json:"random_password,omitempty"`
+}
+
+// BaseCredentialConfig contains fields common to all credential handlers.
+type BaseCredentialConfig struct {
+	Preferred bool `yaml:"preferred" json:"preferred"`
+}
+
+// NoPasswordConfig defines configuration for accounts that don't require passwords.
+type NoPasswordConfig struct {
+	BaseCredentialConfig `yaml:",inline"`
+}
+
+// RandomPasswordConfig defines configuration for random password generation.
+type RandomPasswordConfig struct {
+	BaseCredentialConfig `yaml:",inline"`
+	MaxLength            int    `yaml:"max_length" json:"max_length"`
+	MinLength            int    `yaml:"min_length" json:"min_length"`
+	DisallowedCharacters string `yaml:"disallowed_characters" json:"disallowed_characters"`
+}
+
+// AccountValidationConfig defines the configuration for validating new accounts.
+type AccountValidationConfig struct {
+	// Vars provides variables that can be used within account validation SQL queries.
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+	// Queries is a list of SQL statements to execute for account validation.
+	Query string `yaml:"query" json:"queries"`
+}
+
+// AccountCreationConfig defines the configuration for creating new accounts.
+type AccountCreationConfig struct {
+	// Vars provides variables that can be used within account creation SQL queries.
+	// Variables can reference input fields via 'input.fieldname' and credential data via 'credentials.fieldname'.
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+	// Queries is a list of SQL statements to execute for account creation.
+	Queries []string `yaml:"queries" json:"queries"`
+	// NoTransaction indicates whether the creation queries should be executed without a transaction.
+	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
+}
+
+func (c Config) ExtractAccountProvisioning() (string, *AccountProvisioning, error) {
+	for rtID, rt := range c.ResourceTypes {
+		if rt.AccountProvisioning != nil {
+			return rtID, rt.AccountProvisioning, nil
+		}
+	}
+	return "", nil, ErrNoAccountProvisioningDefined
+}
+
 // Parse converts YAML-encoded configuration data into a Config struct.
 func Parse(data []byte) (*Config, error) {
 	config := &Config{}
@@ -304,4 +396,63 @@ func LoadConfigFromFile(path string) (*Config, error) {
 	}
 
 	return config, nil
+}
+
+// GetAccountCreationSchema returns the account creation schema for the connector metadata.
+func (c *Config) GetAccountCreationSchema(ctx context.Context) (*v2.ConnectorAccountCreationSchema, error) {
+	_, accountProvisioning, err := c.ExtractAccountProvisioning()
+	if err != nil {
+		if errors.Is(err, ErrNoAccountProvisioningDefined) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	schema := &v2.ConnectorAccountCreationSchema{
+		FieldMap: make(map[string]*v2.ConnectorAccountCreationSchema_Field),
+	}
+
+	for _, field := range accountProvisioning.Schema {
+		schemaField := &v2.ConnectorAccountCreationSchema_Field{
+			DisplayName: field.Name,
+			Description: field.Description,
+			Required:    field.Required,
+			Placeholder: field.Placeholder,
+		}
+
+		switch field.Type {
+		case "string":
+			schemaField.Field = &v2.ConnectorAccountCreationSchema_Field_StringField{
+				StringField: &v2.ConnectorAccountCreationSchema_StringField{},
+			}
+
+		case "string_list":
+			schemaField.Field = &v2.ConnectorAccountCreationSchema_Field_StringListField{
+				StringListField: &v2.ConnectorAccountCreationSchema_StringListField{},
+			}
+
+		case "boolean":
+			schemaField.Field = &v2.ConnectorAccountCreationSchema_Field_BoolField{
+				BoolField: &v2.ConnectorAccountCreationSchema_BoolField{},
+			}
+
+		case "int":
+			schemaField.Field = &v2.ConnectorAccountCreationSchema_Field_IntField{
+				IntField: &v2.ConnectorAccountCreationSchema_IntField{},
+			}
+
+		case "map":
+			schemaField.Field = &v2.ConnectorAccountCreationSchema_Field_MapField{
+				MapField: &v2.ConnectorAccountCreationSchema_MapField{},
+			}
+
+		default:
+			return nil, fmt.Errorf("unsupported field type: %s", field.Type)
+		}
+
+		schema.FieldMap[field.Name] = schemaField
+	}
+
+	return schema, nil
 }

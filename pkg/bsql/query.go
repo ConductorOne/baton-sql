@@ -95,9 +95,9 @@ func parseToken(token string) (*queryTokenOpts, error) {
 	return opts, nil
 }
 
-func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext, query string) (string, []interface{}, bool, error) {
-	if pCtx == nil {
-		return query, nil, false, nil
+func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext, query string, vars map[string]any) (string, []interface{}, bool, error) {
+	if vars == nil {
+		vars = make(map[string]any)
 	}
 
 	var qArgs []interface{}
@@ -124,8 +124,13 @@ func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext,
 			val = pCtx.Cursor
 			paginationOptSet = true
 		default:
-			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
-			return token
+			v, ok := vars[opts.Key]
+			if !ok {
+				parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
+				return token
+			}
+
+			val = v
 		}
 
 		// If the value is unquoted, directly insert the value as a string
@@ -156,13 +161,13 @@ func clampPageSize(pageSize int) int64 {
 	return int64(pageSize)
 }
 
-func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token, query string, pOpts *Pagination) (string, []interface{}, *paginationContext, error) {
+func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token, query string, pOpts *Pagination, vars map[string]any) (string, []interface{}, *paginationContext, error) {
 	pCtx, err := s.setupPagination(ctx, pToken, pOpts)
 	if err != nil {
 		return "", nil, nil, err
 	}
 
-	q, qArgs, paginationUsed, err := s.parseQueryOpts(ctx, pCtx, query)
+	q, qArgs, paginationUsed, err := s.parseQueryOpts(ctx, pCtx, query, vars)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -268,6 +273,7 @@ func (s *SQLSyncer) prepareProvisioningQuery(ctx context.Context, query string, 
 		}
 
 		v, ok := vars[opts.Key]
+
 		if !ok {
 			parseErr = errors.Join(parseErr, fmt.Errorf("unknown token %s", token))
 			return token
@@ -346,16 +352,42 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 	return nil
 }
 
+func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any, vars map[string]string) (map[string]any, error) {
+	ret := make(map[string]any)
+
+	if inputs == nil {
+		inputs = make(map[string]any)
+	}
+
+	for k, v := range vars {
+		// Check if the value is a direct reference to an input field
+		if inputVal, exists := inputs[v]; exists {
+			ret[k] = inputVal
+			continue
+		}
+
+		// Otherwise, evaluate it as a CEL expression
+		out, err := s.env.Evaluate(ctx, v, inputs)
+		if err != nil {
+			return nil, err
+		}
+		ret[k] = out
+	}
+
+	return ret, nil
+}
+
 func (s *SQLSyncer) runQuery(
 	ctx context.Context,
 	pToken *pagination.Token,
 	query string,
 	pOpts *Pagination,
+	vars map[string]any,
 	rowCallback func(context.Context, map[string]interface{}) (bool, error),
 ) (string, error) {
 	l := ctxzap.Extract(ctx)
 
-	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, query, pOpts)
+	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, query, pOpts, vars)
 	if err != nil {
 		return "", err
 	}

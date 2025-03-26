@@ -21,7 +21,12 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 		return nil, "", nil, errors.New("no resource list configuration provided")
 	}
 
-	npt, err := s.runQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+	queryVars, err := s.prepareQueryVars(ctx, nil, s.config.List.Vars)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	npt, err := s.runQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		r, err := s.mapResource(ctx, rowMap)
 		if err != nil {
 			return false, err

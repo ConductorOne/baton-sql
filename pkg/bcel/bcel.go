@@ -161,3 +161,11 @@ func (t *Env) ProvisioningInputs(principal *v2.Resource, entitlement *v2.Entitle
 
 	return ret, nil
 }
+
+func (t *Env) AccountProvisioningInputs(inputs map[string]any) (map[string]any, error) {
+	ret := make(map[string]any)
+
+	ret["input"] = inputs
+
+	return ret, nil
+}

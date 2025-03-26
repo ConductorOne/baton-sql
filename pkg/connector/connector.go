@@ -63,6 +63,13 @@ func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 	if c.config.AppDescription != "" {
 		md.Description = c.config.AppDescription
 	}
+
+	accountCreationSchema, err := c.config.GetAccountCreationSchema(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	md.AccountCreationSchema = accountCreationSchema
 	return md, nil
 }
 

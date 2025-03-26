@@ -3,6 +3,7 @@ package bsql
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -154,4 +155,83 @@ func (s *SQLSyncer) prepareProvisioningVars(ctx context.Context, vars map[string
 	}
 
 	return ret, nil
+}
+
+func (s *SQLSyncer) prepareSchemaVars(ctx context.Context, accountProvisioning *AccountProvisioning, accountInfo *v2.AccountInfo) (map[string]any, error) {
+	inputs := make(map[string]any)
+
+	for _, field := range accountProvisioning.Schema {
+		val, ok := accountInfo.Profile.Fields[field.Name]
+		if !ok {
+			continue
+		}
+
+		switch field.Type {
+		case "string":
+			if strVal := val.GetStringValue(); strVal != "" {
+				inputs[field.Name] = strVal
+			}
+
+		case "string_list":
+			if listVal := val.GetListValue(); listVal != nil {
+				var strList []string
+				for _, v := range listVal.Values {
+					if str := v.GetStringValue(); str != "" {
+						strList = append(strList, str)
+					}
+				}
+				inputs[field.Name] = strList
+			}
+
+		case "boolean":
+			inputs[field.Name] = val.GetBoolValue()
+
+		case "int":
+			if numVal := val.GetNumberValue(); numVal != 0 {
+				inputs[field.Name] = int(numVal)
+			}
+
+		case "map":
+			if structVal := val.GetStructValue(); structVal != nil {
+				inputs[field.Name] = structVal.AsMap()
+			}
+		}
+	}
+
+	return inputs, nil
+}
+
+func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *AccountProvisioning, inputs map[string]any) (*v2.Resource, bool, error) {
+	if accountProvisioning.Validate == nil {
+		return nil, false, fmt.Errorf("validation configuration is not defined for account provisioning")
+	}
+
+	if accountProvisioning.Validate.Query == "" {
+		return nil, false, fmt.Errorf("validation query is not defined for account provisioning")
+	}
+
+	queryVars, err := s.prepareQueryVars(ctx, inputs, accountProvisioning.Validate.Vars)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var ret *v2.Resource
+	_, err = s.runQuery(ctx, nil, accountProvisioning.Validate.Query, nil, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+		r, err := s.mapResource(ctx, rowMap)
+		if err != nil {
+			return false, err
+		}
+
+		ret = r
+		return false, nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	if ret == nil {
+		return nil, false, fmt.Errorf("unable to find resource for account provisioning")
+	}
+
+	return ret, true, nil
 }

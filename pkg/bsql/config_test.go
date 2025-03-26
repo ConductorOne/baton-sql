@@ -59,6 +59,55 @@ func TestParse(t *testing.T) {
 				require.Equal(t, "offset", userResourceType.List.Pagination.Strategy)
 				require.Equal(t, "user_id", userResourceType.List.Pagination.PrimaryKey)
 
+				// Validate account provisioning configuration
+				require.NotNil(t, userResourceType.AccountProvisioning)
+				require.Len(t, userResourceType.AccountProvisioning.Schema, 2)
+
+				// Validate schema fields
+				usernameField := userResourceType.AccountProvisioning.Schema[0]
+				require.Equal(t, "username", usernameField.Name)
+				require.Equal(t, "The username of the user", usernameField.Description)
+				require.Equal(t, "string", usernameField.Type)
+				require.Equal(t, "user", usernameField.Placeholder)
+				require.True(t, usernameField.Required)
+
+				emailField := userResourceType.AccountProvisioning.Schema[1]
+				require.Equal(t, "email", emailField.Name)
+				require.Equal(t, "The email of the user", emailField.Description)
+				require.Equal(t, "string", emailField.Type)
+				require.Equal(t, "user@example.com", emailField.Placeholder)
+				require.True(t, emailField.Required)
+
+				// Validate credential handlers
+				require.NotNil(t, userResourceType.AccountProvisioning.Credentials)
+
+				// Validate no_password config
+				require.NotNil(t, userResourceType.AccountProvisioning.Credentials.NoPassword)
+				require.True(t, userResourceType.AccountProvisioning.Credentials.NoPassword.Preferred)
+
+				// Validate random_password config
+				// require.NotNil(t, userResourceType.AccountProvisioning.Credentials.RandomPassword)
+				// require.Equal(t, 128, userResourceType.AccountProvisioning.Credentials.RandomPassword.MaxLength)
+				// require.Equal(t, 12, userResourceType.AccountProvisioning.Credentials.RandomPassword.MinLength)
+				// require.Equal(t, "!@#$%^&*()_+", userResourceType.AccountProvisioning.Credentials.RandomPassword.DisallowedCharacters)
+
+				// Validate account creation configuration
+				require.NotNil(t, userResourceType.AccountProvisioning.Create)
+				require.False(t, userResourceType.AccountProvisioning.Create.NoTransaction)
+
+				// Validate creation vars
+				require.NotNil(t, userResourceType.AccountProvisioning.Create.Vars)
+				require.Equal(t, "input.username", userResourceType.AccountProvisioning.Create.Vars["username"])
+				require.Equal(t, "input.email", userResourceType.AccountProvisioning.Create.Vars["email"])
+				// require.Equal(t, "credentials.password", userResourceType.AccountProvisioning.Create.Vars["password"])
+
+				// Validate creation queries
+				require.Len(t, userResourceType.AccountProvisioning.Create.Queries, 1)
+				require.Equal(t, normalizeQueryString(`
+					INSERT INTO wp_users (user_login, user_email)
+					VALUES (?<username>, ?<email>)
+				`), normalizeQueryString(userResourceType.AccountProvisioning.Create.Queries[0]))
+
 				// Validate `role` resource type
 				roleResourceType := c.ResourceTypes["role"]
 				require.NotNil(t, roleResourceType.List)
@@ -104,7 +153,11 @@ func TestParse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Logf("Parsing config for test: %s", tt.name)
 			c, err := Parse([]byte(tt.input))
+			if err != nil {
+				t.Logf("Error parsing config: %v", err)
+			}
 			require.NoError(t, err)
 			tt.validate(t, c)
 		})
