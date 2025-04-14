@@ -4,7 +4,7 @@ go 1.23
 toolchain go1.24.1
 
 require (
-	github.com/conductorone/baton-sdk v0.2.91
+	github.com/conductorone/baton-sdk v0.2.93
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.8.1
