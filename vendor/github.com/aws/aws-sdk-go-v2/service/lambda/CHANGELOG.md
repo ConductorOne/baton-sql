@@ -1,3 +1,11 @@
+# v1.71.2 (2025-04-10)
+
+* No change notes available for this release.
+
+# v1.71.1 (2025-04-03)
+
+* No change notes available for this release.
+
 # v1.71.0 (2025-03-19)
 
 * **Feature**: Add Ruby 3.4 (ruby3.4) support to AWS Lambda.
