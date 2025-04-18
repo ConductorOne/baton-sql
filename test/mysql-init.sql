@@ -11,13 +11,19 @@ CREATE TABLE users (
   manager_id INT
 );
 
--- Insert sample users with different date formats for last_login
+-- Insert sample users with different date formats for last_login (without manager relationships)
 INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
 ('admin', 'admin@example.com', 'EMP001', 'active', 'human', '2023-01-01 12:00:00', '2023-04-15 09:30:00'),
 ('jane.doe', 'jane.doe@example.com', 'EMP002', 'active', 'human', '2023-01-05 14:30:00', '2023-04-17 08:45:00'),
 ('john.smith', 'john.smith@example.com', 'EMP003', 'active', 'human', '2023-01-10 09:45:00', '2023-04-16 16:20:00'),
 ('service.acct', 'service@example.com', 'SVC001', 'active', 'service', '2023-02-01 08:00:00', NULL),
 ('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', '2023-02-15 10:15:00', '2023-03-01 11:10:00');
+
+-- Update users to establish manager relationships
+UPDATE users SET manager_id = 1 WHERE username = 'jane.doe';   -- jane.doe reports to admin
+UPDATE users SET manager_id = 1 WHERE username = 'john.smith'; -- john.smith reports to admin
+UPDATE users SET manager_id = 2 WHERE username = 'service.acct'; -- service.acct reports to jane.doe
+UPDATE users SET manager_id = 3 WHERE username = 'disabled.user'; -- disabled.user reports to john.smith
 
 -- Create roles table
 CREATE TABLE roles (

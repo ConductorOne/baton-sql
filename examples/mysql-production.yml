@@ -1,17 +1,19 @@
 ---
 # Application name for this connector configuration
-app_name: MySQL Test
-app_description: Test configuration for MySQL with employee_id and last_login support
+app_name: MySQL Production
+app_description: MySQL connector with employee_id and last_login support
 
 # Connection settings for the MySQL database
 connect:
-  # Data Source Name (DSN) for our test MySQL instance
-  # Use "localhost" when running locally and "mysql" when running in Docker Compose
-  dsn: "mysql://baton:password@mysql:3306/batondb"
+  # Data Source Name (DSN) for our MySQL instance - replace with your actual database connection details
+  dsn: "mysql://baton:password@localhost:3306/batondb"
+  # If your database credentials contain special characters, you can specify them separately
+  # user: "username"
+  # password: "password"
 
 # Definition of different resource types managed by this connector
 resource_types:
-  # Configuration for "user" resources in MySQL
+  # Configuration for "user" resources
   user:
     # Display name for this resource type
     name: "User"
@@ -36,7 +38,7 @@ resource_types:
           users u
         LEFT JOIN 
           users m ON u.manager_id = m.id
-      # Pagination configuration (using offset for MySQL)
+      # Pagination configuration
       pagination:
         strategy: "offset"
         primary_key: "id"
@@ -60,10 +62,10 @@ resource_types:
               - ".email"
             # Account type mapping
             account_type: ".account_type"
-            # Employee ID mapping
+            # Employee ID mapping - newly added feature
             employee_id:
               - ".employee_id"
-            # Last login timestamp mapping
+            # Last login timestamp mapping - newly added feature
             last_login: ".last_login"
             # Manager information
             manager_id: ".manager_username"
