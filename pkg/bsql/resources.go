@@ -231,9 +231,13 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		return err
 	}
 
+	// Trait created successfully
+
 	annos := annotations.Annotations(r.Annotations)
 	annos.Update(t)
 	r.Annotations = annos
+	
+	// Annotation applied
 
 	return nil
 }

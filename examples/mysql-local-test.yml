@@ -1,12 +1,11 @@
 ---
 # Application name for this connector configuration
-app_name: MySQL Test
-app_description: Test configuration for MySQL with employee_id and last_login support
+app_name: MySQL Local Test
+app_description: Test configuration for MySQL with employee_id and last_login support (for local testing)
 
 # Connection settings for the MySQL database
 connect:
-  # Data Source Name (DSN) for our test MySQL instance
-  # Use "localhost" when running locally and "mysql" when running in Docker Compose
+  # Data Source Name (DSN) for our local MySQL instance running in Docker
   dsn: "mysql://baton:password@localhost:3306/batondb"
 
 # Definition of different resource types managed by this connector

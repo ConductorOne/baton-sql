@@ -63,7 +63,7 @@ resource_types:
             # Account type mapping
             account_type: ".account_type"
             # Employee ID mapping - newly added feature
-            employee_id:
+            employee_ids:
               - ".employee_id"
             # Last login timestamp mapping - newly added feature
             last_login: ".last_login"
