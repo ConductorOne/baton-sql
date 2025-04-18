@@ -11,6 +11,7 @@ import (
 
 	"github.com/conductorone/baton-sql/pkg/database/mysql"
 	"github.com/conductorone/baton-sql/pkg/database/oracle"
+	"github.com/conductorone/baton-sql/pkg/database/postgres"
 	"github.com/conductorone/baton-sql/pkg/database/sqlserver"
 )
 
@@ -97,6 +98,13 @@ func Connect(ctx context.Context, dsn string, user string, password string) (*sq
 			return nil, Unknown, err
 		}
 		return db, MSSQL, nil
+
+	case "postgres":
+		db, err := postgres.Connect(ctx, parsedDsn.String())
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, PostgreSQL, nil
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}

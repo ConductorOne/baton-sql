@@ -120,6 +120,7 @@ type OracleConnector struct {
 	connectString string
 	dialer        configurations.DialerContext
 	tlsConfig     *tls.Config
+	kerberos      configurations.KerberosAuthInterface
 }
 
 func NewConnector(connString string) driver.Connector {
@@ -149,6 +150,9 @@ func (connector *OracleConnector) Connect(ctx context.Context) (driver.Conn, err
 	if conn.connOption.TLSConfig == nil {
 		conn.connOption.TLSConfig = connector.tlsConfig
 	}
+	if conn.connOption.Kerberos == nil {
+		conn.connOption.Kerberos = connector.kerberos
+	}
 	err = conn.OpenWithContext(ctx)
 	if err != nil {
 		return nil, err
@@ -172,13 +176,18 @@ func (connector *OracleConnector) WithTLSConfig(config *tls.Config) {
 	connector.tlsConfig = config
 }
 
+// WithKerberosAuth sets the Kerberos authenticator to be used by this connector. It does not enable the Kerberos; set AUTH TYPE to KERBEROS to do so.
+func (connector *OracleConnector) WithKerberosAuth(auth configurations.KerberosAuthInterface) {
+	connector.kerberos = auth
+}
+
 // Open return a new open connection
 func (driver *OracleDriver) Open(name string) (driver.Conn, error) {
 	conn, err := NewConnection(name, driver.connOption)
-	conn.cusTyp = driver.cusTyp
 	if err != nil {
 		return nil, err
 	}
+	conn.cusTyp = driver.cusTyp
 	err = conn.Open()
 	if err != nil {
 		return nil, err
@@ -1135,9 +1144,12 @@ func (conn *Connection) QueryRowContext(ctx context.Context, query string, args 
 	stmt := NewStmt(query, conn)
 	stmt.autoClose = true
 	rows, err := stmt.QueryContext(ctx, args)
-	dataSet := rows.(*DataSet)
 	if err != nil {
 		return &DataSet{lasterr: err}
+	}
+	dataSet, ok := rows.(*DataSet)
+	if !ok {
+		return &DataSet{lasterr: errors.New("type object should be *DataSet")}
 	}
 	dataSet.Next_()
 	return dataSet
