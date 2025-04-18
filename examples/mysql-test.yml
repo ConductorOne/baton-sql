@@ -7,7 +7,7 @@ app_description: Test configuration for MySQL with employee_id and last_login su
 connect:
   # Data Source Name (DSN) for our test MySQL instance
   # Use "localhost" when running locally and "mysql" when running in Docker Compose
-  dsn: "mysql://baton:password@localhost:3306/batondb"
+  dsn: "mysql://baton:password@mysql:3306/batondb"
 
 # Definition of different resource types managed by this connector
 resource_types:
@@ -31,7 +31,8 @@ resource_types:
           u.created_at,
           u.last_login,
           u.manager_id,
-          m.username as manager_username
+          m.username as manager_username,
+          m.email as manager_email
         FROM
           users u
         LEFT JOIN 
@@ -67,6 +68,7 @@ resource_types:
             last_login: ".last_login"
             # Manager information
             manager_id: ".manager_username"
+            manager_email: ".manager_email"
             
             # Profile details for the user
             profile:
@@ -74,6 +76,7 @@ resource_types:
               created_at: ".created_at"
               manager_id: ".manager_id"
               manager_username: ".manager_username"
+              manager_email: ".manager_email"
               
   # Configuration for "role" resources 
   role:

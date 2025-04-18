@@ -226,6 +226,32 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		opts = append(opts, sdkResource.WithUserLogin(primaryLogin, aliases...))
 	}
 
+	// Manager ID
+	if mappings.ManagerID != "" {
+		managerID, err := s.env.EvaluateString(ctx, mappings.ManagerID, inputs)
+		if err != nil {
+			return err
+		}
+		
+		if managerID != "" {
+			// Add manager ID to profile attributes
+			profile["manager_id"] = managerID
+		}
+	}
+	
+	// Manager Email
+	if mappings.ManagerEmail != "" {
+		managerEmail, err := s.env.EvaluateString(ctx, mappings.ManagerEmail, inputs)
+		if err != nil {
+			return err
+		}
+		
+		if managerEmail != "" {
+			// Add manager email to profile attributes
+			profile["manager_email"] = managerEmail
+		}
+	}
+
 	t, err := sdkResource.NewUserTrait(opts...)
 	if err != nil {
 		return err

@@ -30,7 +30,8 @@ resource_types:
           u.created_at,
           u.last_login,
           u.manager_id,
-          m.username as manager_username
+          m.username as manager_username,
+          m.email as manager_email
         FROM
           users u
         LEFT JOIN 
@@ -66,6 +67,7 @@ resource_types:
             last_login: ".last_login"
             # Manager information
             manager_id: ".manager_username"
+            manager_email: ".manager_email"
             
             # Profile details for the user
             profile:
@@ -73,6 +75,7 @@ resource_types:
               created_at: ".created_at"
               manager_id: ".manager_id"
               manager_username: ".manager_username"
+              manager_email: ".manager_email"
               
   # Configuration for "role" resources 
   role:
