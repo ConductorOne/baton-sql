@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # MySQL Database for testing employee_id and last_login features
   mysql:

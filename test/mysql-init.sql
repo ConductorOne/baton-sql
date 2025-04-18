@@ -20,13 +20,13 @@ CREATE TABLE users (
 
 -- Insert sample users with different date formats for last_login (without manager relationships)
 INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
-('admin', 'admin@example.com', 'EMP001', 'active', 'human', '2023-01-01 12:00:00', '2023-04-15 09:30:00'),
-('jane.doe', 'jane.doe@example.com', 'EMP002', 'active', 'human', '2023-01-05 14:30:00', '2023-04-17 08:45:00'),
-('john.smith', 'john.smith@example.com', 'EMP003', 'active', 'human', '2023-01-10 09:45:00', '2023-04-16 16:20:00'),
-('service.acct', 'service@example.com', 'SVC001', 'active', 'service', '2023-02-01 08:00:00', NULL),
-('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', '2023-02-15 10:15:00', '2023-03-01 11:10:00'),
-('bjorn.tipling.c1', 'bjorn.tipling@conductorone.com', 'EMP005', 'active', 'human', '2023-03-01 09:00:00', '2023-04-18 10:15:00'),
-('bjorn.tipling.ins', 'bjorn.tipling@insulator.one', 'EMP006', 'active', 'human', '2023-03-05 11:30:00', '2023-04-18 14:30:00');
+('admin', 'admin@example.com', 'EMP001', 'active', 'human', '2025-01-01 12:00:00', '2025-04-15 09:30:00'),
+('jane.doe', 'jane.doe@example.com', 'EMP002', 'active', 'human', '2025-01-05 14:30:00', '2025-04-17 08:45:00'),
+('john.smith', 'john.smith@example.com', 'EMP003', 'active', 'human', '2025-01-10 09:45:00', '2025-04-16 16:20:00'),
+('service.acct', 'service@example.com', 'SVC001', 'active', 'service', '2025-02-01 08:00:00', NULL),
+('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', '2025-02-15 10:15:00', '2025-03-01 11:10:00'),
+('bjorn.tipling.c1', 'bjorn.tipling@conductorone.com', 'EMP005', 'active', 'human', '2025-03-01 09:00:00', '2025-04-18 10:15:00'),
+('bjorn.tipling.ins', 'bjorn.tipling@insulator.one', 'EMP006', 'active', 'human', '2025-03-05 11:30:00', '2025-04-18 14:30:00');
 
 -- Update users to establish manager relationships
 -- jane.doe and john.smith report to admin
@@ -91,12 +91,12 @@ CREATE TABLE login_history (
 
 -- Insert various date formats for testing
 INSERT INTO login_history (user_id, login_time, login_time_text, login_time_alt) VALUES
-(1, '2023-04-15 09:30:00', '15-APR-2023 09:30:00', '15/04/2023 09:30:00'),
-(2, '2023-04-17 08:45:00', '17-APR-2023 08:45:00', '17/04/2023 08:45:00'),
-(3, '2023-04-16 16:20:00', '16-APR-2023 16:20:00', '16/04/2023 16:20:00'),
-(5, '2023-03-01 11:10:00', '01-MAR-2023 11:10:00', '01/03/2023 11:10:00'),
-(6, '2023-04-18 10:15:00', '18-APR-2023 10:15:00', '18/04/2023 10:15:00'),
-(7, '2023-04-18 14:30:00', '18-APR-2023 14:30:00', '18/04/2023 14:30:00');
+(1, '2025-04-15 09:30:00', '15-APR-2025 09:30:00', '15/04/2025 09:30:00'),
+(2, '2025-04-17 08:45:00', '17-APR-2025 08:45:00', '17/04/2025 08:45:00'),
+(3, '2025-04-16 16:20:00', '16-APR-2025 16:20:00', '16/04/2025 16:20:00'),
+(5, '2025-03-01 11:10:00', '01-MAR-2025 11:10:00', '01/03/2025 11:10:00'),
+(6, '2025-04-18 10:15:00', '18-APR-2025 10:15:00', '18/04/2025 10:15:00'),
+(7, '2025-04-18 14:30:00', '18-APR-2025 14:30:00', '18/04/2025 14:30:00');
 
 -- Create test table for employee IDs in different formats
 CREATE TABLE employee_data (

@@ -158,7 +158,7 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 			if err != nil {
 				l.Warn("failed to parse last login time", zap.String("last_login", lastLoginValue), zap.Error(err))
 			} else {
-				opts = append(opts, sdkResource.WithLastLogin(lastLoginTime))
+				opts = append(opts, sdkResource.WithLastLogin(*lastLoginTime))
 			}
 		}
 	}
@@ -232,20 +232,20 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		if err != nil {
 			return err
 		}
-		
+
 		if managerID != "" {
 			// Add manager ID to profile attributes
 			profile["manager_id"] = managerID
 		}
 	}
-	
+
 	// Manager Email
 	if mappings.ManagerEmail != "" {
 		managerEmail, err := s.env.EvaluateString(ctx, mappings.ManagerEmail, inputs)
 		if err != nil {
 			return err
 		}
-		
+
 		if managerEmail != "" {
 			// Add manager email to profile attributes
 			profile["manager_email"] = managerEmail
@@ -262,7 +262,7 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 	annos := annotations.Annotations(r.Annotations)
 	annos.Update(t)
 	r.Annotations = annos
-	
+
 	// Annotation applied
 
 	return nil

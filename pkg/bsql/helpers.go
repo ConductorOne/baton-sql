@@ -47,10 +47,10 @@ var timeFormats = []string{
 }
 
 // parseTime attempts to parse a time string using various database formats.
-func parseTime(value string) (time.Time, error) {
+func parseTime(value string) (*time.Time, error) {
 	// Handle empty string
 	if value == "" {
-		return time.Time{}, errors.New("empty time string")
+		return &time.Time{}, errors.New("empty time string")
 	}
 
 	value = strings.TrimSpace(value)
@@ -58,7 +58,7 @@ func parseTime(value string) (time.Time, error) {
 	// Try all the predefined formats
 	for _, format := range timeFormats {
 		if t, err := time.Parse(format, value); err == nil {
-			return t, nil
+			return &t, nil
 		}
 	}
 
@@ -66,7 +66,8 @@ func parseTime(value string) (time.Time, error) {
 	if i, err := strconv.ParseInt(value, 10, 64); err == nil {
 		// Check if it's likely a Unix timestamp (Jan 1, 1970 to Jan 1, 2100)
 		if i > 0 && i < 4102444800 {
-			return time.Unix(i, 0), nil
+			t := time.Unix(i, 0)
+			return &t, nil
 		}
 	}
 
@@ -74,9 +75,10 @@ func parseTime(value string) (time.Time, error) {
 	if i, err := strconv.ParseInt(value, 10, 64); err == nil {
 		// Check if it's likely a millisecond timestamp
 		if i > 1000000000000 && i < 4102444800000 {
-			return time.Unix(i/1000, (i%1000)*1000000), nil
+			t := time.Unix(i/1000, (i%1000)*1000000)
+			return &t, nil
 		}
 	}
 
-	return time.Time{}, errors.New("unable to parse time string with any known format")
+	return nil, errors.New("unable to parse time string with any known format")
 }
