@@ -67,7 +67,7 @@ resource_types:
             # Last login timestamp mapping
             last_login: ".last_login"
             # Manager information
-            manager_id: ".manager_username"
+            manager_id: ".manager_id"
             manager_email: ".manager_email"
             
             # Profile details for the user
