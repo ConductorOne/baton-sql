@@ -49,7 +49,6 @@ var timeFormats = []string{
 }
 
 // parseTime attempts to parse a time string using various database formats.
-// This is the old implementation, kept for backward compatibility.
 func parseTime(value string) (*time.Time, error) {
 	// Handle empty string
 	if value == "" {
