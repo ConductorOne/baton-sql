@@ -6,7 +6,7 @@ This directory contains tests for the baton-sql connector, including tests for s
 
 ### Docker Compose Test Environment
 
-We provide a Docker Compose setup to easily test the baton-sql connector with a MySQL database:
+ExampleDocker Compose setup to test the baton-sql connector with a MySQL database:
 
 ```bash
 # Start the test environment
@@ -25,11 +25,13 @@ To validate that the employee ID and last login features are working correctly:
 
 1. First, run the connector using the test configuration:
    ```bash
-   # Either through Docker Compose:
-   docker-compose -f docker-compose-test.yml up
+   # Bring up the test environment:
+   docker-compose -f docker-compose-test.yml up -d
 
-   # Or directly:
-   ./dist/darwin_arm64/baton-sql --config-path ./examples/mysql-test.yml --log-level debug
+   # run a sync
+   ./dist/darwin_arm64/baton-sql \
+  --config-path ./examples/mysql.yml \
+  --log-level debug
    ```
 
 2. Then run the validation script:
