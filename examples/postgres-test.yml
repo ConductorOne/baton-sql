@@ -42,7 +42,7 @@ resource_types:
         # Field to display as the resource's name
         display_name: ".username"
         # Additional description for the user resource
-        description: "'.username + \" (\" + .email + \")\"'"
+        description: ".username"
         # Extra attributes (traits) for the user resource
         traits:
           user:
@@ -56,7 +56,7 @@ resource_types:
             # Account type mapping
             account_type: ".account_type"
             # Employee ID mapping
-            employee_id:
+            employee_ids:
               - ".employee_id"
             # Last login timestamp mapping
             last_login: ".last_login"
@@ -103,8 +103,8 @@ resource_types:
     # Define a static entitlement for role membership
     static_entitlements:
       - id: "member"
-        display_name: "resource.DisplayName + ' Member'"
-        description: "'Member of the ' + resource.DisplayName + ' role'"
+        display_name: "'Member'"
+        description: "'Role member'"
         purpose: "assignment"
         grantable_to:
           - "user"
