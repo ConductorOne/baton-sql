@@ -74,6 +74,7 @@ resource_types:
             profile:
               user_id: ".id"
               created_at: ".created_at"
+              last_login: ".last_login"
               manager_id: ".manager_id"
               manager_username: ".manager_username"
               manager_email: ".manager_email"
@@ -115,8 +116,8 @@ resource_types:
     # Define a static entitlement for role membership
     static_entitlements:
       - id: "member"
-        display_name: "\"Member\""
-        description: "\"Role member\""
+        display_name: "'Member'"
+        description: "'Role member'"
         purpose: "assignment"
         grantable_to:
           - "user"

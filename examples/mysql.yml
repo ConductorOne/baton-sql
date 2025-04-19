@@ -1,37 +1,45 @@
 ---
 # Application name for this connector configuration
-app_name: PostgreSQL Test
-app_description: Test configuration for PostgreSQL with employee_id and last_login support
+app_name: MySQL Production
+app_description: MySQL connector with employee_id and last_login support
 
-# Connection settings for the PostgreSQL database
+# Connection settings for the MySQL database
 connect:
-  # Data Source Name (DSN) for our test PostgreSQL instance
-  dsn: "postgres://baton:password@localhost:5432/batondb?sslmode=disable"
+  # Data Source Name (DSN) for our MySQL instance - replace with your actual database connection details
+  dsn: "mysql://baton:password@localhost:3306/batondb"
+  # If your database credentials contain special characters, you can specify them separately
+  # user: "username"
+  # password: "password"
 
 # Definition of different resource types managed by this connector
 resource_types:
-  # Configuration for "user" resources in PostgreSQL
+  # Configuration for "user" resources
   user:
     # Display name for this resource type
     name: "User"
     # Description providing context about what a user represents
-    description: "A user within the PostgreSQL system"
+    description: "A user within the MySQL system"
     # Settings for listing user records from the database
     list:
-      # SQL query to fetch user-related data including employee_id and last_login
+      # SQL query to fetch user-related data including employee_id, last_login, and manager information
       query: |
         SELECT
-          id, 
-          username,
-          email,
-          employee_id,
-          status,
-          account_type,
-          created_at,
-          last_login
+          u.id, 
+          u.username,
+          u.email,
+          u.employee_id,
+          u.status,
+          u.account_type,
+          u.created_at,
+          u.last_login,
+          u.manager_id,
+          m.username as manager_username,
+          m.email as manager_email
         FROM
-          users
-      # Pagination configuration (using offset for PostgreSQL)
+          users u
+        LEFT JOIN 
+          users m ON u.manager_id = m.id
+      # Pagination configuration
       pagination:
         strategy: "offset"
         primary_key: "id"
@@ -42,7 +50,7 @@ resource_types:
         # Field to display as the resource's name
         display_name: ".username"
         # Additional description for the user resource
-        description: "'.username + \" (\" + .email + \")\"'"
+        description: ".username"
         # Extra attributes (traits) for the user resource
         traits:
           user:
@@ -55,23 +63,30 @@ resource_types:
               - ".email"
             # Account type mapping
             account_type: ".account_type"
-            # Employee ID mapping
-            employee_id:
+            # Employee ID mapping - newly added feature
+            employee_ids:
               - ".employee_id"
-            # Last login timestamp mapping
+            # Last login timestamp mapping - newly added feature
             last_login: ".last_login"
+            # Manager information
+            manager_id: ".manager_id"
+            manager_email: ".manager_email"
+            
             # Profile details for the user
             profile:
               user_id: ".id"
               created_at: ".created_at"
               last_login: ".last_login"
+              manager_id: ".manager_id"
+              manager_username: ".manager_username"
+              manager_email: ".manager_email"
               
   # Configuration for "role" resources 
   role:
     # Display name for the role resource type
     name: "Role"
     # Brief description of what a role signifies
-    description: "A role within the PostgreSQL system"
+    description: "A role within the MySQL system"
     # Settings for listing roles from the database
     list:
       # SQL query to retrieve roles
@@ -92,7 +107,7 @@ resource_types:
         # Display name for the role
         display_name: ".role_name"
         # Role description
-        description: "'PostgreSQL role: ' + .role_name"
+        description: ".role_name"
         # Additional role-specific traits
         traits:
           role:
@@ -103,8 +118,8 @@ resource_types:
     # Define a static entitlement for role membership
     static_entitlements:
       - id: "member"
-        display_name: "resource.DisplayName + ' Member'"
-        description: "'Member of the ' + resource.DisplayName + ' role'"
+        display_name: "'Member'"
+        description: "'Role member'"
         purpose: "assignment"
         grantable_to:
           - "user"

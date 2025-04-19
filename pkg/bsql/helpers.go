@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/conductorone/baton-sql/pkg/database"
 )
 
 // Common time formats that may be used in databases.
@@ -47,6 +49,7 @@ var timeFormats = []string{
 }
 
 // parseTime attempts to parse a time string using various database formats.
+// This is the old implementation, kept for backward compatibility.
 func parseTime(value string) (*time.Time, error) {
 	// Handle empty string
 	if value == "" {
@@ -81,4 +84,54 @@ func parseTime(value string) (*time.Time, error) {
 	}
 
 	return nil, errors.New("unable to parse time string with any known format")
+}
+
+// parseTimeWithEngine attempts to parse a time string using database-specific formats based on engine type.
+func parseTimeWithEngine(value string, dbEngine database.DbEngine) (*time.Time, error) {
+	// Handle empty string
+	if value == "" {
+		return &time.Time{}, errors.New("empty time string")
+	}
+
+	value = strings.TrimSpace(value)
+
+	// Try formats prioritized based on database engine
+	var prioritizedFormats []string
+
+	switch dbEngine {
+	case database.MySQL:
+		// MySQL common formats
+		prioritizedFormats = []string{
+			"2006-01-02 15:04:05",
+			"2006-01-02 15:04:05.000",
+			time.RFC3339,
+		}
+	case database.PostgreSQL:
+		// PostgreSQL common formats
+		prioritizedFormats = []string{
+			"2006-01-02 15:04:05.000000",
+			"2006-01-02 15:04:05",
+			time.RFC3339,
+		}
+	case database.Oracle:
+		// Oracle common formats
+		prioritizedFormats = []string{
+			"02-JAN-2006 15:04:05",
+			"02-Jan-2006 15:04:05",
+			"Jan 02, 2006 15:04:05",
+		}
+	default:
+		// Try the generic time parser for unknown engines
+		return parseTime(value)
+	}
+
+	// Try prioritized formats first
+	for _, format := range prioritizedFormats {
+		if t, err := time.Parse(format, value); err == nil {
+			return &t, nil
+		}
+	}
+
+	// Fall back to the generic parser if prioritized formats don't match
+	return parseTime(value)
 }

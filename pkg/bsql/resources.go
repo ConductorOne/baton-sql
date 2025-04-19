@@ -153,8 +153,8 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		}
 
 		if lastLoginValue != "" {
-			// Try to parse the last login date
-			lastLoginTime, err := parseTime(lastLoginValue)
+			// Try to parse the last login date using dbEngine to determine format
+			lastLoginTime, err := parseTimeWithEngine(lastLoginValue, s.dbEngine)
 			if err != nil {
 				l.Warn("failed to parse last login time", zap.String("last_login", lastLoginValue), zap.Error(err))
 			} else {
