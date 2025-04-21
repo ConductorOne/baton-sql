@@ -20,8 +20,7 @@ resource_types:
       # SQL query to fetch user-related data
       query: |
         SELECT
-          USERNAME, USER_ID, ACCOUNT_STATUS, CREATED, LAST_LOGIN, 
-          EMPLOYEE_ID  -- Add employee ID field
+          USERNAME, USER_ID, ACCOUNT_STATUS, CREATED, LAST_LOGIN
         FROM
           DBA_USERS
       # Mapping of query results to resource fields
@@ -43,9 +42,6 @@ resource_types:
             login: ".USERNAME"
             # Last login timestamp - now properly set in user trait
             last_login: ".LAST_LOGIN"
-            # Employee ID - can be a single value or multiple IDs
-            employee_id:
-              - ".EMPLOYEE_ID"
             # Profile details for the user
             profile:
               # Mapped username from the USERNAME field
@@ -54,6 +50,8 @@ resource_types:
               user_id: ".USER_ID"
               # Timestamp of when the user was created (from the CREATED column)
               created_at: ".CREATED"
+              # Last login timestamp from the LAST_LOGIN column
+              last_login: ".LAST_LOGIN"
     account_provisioning:
       schema:
         - name: "username"
@@ -73,8 +71,7 @@ resource_types:
             USER_ID,
             ACCOUNT_STATUS,
             CREATED,
-            LAST_LOGIN,
-            EMPLOYEE_ID
+            LAST_LOGIN
           FROM
             DBA_USERS
           WHERE
