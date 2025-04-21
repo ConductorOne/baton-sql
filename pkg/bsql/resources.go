@@ -164,9 +164,9 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 	}
 
 	// Employee ID
-	if len(mappings.EmployeeID) > 0 {
+	if len(mappings.EmployeeIDs) > 0 {
 		var employeeIDs []string
-		for _, idMapping := range mappings.EmployeeID {
+		for _, idMapping := range mappings.EmployeeIDs {
 			employeeID, err := s.env.EvaluateString(ctx, idMapping, inputs)
 			if err != nil {
 				return err

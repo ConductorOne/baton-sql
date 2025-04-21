@@ -160,7 +160,7 @@ type UserTraitMapping struct {
 	LastLogin string `yaml:"last_login" json:"last_login"`
 
 	// EmployeeIds stores the employee identifier(s) for the user.
-	EmployeeID []string `yaml:"employee_ids" json:"employee_ids"`
+	EmployeeIDs []string `yaml:"employee_ids" json:"employee_ids"`
 
 	// ManagerID is the identifier of the user's manager.
 	ManagerID string `yaml:"manager_id" json:"manager_id"`
