@@ -40,6 +40,8 @@ resource_types:
             status_details: ".ACCOUNT_STATUS != 'OPEN' ? .ACCOUNT_STATUS : ''"
             # Login identifier for the user (using the USERNAME)
             login: ".USERNAME"
+            # Last login timestamp - now properly set in user trait
+            last_login: ".LAST_LOGIN"
             # Profile details for the user
             profile:
               # Mapped username from the USERNAME field

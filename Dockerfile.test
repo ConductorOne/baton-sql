@@ -1,0 +1,26 @@
+FROM golang:1.24-alpine as builder
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN go build -o baton-sql ./cmd/baton-sql
+
+# Create final container
+FROM alpine:3.18
+
+RUN apk add --no-cache ca-certificates bash curl
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/baton-sql .
+
+# Default command
+CMD ["/app/baton-sql"]

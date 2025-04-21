@@ -145,6 +145,42 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		opts = append(opts, sdkResource.WithUserProfile(profile))
 	}
 
+	// Last Login
+	if mappings.LastLogin != "" {
+		lastLoginValue, err := s.env.EvaluateString(ctx, mappings.LastLogin, inputs)
+		if err != nil {
+			return err
+		}
+
+		if lastLoginValue != "" {
+			// Try to parse the last login date using dbEngine to determine format
+			lastLoginTime, err := parseTimeWithEngine(lastLoginValue, s.dbEngine)
+			if err != nil {
+				l.Warn("failed to parse last login time", zap.String("last_login", lastLoginValue), zap.Error(err))
+			} else {
+				opts = append(opts, sdkResource.WithLastLogin(*lastLoginTime))
+			}
+		}
+	}
+
+	// Employee ID
+	if len(mappings.EmployeeIDs) > 0 {
+		var employeeIDs []string
+		for _, idMapping := range mappings.EmployeeIDs {
+			employeeID, err := s.env.EvaluateString(ctx, idMapping, inputs)
+			if err != nil {
+				return err
+			}
+			if employeeID != "" {
+				employeeIDs = append(employeeIDs, employeeID)
+			}
+		}
+
+		if len(employeeIDs) > 0 {
+			opts = append(opts, sdkResource.WithEmployeeID(employeeIDs...))
+		}
+	}
+
 	if mappings.AccountType != "" {
 		v, err := s.env.EvaluateString(ctx, mappings.AccountType, inputs)
 		if err != nil {
@@ -190,14 +226,44 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		opts = append(opts, sdkResource.WithUserLogin(primaryLogin, aliases...))
 	}
 
+	// Manager ID
+	if mappings.ManagerID != "" {
+		managerID, err := s.env.EvaluateString(ctx, mappings.ManagerID, inputs)
+		if err != nil {
+			return err
+		}
+
+		if managerID != "" {
+			// Add manager ID to profile attributes
+			profile["manager_id"] = managerID
+		}
+	}
+
+	// Manager Email
+	if mappings.ManagerEmail != "" {
+		managerEmail, err := s.env.EvaluateString(ctx, mappings.ManagerEmail, inputs)
+		if err != nil {
+			return err
+		}
+
+		if managerEmail != "" {
+			// Add manager email to profile attributes
+			profile["manager_email"] = managerEmail
+		}
+	}
+
 	t, err := sdkResource.NewUserTrait(opts...)
 	if err != nil {
 		return err
 	}
 
+	// Trait created successfully
+
 	annos := annotations.Annotations(r.Annotations)
 	annos.Update(t)
 	r.Annotations = annos
+
+	// Annotation applied
 
 	return nil
 }

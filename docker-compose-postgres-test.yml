@@ -1,0 +1,38 @@
+services:
+  # PostgreSQL Database for testing employee_id and last_login features
+  postgres:
+    image: postgres:14
+    container_name: baton-postgres-test
+    environment:
+      POSTGRES_USER: baton
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: batondb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./test/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "baton"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Connector test container
+  baton-sql-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: baton-sql-postgres-test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./examples:/examples
+      - ./test:/test
+    command: >
+      /bin/bash -c "
+        # Wait for PostgreSQL to be fully ready
+        sleep 5
+        # Run the baton-sql connector with PostgreSQL test configuration
+        /app/baton-sql --config-path /examples/postgres-test.yml --log-level debug
+      "

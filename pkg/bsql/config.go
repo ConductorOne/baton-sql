@@ -159,6 +159,15 @@ type UserTraitMapping struct {
 	// LastLogin records the time of the user's last login.
 	LastLogin string `yaml:"last_login" json:"last_login"`
 
+	// EmployeeIds stores the employee identifier(s) for the user.
+	EmployeeIDs []string `yaml:"employee_ids" json:"employee_ids"`
+
+	// ManagerID is the identifier of the user's manager.
+	ManagerID string `yaml:"manager_id" json:"manager_id"`
+
+	// ManagerEmail is the email address of the user's manager.
+	ManagerEmail string `yaml:"manager_email" json:"manager_email"`
+
 	// MfaEnabled indicates whether multi-factor authentication is enabled for the user.
 	MfaEnabled string `yaml:"mfa_enabled" json:"mfa_enabled"`
 

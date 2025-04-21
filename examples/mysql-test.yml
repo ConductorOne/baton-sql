@@ -1,0 +1,144 @@
+---
+# Application name for this connector configuration
+app_name: MySQL Test
+app_description: Test configuration for MySQL with employee_id and last_login support
+
+# Connection settings for the MySQL database
+connect:
+  # Data Source Name (DSN) for our test MySQL instance
+  # Use "localhost" when running locally and "mysql" when running in Docker Compose
+  dsn: "mysql://baton:password@mysql:3306/batondb"
+
+# Definition of different resource types managed by this connector
+resource_types:
+  # Configuration for "user" resources in MySQL
+  user:
+    # Display name for this resource type
+    name: "User"
+    # Description providing context about what a user represents
+    description: "A user within the MySQL system"
+    # Settings for listing user records from the database
+    list:
+      # SQL query to fetch user-related data including employee_id, last_login, and manager information
+      query: |
+        SELECT
+          u.id, 
+          u.username,
+          u.email,
+          u.employee_id,
+          u.status,
+          u.account_type,
+          u.created_at,
+          u.last_login,
+          u.manager_id,
+          m.username as manager_username,
+          m.email as manager_email
+        FROM
+          users u
+        LEFT JOIN 
+          users m ON u.manager_id = m.id
+      # Pagination configuration (using offset for MySQL)
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      # Mapping of query results to resource fields
+      map:
+        # Unique identifier for the user resource 
+        id: ".username"
+        # Field to display as the resource's name
+        display_name: ".username"
+        # Additional description for the user resource
+        description: ".username"
+        # Extra attributes (traits) for the user resource
+        traits:
+          user:
+            # Map status from database (active, disabled) to proper resource status
+            status: ".status"
+            # Login identifier - username
+            login: ".username"
+            # Email addresses
+            emails:
+              - ".email"
+            # Account type mapping
+            account_type: ".account_type"
+            # Employee ID mapping
+            employee_ids:
+              - ".employee_id"
+            # Last login timestamp mapping
+            last_login: ".last_login"
+            # Manager information
+            manager_id: ".manager_id"
+            manager_email: ".manager_email"
+            
+            # Profile details for the user
+            profile:
+              user_id: ".id"
+              created_at: ".created_at"
+              last_login: ".last_login"
+              manager_id: ".manager_id"
+              manager_username: ".manager_username"
+              manager_email: ".manager_email"
+              
+  # Configuration for "role" resources 
+  role:
+    # Display name for the role resource type
+    name: "Role"
+    # Brief description of what a role signifies
+    description: "A role within the MySQL system"
+    # Settings for listing roles from the database
+    list:
+      # SQL query to retrieve roles
+      query: |
+        SELECT
+          id,
+          role_name
+        FROM
+          roles
+      # Pagination configuration
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      # Mapping of each query result to role resource fields
+      map:
+        # Unique role identifier
+        id: ".role_name"
+        # Display name for the role
+        display_name: ".role_name"
+        # Role description
+        description: ".role_name"
+        # Additional role-specific traits
+        traits:
+          role:
+            # Profile mapping for the role
+            profile:
+              role_id: ".id"
+              
+    # Define a static entitlement for role membership
+    static_entitlements:
+      - id: "member"
+        display_name: "'Member'"
+        description: "'Role member'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+
+    # Dynamic grants based on SQL queries to associate users with roles
+    grants:
+      - query: |
+          SELECT 
+            u.username,
+            r.role_name
+          FROM 
+            users u
+          JOIN 
+            user_roles ur ON u.id = ur.user_id
+          JOIN 
+            roles r ON r.id = ur.role_id
+        pagination:
+          strategy: "offset"
+          primary_key: "username"
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "member"
