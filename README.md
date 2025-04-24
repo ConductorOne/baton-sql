@@ -11,8 +11,7 @@
 - MySQL
 - Microsoft SQL Server
 - Oracle
-- PostgreSQL (soon)
-- SQLite (soon)
+- PostgreSQL
 
 ## Configuration
 
