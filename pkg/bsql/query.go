@@ -396,6 +396,7 @@ func (s *SQLSyncer) runQuery(
 
 	rows, err := s.db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
+		l.Error("failed to run query", zap.String("query", q), zap.Any("args", qArgs), zap.Error(err))
 		return "", err
 	}
 	defer rows.Close()
