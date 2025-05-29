@@ -160,8 +160,17 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		}
 
 		if !skip {
+			entitlementIDs := []string{}
+			for _, entitlement := range mapping.Expandable.Entitlements {
+				entitlementID, err := s.env.EvaluateString(ctx, entitlement, inputs)
+				if err != nil {
+					return nil, false, err
+				}
+				entitlementIDs = append(entitlementIDs, entitlementID)
+			}
+
 			grantOptions = append(grantOptions, sdkGrant.WithAnnotation(&v2.GrantExpandable{
-				EntitlementIds: mapping.Expandable.EntitlementIDs,
+				EntitlementIds: entitlementIDs,
 				Shallow:        mapping.Expandable.Shallow,
 			}))
 		}
