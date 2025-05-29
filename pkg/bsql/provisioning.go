@@ -68,10 +68,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		return nil, err
 	}
 
-	useTx := true
-	if provisioningConfig.Grant.NoTransaction {
-		useTx = false
-	}
+	useTx := !provisioningConfig.Grant.NoTransaction
 	err = s.runProvisioningQueries(ctx, provisioningConfig.Grant.Queries, provisioningVars, useTx)
 	if err != nil {
 		return nil, err
@@ -116,11 +113,7 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 		return nil, err
 	}
 
-	useTx := true
-	if provisioningConfig.Revoke.NoTransaction {
-		useTx = false
-	}
-
+	useTx := !provisioningConfig.Revoke.NoTransaction
 	err = s.runProvisioningQueries(ctx, provisioningConfig.Revoke.Queries, provisioningVars, useTx)
 	if err != nil {
 		return nil, err
