@@ -161,7 +161,7 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 
 		if !skip {
 			grantOptions = append(grantOptions, sdkGrant.WithAnnotation(&v2.GrantExpandable{
-				EntitlementIds: mapping.Expandable.EntitlementIds,
+				EntitlementIds: mapping.Expandable.EntitlementIDs,
 				Shallow:        mapping.Expandable.Shallow,
 			}))
 		}
