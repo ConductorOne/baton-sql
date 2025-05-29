@@ -154,6 +154,10 @@ resource_types:
       pagination:
         strategy: "offset"
         primary_key: "user_id"
+      expandable:
+          entitlement_ids:
+          - "group:member"
+          shallow: true
 
 # Additional resource types would follow the same pattern
 # Example: groups, roles, applications, etc.

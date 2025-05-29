@@ -304,6 +304,17 @@ type GrantMapping struct {
 
 	// Annotations includes additional metadata for the grant mapping.
 	Annotations *Annotations `yaml:"annotations" json:"annotations"`
+
+	// Expandable indicates whether the grant should be expanded.
+	Expandable *ExpandableGrant `yaml:"expandable,omitempty" json:"expandable,omitempty"`
+}
+
+type ExpandableGrant struct {
+	// EntitlementIds is a list of entitlement IDs to expand.
+	EntitlementIds []string `yaml:"entitlement_ids" json:"entitlement_ids"`
+
+	// Shallow indicates whether the grant should be expanded shallowly.
+	Shallow bool `yaml:"shallow,omitempty" json:"shallow,omitempty"`
 }
 
 // AccountProvisioning defines the configuration for provisioning new accounts.

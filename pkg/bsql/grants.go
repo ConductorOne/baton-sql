@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -149,5 +150,13 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		return nil, false, err
 	}
 
-	return sdkGrant.NewGrant(resource, entitlementID, principal), true, nil
+	grantOptions := []grant.GrantOption{}
+	if mapping.Expandable != nil {
+		grantOptions = append(grantOptions, grant.WithAnnotation(&v2.GrantExpandable{
+			EntitlementIds: mapping.Expandable.EntitlementIds,
+			Shallow:        mapping.Expandable.Shallow,
+		}))
+	}
+
+	return sdkGrant.NewGrant(resource, entitlementID, principal, grantOptions...), true, nil
 }
