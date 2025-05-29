@@ -8,7 +8,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	connector_v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
@@ -106,10 +105,10 @@ type ResourceMapping struct {
 // Annotations holds extra metadata for resource or grant mappings.
 type Annotations struct {
 	// EntitlementImmutable provides settings to mark an entitlement as immutable (e.g., cannot be revoked).
-	EntitlementImmutable *connector_v2.EntitlementImmutable `yaml:"entitlement_immutable" json:"entitlement_immutable"`
+	EntitlementImmutable *v2.EntitlementImmutable `yaml:"entitlement_immutable" json:"entitlement_immutable"`
 
 	// ExternalLink provides an external URL reference related to the resource or entitlement.
-	ExternalLink *connector_v2.ExternalLink `yaml:"external_link" json:"external_link"`
+	ExternalLink *v2.ExternalLink `yaml:"external_link" json:"external_link"`
 }
 
 // Traits defines attribute mappings for different resource types.

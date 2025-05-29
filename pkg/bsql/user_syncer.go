@@ -133,12 +133,9 @@ func (s *userSyncer) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("unsupported credential options %v", credentialOptions)
 	}
 
-	useTx := true
-	if accountProvisioning.Create.NoTransaction {
-		useTx = false
-	}
+	useTx := !accountProvisioning.Create.NoTransaction
 
-	err = s.SQLSyncer.runProvisioningQueries(ctx, accountProvisioning.Create.Queries, inputs, useTx)
+	err = s.runProvisioningQueries(ctx, accountProvisioning.Create.Queries, inputs, useTx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
