@@ -310,6 +310,9 @@ type GrantMapping struct {
 }
 
 type ExpandableGrant struct {
+	// SkipIf provides a CEL expression to ignore this row mapping if the condition evaluates to true.
+	SkipIf string `yaml:"skip_if,omitempty" json:"skip_if,omitempty"`
+
 	// EntitlementIds is a list of entitlement IDs to expand.
 	EntitlementIds []string `yaml:"entitlement_ids" json:"entitlement_ids"`
 

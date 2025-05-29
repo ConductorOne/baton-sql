@@ -152,10 +152,20 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 
 	grantOptions := []grant.GrantOption{}
 	if mapping.Expandable != nil {
-		grantOptions = append(grantOptions, grant.WithAnnotation(&v2.GrantExpandable{
-			EntitlementIds: mapping.Expandable.EntitlementIds,
-			Shallow:        mapping.Expandable.Shallow,
-		}))
+		skip := false
+		if mapping.Expandable.SkipIf != "" {
+			skip, err = s.env.EvaluateBool(ctx, mapping.Expandable.SkipIf, inputs)
+			if err != nil {
+				return nil, false, err
+			}
+		}
+
+		if !skip {
+			grantOptions = append(grantOptions, grant.WithAnnotation(&v2.GrantExpandable{
+				EntitlementIds: mapping.Expandable.EntitlementIds,
+				Shallow:        mapping.Expandable.Shallow,
+			}))
+		}
 	}
 
 	return sdkGrant.NewGrant(resource, entitlementID, principal, grantOptions...), true, nil
