@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -150,7 +149,7 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		return nil, false, err
 	}
 
-	grantOptions := []grant.GrantOption{}
+	grantOptions := []sdkGrant.GrantOption{}
 	if mapping.Expandable != nil {
 		skip := false
 		if mapping.Expandable.SkipIf != "" {
@@ -161,7 +160,7 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		}
 
 		if !skip {
-			grantOptions = append(grantOptions, grant.WithAnnotation(&v2.GrantExpandable{
+			grantOptions = append(grantOptions, sdkGrant.WithAnnotation(&v2.GrantExpandable{
 				EntitlementIds: mapping.Expandable.EntitlementIds,
 				Shallow:        mapping.Expandable.Shallow,
 			}))
