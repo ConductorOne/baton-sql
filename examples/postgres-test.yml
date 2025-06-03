@@ -6,7 +6,7 @@ app_description: Test configuration for PostgreSQL with employee_id and last_log
 # Connection settings for the PostgreSQL database
 connect:
   # Data Source Name (DSN) for our test PostgreSQL instance
-  dsn: "postgres://baton:password@baton-postgres-test:5432/batondb?sslmode=disable"
+  dsn: "postgres://baton:password@localhost:5432/batondb?sslmode=disable"
 
 # Definition of different resource types managed by this connector
 resource_types:
