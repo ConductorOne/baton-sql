@@ -141,3 +141,56 @@ resource_types:
             principal_id: ".username"
             principal_type: "user"
             entitlement_id: "member"
+
+  feature:
+    name: "Feature"
+    description: "A Feature in the App"
+    list:
+      query: |
+        SELECT
+          f.id AS feat_id,
+          f.name AS feat_name,
+          f.description AS feat_desc
+        FROM features f
+        where f.is_deleted = false
+      map:
+        id: ".feat_id"
+        display_name: ".feat_name"
+        description:  ".feat_desc"
+        traits:
+          feature:
+            profile:
+              - feature_id: ".feat_id"
+      pagination:
+        strategy: "offset"
+        primary_key: "feat_id"
+    static_entitlements:
+      - id: "assigned"
+        display_name: "'Assigned'"
+        description: "'Assigned'"
+        purpose: "permission"
+        grantable_to:
+          - "user"
+          - "role"
+    grants:
+      - query: |
+          SELECT DISTINCT
+            fr.feature_id AS feat_id,
+            fr.role_id AS role_id,
+            f.name AS feat_name, 
+            r.name AS role_name
+          FROM feature_roles fr
+          JOIN roles r
+          ON r.id = fr.role_id
+          JOIN features f
+          ON f.id = fr.feature_id
+        map:
+          - skip_if: "string(.feat_id) != resource.ID"
+            principal_id: ".role_id"
+            principal_type: "role"
+            entitlement_id: "assigned"
+        expandable:
+          # skip_if: ".principal_type == 'role'"
+          entitlement_ids:
+            - "role:assigned"
+          shallow: true
