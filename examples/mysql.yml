@@ -144,8 +144,3 @@ resource_types:
             principal_id: ".username"
             principal_type: "user"
             entitlement_id: "member"
-        expandable:
-          skip_if: ".principal_type == 'role'"
-          entitlement_ids:
-            - "role:member"
-          shallow: true
