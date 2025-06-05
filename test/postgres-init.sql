@@ -4,6 +4,7 @@ DROP TABLE IF EXISTS login_history;
 DROP TABLE IF EXISTS user_roles;
 DROP TABLE IF EXISTS roles;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS features;
 
 -- Create users table
 CREATE TABLE users (
@@ -113,6 +114,34 @@ INSERT INTO employee_data (user_id, employee_id, employee_number, employee_code)
 (5, 'EMP004', 10004, 'E-10004'),
 (6, 'EMP005', 10005, 'E-10005'),
 (7, 'EMP006', 10006, 'E-10006');
+
+-- Create features table
+CREATE TABLE features (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  description VARCHAR(255) NOT NULL,
+  is_deleted BOOLEAN DEFAULT FALSE
+);
+
+-- Insert sample features
+INSERT INTO features (name, description) VALUES
+('feature1', 'Feature 1 description'),
+('feature2', 'Feature 2 description'),
+('feature3', 'Feature 3 description');
+
+-- Create feature_roles table
+CREATE TABLE feature_roles (
+  feature_id INTEGER,
+  role_id INTEGER,
+  PRIMARY KEY (feature_id, role_id),
+  FOREIGN KEY (feature_id) REFERENCES features(id),
+  FOREIGN KEY (role_id) REFERENCES roles(id)
+);
+
+-- Assign roles to features
+INSERT INTO feature_roles (feature_id, role_id) VALUES
+(1, 1), -- feature1 has admin role
+(2, 2); -- feature2 has user role
 
 -- Print a message indicating successful setup
 SELECT 'Baton SQL test database initialized successfully' as message;

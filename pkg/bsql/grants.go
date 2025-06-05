@@ -149,5 +149,32 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		return nil, false, err
 	}
 
-	return sdkGrant.NewGrant(resource, entitlementID, principal), true, nil
+	grantOptions := []sdkGrant.GrantOption{}
+	if mapping.Expandable != nil {
+		skip := false
+		if mapping.Expandable.SkipIf != "" {
+			skip, err = s.env.EvaluateBool(ctx, mapping.Expandable.SkipIf, inputs)
+			if err != nil {
+				return nil, false, err
+			}
+		}
+
+		if !skip {
+			entitlementIDs := []string{}
+			for _, entitlement := range mapping.Expandable.Entitlements {
+				entitlementID, err := s.env.EvaluateString(ctx, entitlement, inputs)
+				if err != nil {
+					return nil, false, err
+				}
+				entitlementIDs = append(entitlementIDs, entitlementID)
+			}
+
+			grantOptions = append(grantOptions, sdkGrant.WithAnnotation(&v2.GrantExpandable{
+				EntitlementIds: entitlementIDs,
+				Shallow:        mapping.Expandable.Shallow,
+			}))
+		}
+	}
+
+	return sdkGrant.NewGrant(resource, entitlementID, principal, grantOptions...), true, nil
 }
