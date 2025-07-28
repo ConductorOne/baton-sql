@@ -3,7 +3,7 @@ module github.com/conductorone/baton-sql
 go 1.24
 
 require (
-	github.com/conductorone/baton-sdk v0.3.7
+	github.com/conductorone/baton-sdk v0.3.22
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.9.2
@@ -124,6 +124,7 @@ require (
 	golang.org/x/oauth2 v0.29.0 // indirect
 	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/term v0.31.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250414145226-207652e42e2e // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250414145226-207652e42e2e // indirect
 	google.golang.org/grpc v1.71.1 // indirect
