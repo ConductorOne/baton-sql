@@ -99,7 +99,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with no replacements",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table",
 				nil,
 				nil,
@@ -113,7 +113,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with same case replacement",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<limit>",
 				&paginationContext{
 					Limit: 10,
@@ -129,7 +129,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with different case replacement",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<LIMIT>",
 				&paginationContext{
 					Limit: 10,
@@ -145,7 +145,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with multiple replacements (Postgres)",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<LIMIT> OFFSET ?<OFFSET>",
 				&paginationContext{
 					Limit:  10,
@@ -162,7 +162,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with multiple replacements (Postgres)",
 			database.PostgreSQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<LIMIT> OFFSET ?<OFFSET>",
 				&paginationContext{
 					Limit:  10,
@@ -179,7 +179,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with multiple replacements (SQLite)",
 			database.SQLite,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<LIMIT> OFFSET ?<OFFSET>",
 				&paginationContext{
 					Limit:  10,
@@ -196,7 +196,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with multiple replacements (MSSQL)",
 			database.MSSQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<LIMIT> OFFSET ?<OFFSET>",
 				&paginationContext{
 					Limit:  10,
@@ -213,7 +213,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with multiple replacements (Oracle)",
 			database.Oracle,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<LIMIT> OFFSET ?<OFFSET>",
 				&paginationContext{
 					Limit:  10,
@@ -230,7 +230,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with unknown token",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM ?<badToken> LIMIT ?<LIMIT> OFFSET ?<OFFSET>",
 				&paginationContext{
 					Limit:  10,
@@ -247,7 +247,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with unquoted limit",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<limit|unquoted>",
 				&paginationContext{
 					Limit: 10,
@@ -263,7 +263,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with unquoted offset",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table OFFSET ?<offset|unquoted>",
 				&paginationContext{
 					Offset: 123,
@@ -279,7 +279,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with unquoted cursor",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table WHERE id > ?<cursor|unquoted>",
 				&paginationContext{
 					Cursor: "abc123",
@@ -295,7 +295,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with mixed quoted and unquoted options",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table WHERE id > ?<cursor> LIMIT ?<limit|unquoted>",
 				&paginationContext{
 					Cursor: "abc123",
@@ -312,7 +312,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test invalid unquoted option",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table LIMIT ?<limit|invalid>",
 				&paginationContext{
 					Limit: 10,
@@ -328,7 +328,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with var substitution",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM table WHERE test = ?<foo> and answer = ?<bar>",
 				nil,
 				map[string]any{
@@ -345,7 +345,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			"Test valid query with unquoted table name var substitution",
 			database.MySQL,
 			args{
-				context.Background(),
+				t.Context(),
 				"SELECT * FROM ?<table_name|unquoted> WHERE test = ?<foo>",
 				nil,
 				map[string]any{
@@ -364,7 +364,7 @@ func Test_parseQueryOpts(t *testing.T) {
 			ss := &SQLSyncer{
 				dbEngine: tt.dbEngine,
 			}
-			query, queryArgs, paginationUsed, err := ss.parseQueryOpts(tt.args.ctx, tt.args.pCtx, tt.args.query, tt.args.vars)
+			query, queryArgs, paginationUsed, err := ss.parseQueryOpts(tt.args.pCtx, tt.args.query, tt.args.vars)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseQueryOpts() error = %v, wantErr %v", err, tt.wantErr)
 				return

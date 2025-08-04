@@ -19,7 +19,7 @@ func (s *SQLSyncer) Entitlements(ctx context.Context, resource *v2.Resource, pTo
 	return s.dynamicEntitlements(ctx, resource, pToken)
 }
 
-func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	inputs := s.env.SyncInputsWithResource(nil, resource)
 
 	var ret []*v2.Entitlement

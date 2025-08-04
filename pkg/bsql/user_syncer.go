@@ -121,7 +121,7 @@ func (s *userSyncer) CreateAccount(
 
 	var ptds []*v2.PlaintextData
 
-	inputs, err := s.prepareSchemaVars(ctx, accountProvisioning, accountInfo)
+	inputs, err := s.prepareSchemaVars(accountProvisioning, accountInfo)
 	if err != nil {
 		return nil, nil, nil, err
 	}

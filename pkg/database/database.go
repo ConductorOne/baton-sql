@@ -28,7 +28,7 @@ const (
 	Oracle
 )
 
-func updateFromEnv(ctx context.Context, dsn string) (string, error) {
+func updateFromEnv(dsn string) (string, error) {
 	var err error
 
 	result := DSNREnvRegex.ReplaceAllStringFunc(dsn, func(match string) string {
@@ -49,7 +49,7 @@ func updateFromEnv(ctx context.Context, dsn string) (string, error) {
 }
 
 func Connect(ctx context.Context, dsn string, user string, password string) (*sql.DB, DbEngine, error) {
-	populatedDSN, err := updateFromEnv(ctx, dsn)
+	populatedDSN, err := updateFromEnv(dsn)
 	if err != nil {
 		return nil, Unknown, err
 	}
@@ -64,12 +64,12 @@ func Connect(ctx context.Context, dsn string, user string, password string) (*sq
 			return nil, Unknown, errors.New("user and password must be set in DSN or in the configuration")
 		}
 
-		populatedUser, err := updateFromEnv(ctx, user)
+		populatedUser, err := updateFromEnv(user)
 		if err != nil {
 			return nil, Unknown, err
 		}
 
-		populatedPassword, err := updateFromEnv(ctx, password)
+		populatedPassword, err := updateFromEnv(password)
 		if err != nil {
 			return nil, Unknown, err
 		}

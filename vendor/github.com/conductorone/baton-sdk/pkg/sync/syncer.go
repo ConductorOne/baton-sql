@@ -107,12 +107,6 @@ func (p *ProgressCounts) LogEntitlementsProgress(ctx context.Context, resourceTy
 	percentComplete := (entitlementsProgress * 100) / resources
 
 	switch {
-	case entitlementsProgress > resources:
-		l.Error("more entitlement resources than resources",
-			zap.String("resource_type_id", resourceType),
-			zap.Int("synced", entitlementsProgress),
-			zap.Int("total", resources),
-		)
 	case percentComplete == 100:
 		l.Info("Synced entitlements",
 			zap.String("resource_type_id", resourceType),
@@ -121,12 +115,20 @@ func (p *ProgressCounts) LogEntitlementsProgress(ctx context.Context, resourceTy
 		)
 		p.LastEntitlementLog[resourceType] = time.Time{}
 	case time.Since(p.LastEntitlementLog[resourceType]) > maxLogFrequency:
-		l.Info("Syncing entitlements",
-			zap.String("resource_type_id", resourceType),
-			zap.Int("synced", entitlementsProgress),
-			zap.Int("total", resources),
-			zap.Int("percent_complete", percentComplete),
-		)
+		if entitlementsProgress > resources {
+			l.Warn("more entitlement resources than resources",
+				zap.String("resource_type_id", resourceType),
+				zap.Int("synced", entitlementsProgress),
+				zap.Int("total", resources),
+			)
+		} else {
+			l.Info("Syncing entitlements",
+				zap.String("resource_type_id", resourceType),
+				zap.Int("synced", entitlementsProgress),
+				zap.Int("total", resources),
+				zap.Int("percent_complete", percentComplete),
+			)
+		}
 		p.LastEntitlementLog[resourceType] = time.Now()
 	}
 }
@@ -151,12 +153,6 @@ func (p *ProgressCounts) LogGrantsProgress(ctx context.Context, resourceType str
 	percentComplete := (grantsProgress * 100) / resources
 
 	switch {
-	case grantsProgress > resources:
-		l.Error("more grant resources than resources",
-			zap.String("resource_type_id", resourceType),
-			zap.Int("synced", grantsProgress),
-			zap.Int("total", resources),
-		)
 	case percentComplete == 100:
 		l.Info("Synced grants",
 			zap.String("resource_type_id", resourceType),
@@ -165,12 +161,20 @@ func (p *ProgressCounts) LogGrantsProgress(ctx context.Context, resourceType str
 		)
 		p.LastGrantLog[resourceType] = time.Time{}
 	case time.Since(p.LastGrantLog[resourceType]) > maxLogFrequency:
-		l.Info("Syncing grants",
-			zap.String("resource_type_id", resourceType),
-			zap.Int("synced", grantsProgress),
-			zap.Int("total", resources),
-			zap.Int("percent_complete", percentComplete),
-		)
+		if grantsProgress > resources {
+			l.Warn("more grant resources than resources",
+				zap.String("resource_type_id", resourceType),
+				zap.Int("synced", grantsProgress),
+				zap.Int("total", resources),
+			)
+		} else {
+			l.Info("Syncing grants",
+				zap.String("resource_type_id", resourceType),
+				zap.Int("synced", grantsProgress),
+				zap.Int("total", resources),
+				zap.Int("percent_complete", percentComplete),
+			)
+		}
 		p.LastGrantLog[resourceType] = time.Now()
 	}
 }
@@ -204,8 +208,9 @@ type syncer struct {
 	lastCheckPointTime                  time.Time
 	counts                              *ProgressCounts
 	targetedSyncResourceIDs             []string
-
-	skipEGForResourceType map[string]bool
+	onlyExpandGrants                    bool
+	syncID                              string
+	skipEGForResourceType               map[string]bool
 }
 
 const minCheckpointInterval = 10 * time.Second
@@ -261,6 +266,14 @@ func (s *syncer) startOrResumeSync(ctx context.Context) (string, bool, error) {
 	// Sync resuming logic:
 	// If no targetedSyncResourceIDs, find the most recent sync and resume it (regardless of partial or full).
 	// If targetedSyncResourceIDs, start a new partial sync. Use the most recent completed sync as the parent sync ID (if it exists).
+
+	if s.syncID != "" {
+		err := s.store.SetCurrentSync(ctx, s.syncID)
+		if err != nil {
+			return "", false, err
+		}
+		return s.syncID, false, nil
+	}
 
 	var syncID string
 	var newSync bool
@@ -409,6 +422,7 @@ func (s *syncer) Sync(ctx context.Context) error {
 						ParentResourceTypeID: r.GetParentResourceId().GetResourceType(),
 					})
 				}
+				s.state.SetShouldFetchRelatedResources()
 				s.state.PushAction(ctx, Action{Op: SyncResourceTypesOp})
 				err = s.Checkpoint(ctx, true)
 				if err != nil {
@@ -423,6 +437,14 @@ func (s *syncer) Sync(ctx context.Context) error {
 			s.state.PushAction(ctx, Action{Op: SyncGrantExpansionOp})
 			if s.externalResourceReader != nil {
 				s.state.PushAction(ctx, Action{Op: SyncExternalResourcesOp})
+			}
+			if s.onlyExpandGrants {
+				s.state.SetNeedsExpansion()
+				err = s.Checkpoint(ctx, true)
+				if err != nil {
+					return err
+				}
+				continue
 			}
 			s.state.PushAction(ctx, Action{Op: SyncGrantsOp})
 			s.state.PushAction(ctx, Action{Op: SyncEntitlementsOp})
@@ -660,6 +682,31 @@ func (s *syncer) getSubResources(ctx context.Context, parent *v2.Resource) error
 	return nil
 }
 
+func (s *syncer) getResourceFromConnector(ctx context.Context, resourceID *v2.ResourceId, parentResourceID *v2.ResourceId) (*v2.Resource, error) {
+	ctx, span := tracer.Start(ctx, "syncer.getResource")
+	defer span.End()
+
+	resourceResp, err := s.connector.GetResource(ctx,
+		&v2.ResourceGetterServiceGetResourceRequest{
+			ResourceId:       resourceID,
+			ParentResourceId: parentResourceID,
+		},
+	)
+	if err == nil {
+		return resourceResp.Resource, nil
+	}
+	l := ctxzap.Extract(ctx)
+	if status.Code(err) == codes.NotFound {
+		l.Warn("skipping resource due to not found", zap.String("resource_id", resourceID.GetResource()), zap.String("resource_type_id", resourceID.GetResourceType()))
+		return nil, nil
+	}
+	if status.Code(err) == codes.Unimplemented {
+		l.Warn("skipping resource due to unimplemented connector", zap.String("resource_id", resourceID.GetResource()), zap.String("resource_type_id", resourceID.GetResourceType()))
+		return nil, nil
+	}
+	return nil, err
+}
+
 func (s *syncer) SyncTargetedResource(ctx context.Context) error {
 	ctx, span := tracer.Start(ctx, "syncer.SyncTargetedResource")
 	defer span.End()
@@ -680,21 +727,22 @@ func (s *syncer) SyncTargetedResource(ctx context.Context) error {
 		}
 	}
 
-	resourceResp, err := s.connector.GetResource(ctx,
-		&v2.ResourceGetterServiceGetResourceRequest{
-			ResourceId: &v2.ResourceId{
-				ResourceType: resourceTypeID,
-				Resource:     resourceID,
-			},
-			ParentResourceId: prID,
-		},
-	)
+	resource, err := s.getResourceFromConnector(ctx, &v2.ResourceId{
+		ResourceType: resourceTypeID,
+		Resource:     resourceID,
+	}, prID)
 	if err != nil {
 		return err
 	}
 
+	// If getResource encounters not found or unimplemented, it returns a nil resource and nil error.
+	if resource == nil {
+		s.state.FinishAction(ctx)
+		return nil
+	}
+
 	// Save our resource in the DB
-	if err := s.store.PutResources(ctx, resourceResp.Resource); err != nil {
+	if err := s.store.PutResources(ctx, resource); err != nil {
 		return err
 	}
 
@@ -714,7 +762,7 @@ func (s *syncer) SyncTargetedResource(ctx context.Context) error {
 		ResourceID:     resourceID,
 	})
 
-	err = s.getSubResources(ctx, resourceResp.Resource)
+	err = s.getSubResources(ctx, resource)
 	if err != nil {
 		return err
 	}
@@ -1515,6 +1563,7 @@ func (s *syncer) syncGrantsForResource(ctx context.Context, resourceID *v2.Resou
 	// We want to process any grants from the previous sync first so that if there is a conflict, the newer data takes precedence
 	grants = append(grants, resp.List...)
 
+	l := ctxzap.Extract(ctx)
 	for _, grant := range grants {
 		grantAnnos := annotations.Annotations(grant.GetAnnotations())
 		if grantAnnos.Contains(&v2.GrantExpandable{}) {
@@ -1522,6 +1571,57 @@ func (s *syncer) syncGrantsForResource(ctx context.Context, resourceID *v2.Resou
 		}
 		if grantAnnos.ContainsAny(&v2.ExternalResourceMatchAll{}, &v2.ExternalResourceMatch{}, &v2.ExternalResourceMatchID{}) {
 			s.state.SetHasExternalResourcesGrants()
+		}
+
+		if !s.state.ShouldFetchRelatedResources() {
+			continue
+		}
+		// Some connectors emit grants for other resources. If we're doing a partial sync, check if it exists and queue a fetch if not.
+		entitlementResource := grant.GetEntitlement().GetResource()
+		_, err := s.store.GetResource(ctx, &reader_v2.ResourcesReaderServiceGetResourceRequest{
+			ResourceId: entitlementResource.GetId(),
+		})
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+
+			erId := entitlementResource.GetId()
+			prId := entitlementResource.GetParentResourceId()
+			resource, err := s.getResourceFromConnector(ctx, erId, prId)
+			if err != nil {
+				l.Error("error fetching entitlement resource", zap.Error(err))
+				return err
+			}
+			if resource == nil {
+				continue
+			}
+			if err := s.store.PutResources(ctx, resource); err != nil {
+				return err
+			}
+		}
+
+		principalResource := grant.GetPrincipal()
+		_, err = s.store.GetResource(ctx, &reader_v2.ResourcesReaderServiceGetResourceRequest{
+			ResourceId: principalResource.GetId(),
+		})
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+
+			// Principal resource is not in the DB, so try to fetch it from the connector.
+			resource, err := s.getResourceFromConnector(ctx, principalResource.GetId(), principalResource.GetParentResourceId())
+			if err != nil {
+				l.Error("error fetching principal resource", zap.Error(err))
+				return err
+			}
+			if resource == nil {
+				continue
+			}
+			if err := s.store.PutResources(ctx, resource); err != nil {
+				return err
+			}
 		}
 	}
 	err = s.store.PutGrants(ctx, grants...)
@@ -2236,7 +2336,8 @@ func (s *syncer) runGrantExpandActions(ctx context.Context) (bool, error) {
 
 	// Peek the next action on the stack
 	if len(graph.Actions) == 0 {
-		l.Debug("runGrantExpandActions: no actions", zap.Any("graph", graph))
+		l.Debug("runGrantExpandActions: no actions") // zap.Any("graph", graph),
+
 		return true, nil
 	}
 	action := graph.Actions[0]
@@ -2366,12 +2467,6 @@ func (s *syncer) runGrantExpandActions(ctx context.Context) (bool, error) {
 			}
 			// Include the source grant as a source.
 			sourcesMap[sourceGrant.GetEntitlement().GetId()] = &v2.GrantSources_GrantSource{}
-
-			l.Debug(
-				"runGrantExpandActions: updating sources for descendant grant",
-				zap.String("grant_id", descendantGrant.GetId()),
-				zap.Any("sources", sources),
-			)
 		}
 		newGrants = append(newGrants, descendantGrants...)
 	}
@@ -2424,7 +2519,7 @@ func (s *syncer) expandGrantsForEntitlements(ctx context.Context) error {
 
 	graph := s.state.EntitlementGraph(ctx)
 	l = l.With(zap.Int("depth", graph.Depth))
-	l.Debug("expandGrantsForEntitlements: start", zap.Any("graph", graph))
+	l.Debug("expandGrantsForEntitlements: start") // zap.Any("graph", graph)
 
 	s.counts.LogExpandProgress(ctx, graph.Actions)
 
@@ -2451,7 +2546,7 @@ func (s *syncer) expandGrantsForEntitlements(ctx context.Context) error {
 	if int64(graph.Depth) > maxDepth {
 		l.Error(
 			"expandGrantsForEntitlements: exceeded max depth",
-			zap.Any("graph", graph),
+			// zap.Any("graph", graph),
 			zap.Int64("max_depth", maxDepth),
 		)
 		s.state.FinishAction(ctx)
@@ -2487,13 +2582,13 @@ func (s *syncer) expandGrantsForEntitlements(ctx context.Context) error {
 	}
 
 	if graph.IsExpanded() {
-		l.Debug("expandGrantsForEntitlements: graph is expanded", zap.Any("graph", graph))
+		l.Debug("expandGrantsForEntitlements: graph is expanded") // zap.Any("graph", graph)
 		s.state.FinishAction(ctx)
 		return nil
 	}
 
 	graph.Depth++
-	l.Debug("expandGrantsForEntitlements: graph is not expanded", zap.Any("graph", graph))
+	l.Debug("expandGrantsForEntitlements: graph is not expanded") // zap.Any("graph", graph)
 	return nil
 }
 
@@ -2620,6 +2715,18 @@ func WithExternalResourceEntitlementIdFilter(entitlementId string) SyncOpt {
 func WithTargetedSyncResourceIDs(resourceIDs []string) SyncOpt {
 	return func(s *syncer) {
 		s.targetedSyncResourceIDs = resourceIDs
+	}
+}
+
+func WithOnlyExpandGrants() SyncOpt {
+	return func(s *syncer) {
+		s.onlyExpandGrants = true
+	}
+}
+
+func WithSyncID(syncID string) SyncOpt {
+	return func(s *syncer) {
+		s.syncID = syncID
 	}
 }
 

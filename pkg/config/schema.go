@@ -15,3 +15,12 @@ var (
 	}
 	ConfigurationSchema = field.NewConfiguration(ConfigurationFields)
 )
+
+var (
+	Config = field.NewConfiguration(
+		ConfigurationFields,
+		field.WithConnectorDisplayName("SQL"),
+		field.WithHelpUrl("/docs/baton/sql"),
+		field.WithIconUrl("/static/app-icons/sql.svg"),
+	)
+)
