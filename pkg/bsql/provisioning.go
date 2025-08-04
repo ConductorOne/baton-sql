@@ -150,7 +150,7 @@ func (s *SQLSyncer) prepareProvisioningVars(ctx context.Context, vars map[string
 	return ret, nil
 }
 
-func (s *SQLSyncer) prepareSchemaVars(ctx context.Context, accountProvisioning *AccountProvisioning, accountInfo *v2.AccountInfo) (map[string]any, error) {
+func (s *SQLSyncer) prepareSchemaVars(accountProvisioning *AccountProvisioning, accountInfo *v2.AccountInfo) (map[string]any, error) {
 	inputs := make(map[string]any)
 
 	for _, field := range accountProvisioning.Schema {

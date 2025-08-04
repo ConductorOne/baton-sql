@@ -1,7 +1,6 @@
 package bcel
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 )
 
 func TestTemplateEnv_Evaluate(tt *testing.T) {
-	ctx := context.Background()
+	ctx := tt.Context()
 
 	for _, fn := range functions.GetAllFunctions() {
 		for _, op := range fn.Overloads {

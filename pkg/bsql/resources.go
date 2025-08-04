@@ -41,7 +41,7 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 	return ret, npt, nil, nil
 }
 
-func (s *SQLSyncer) fetchTraits(ctx context.Context) map[string]bool {
+func (s *SQLSyncer) fetchTraits() map[string]bool {
 	traits := make(map[string]bool)
 	mapTraits := s.config.List.Map.Traits
 	if mapTraits != nil {
@@ -373,7 +373,7 @@ func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map
 func (s *SQLSyncer) mapTraits(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
 	l := ctxzap.Extract(ctx)
 
-	for trait, enabled := range s.fetchTraits(ctx) {
+	for trait, enabled := range s.fetchTraits() {
 		if !enabled {
 			continue
 		}

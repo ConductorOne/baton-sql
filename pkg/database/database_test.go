@@ -22,7 +22,7 @@ func Test_updateDSNFromEnv(t *testing.T) {
 			"Test valid DSN with no replacements",
 			map[string]string{},
 			args{
-				context.Background(),
+				t.Context(),
 				"mysql://user:password@localhost:3306/dbname",
 			},
 			"mysql://user:password@localhost:3306/dbname",
@@ -38,7 +38,7 @@ func Test_updateDSNFromEnv(t *testing.T) {
 				"DB_NAME":     "dbname",
 			},
 			args{
-				context.Background(),
+				t.Context(),
 				"mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}",
 			},
 			"mysql://user:password@localhost:3306/dbname",
@@ -53,7 +53,7 @@ func Test_updateDSNFromEnv(t *testing.T) {
 				"DB_NAME":     "dbname",
 			},
 			args{
-				context.Background(),
+				t.Context(),
 				"mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}",
 			},
 			"",
@@ -64,11 +64,9 @@ func Test_updateDSNFromEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for k, v := range tt.env {
-				if err := os.Setenv(k, v); err != nil {
-					t.Fatalf("failed to set env var %s: %v", k, err)
-				}
+				t.Setenv(k, v)
 			}
-			got, err := updateFromEnv(tt.args.ctx, tt.args.dsn)
+			got, err := updateFromEnv(tt.args.dsn)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("updateFromEnv() error = %v, wantErr %v", err, tt.wantErr)
 				return

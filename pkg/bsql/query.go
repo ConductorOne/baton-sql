@@ -95,7 +95,7 @@ func parseToken(token string) (*queryTokenOpts, error) {
 	return opts, nil
 }
 
-func (s *SQLSyncer) parseQueryOpts(ctx context.Context, pCtx *paginationContext, query string, vars map[string]any) (string, []interface{}, bool, error) {
+func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars map[string]any) (string, []interface{}, bool, error) {
 	if vars == nil {
 		vars = make(map[string]any)
 	}
@@ -161,13 +161,13 @@ func clampPageSize(pageSize int) int64 {
 	return int64(pageSize)
 }
 
-func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token, query string, pOpts *Pagination, vars map[string]any) (string, []interface{}, *paginationContext, error) {
-	pCtx, err := s.setupPagination(ctx, pToken, pOpts)
+func (s *SQLSyncer) prepareQuery(pToken *pagination.Token, query string, pOpts *Pagination, vars map[string]any) (string, []interface{}, *paginationContext, error) {
+	pCtx, err := s.setupPagination(pToken, pOpts)
 	if err != nil {
 		return "", nil, nil, err
 	}
 
-	q, qArgs, paginationUsed, err := s.parseQueryOpts(ctx, pCtx, query, vars)
+	q, qArgs, paginationUsed, err := s.parseQueryOpts(pCtx, query, vars)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -179,7 +179,7 @@ func (s *SQLSyncer) prepareQuery(ctx context.Context, pToken *pagination.Token, 
 	return q, qArgs, pCtx, nil
 }
 
-func (s *SQLSyncer) nextPageToken(ctx context.Context, pCtx *paginationContext, lastRowID any) (string, error) {
+func (s *SQLSyncer) nextPageToken(pCtx *paginationContext, lastRowID any) (string, error) {
 	if pCtx == nil {
 		return "", nil
 	}
@@ -227,7 +227,7 @@ func (s *SQLSyncer) nextPageToken(ctx context.Context, pCtx *paginationContext, 
 	return ret, nil
 }
 
-func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Token, pOpts *Pagination) (*paginationContext, error) {
+func (s *SQLSyncer) setupPagination(pToken *pagination.Token, pOpts *Pagination) (*paginationContext, error) {
 	if pOpts == nil {
 		return nil, nil
 	}
@@ -261,7 +261,7 @@ func (s *SQLSyncer) setupPagination(ctx context.Context, pToken *pagination.Toke
 	return ret, nil
 }
 
-func (s *SQLSyncer) prepareProvisioningQuery(ctx context.Context, query string, vars map[string]any) (string, []interface{}, error) {
+func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) (string, []interface{}, error) {
 	var qArgs []interface{}
 
 	var parseErr error
@@ -299,7 +299,7 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 	var executor executor = s.db
 
 	if useTx {
-		tx, err := s.db.Begin()
+		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -315,7 +315,7 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 	}
 
 	for _, q := range queries {
-		q, qArgs, err := s.prepareProvisioningQuery(ctx, q, vars)
+		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
 			return err
 		}
@@ -387,7 +387,7 @@ func (s *SQLSyncer) runQuery(
 ) (string, error) {
 	l := ctxzap.Extract(ctx)
 
-	q, qArgs, pCtx, err := s.prepareQuery(ctx, pToken, query, pOpts, vars)
+	q, qArgs, pCtx, err := s.prepareQuery(pToken, query, pOpts, vars)
 	if err != nil {
 		return "", err
 	}
@@ -454,7 +454,7 @@ func (s *SQLSyncer) runQuery(
 
 	nextPageToken := ""
 	if pCtx != nil && rowCount > int(pCtx.Limit) {
-		nextPageToken, err = s.nextPageToken(ctx, pCtx, lastRowID)
+		nextPageToken, err = s.nextPageToken(pCtx, lastRowID)
 		if err != nil {
 			return "", err
 		}
