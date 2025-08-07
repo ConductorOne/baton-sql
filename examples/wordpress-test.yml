@@ -1,0 +1,146 @@
+---
+# Application name for the Wordpress connector.
+app_name: Wordpress Test
+app_description: Test configuration for WordPress with password support
+
+# Connection configuration using a MySQL DSN.
+connect:
+  dsn: "mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local"
+
+resource_types:
+  user:
+    name: "User"
+    description: "A user within the wordpress system"
+    list:
+      # SQL query to fetch user details from the WordPress database.
+      query: |
+        SELECT
+          u.ID AS user_id,
+          u.user_login AS username,
+          u.user_email AS email,
+          u.user_registered AS created_at
+        FROM wp_users u
+        ORDER BY user_id ASC
+        LIMIT ?<Limit> OFFSET ?<Offset>
+      map:
+        id: ".user_id"
+        display_name: ".username"
+        description: ".email"
+        traits:
+          user:
+            emails:
+              - ".email"
+            status: "active"
+            status_details: "'detailed status'"
+            login: ".username"
+            profile:
+              name: ".username"
+              created_at: ".created_at"
+      pagination:
+        strategy: "offset"
+        primary_key: "user_id"
+    account_provisioning:
+      schema:
+        - name: "username"
+          description: "The username of the user"
+          type: "string"
+          placeholder: "user"
+          required: true
+        - name: "email"
+          description: "The email of the user"
+          type: "string"
+          placeholder: "user@example.com"
+          required: true
+      credentials:
+        no_password:
+          preferred: false
+        random_password:
+          max_length: 128
+          min_length: 12
+          preferred: true
+      validate:
+        vars:
+          email: "email"
+        query: |
+          SELECT
+            u.ID AS user_id,
+            u.user_login AS username,
+            u.user_email AS email,
+            u.user_registered AS created_at
+          FROM wp_users u
+          WHERE u.user_email = ?<email>
+      create:
+        vars:
+          username: "input.username"
+          email: "input.email"
+          password: "password"
+        queries:
+          - "INSERT INTO wp_users (user_login, user_email, user_pass) VALUES (?<username>, ?<email>, MD5(?<password>))"
+
+  role:
+    name: "Role"
+    description: "A role within the wordpress system that can be assigned to a user"
+    list:
+      query: |
+        SELECT DISTINCT
+          um.umeta_id AS row_id,
+          um.meta_value AS role_name
+        FROM wp_usermeta um
+        WHERE um.meta_key = 'wp_capabilities'
+        AND um.meta_value != 'a:0:{}'
+        AND um.umeta_id > ?<Cursor>
+        ORDER BY row_id ASC
+        LIMIT ?<Limit>
+      map:
+        id: "phpDeserializeStringArray(string(.role_name))[0]"
+        display_name: "titleCase(phpDeserializeStringArray(string(.role_name))[0])"
+        description: "'Wordpress role for user'"
+        traits:
+          role:
+            profile:
+      pagination:
+        strategy: "cursor"
+        primary_key: "row_id"
+
+    static_entitlements:
+      - id: "member"
+        display_name: "resource.DisplayName + ' Role Member'"
+        description: "'Member of the ' + resource.DisplayName + ' role'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+        provisioning:
+          vars:
+            principal_id: principal.ID
+            role_string: "phpSerializeStringArray([resource.ID])"
+          grant:
+            queries:
+              - |
+                DELETE FROM wp_usermeta
+                WHERE user_id = ?<principal_id> AND meta_key = 'wp_capabilities'
+              - |
+                INSERT INTO wp_usermeta (user_id, meta_key, meta_value)
+                VALUES (?<principal_id>, 'wp_capabilities', ?<role_string>)
+          revoke:
+            queries:
+              - |
+                DELETE FROM wp_usermeta
+                WHERE user_id = ?<principal_id> AND meta_key = 'wp_capabilities'
+
+    grants:
+      - query: |
+          SELECT
+            u.ID AS user_id,
+            um.meta_value AS role_name
+          FROM wp_users u
+          JOIN wp_usermeta um ON u.ID = um.user_id
+          WHERE um.meta_key = 'wp_capabilities'
+          LIMIT ?<Limit> OFFSET ?<Offset>
+        map:
+          - skip_if: "(size(phpDeserializeStringArray(string(.role_name))) < 1 || phpDeserializeStringArray(string(.role_name))[0] != resource.ID)"
+            principal_id: ".user_id"
+            principal_type: "user"
+            entitlement_id: "member"
+        pagination:
+          strategy: "offset"
+          primary_key: "user_id"

@@ -13,22 +13,22 @@ func TestPHPDeserializeArray(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "simple",
+			name: "administrator_role",
 			expr: `a:1:{s:13:"administrator";b:1;}`,
 			want: []string{"administrator"},
 		},
 		{
-			name: "simple",
+			name: "editor_role",
 			expr: `a:1:{s:6:"editor";b:1;}`,
 			want: []string{"editor"},
 		},
 		{
-			name: "simple",
+			name: "subscriber_role",
 			expr: `a:1:{s:10:"subscriber";b:1;}`,
 			want: []string{"subscriber"},
 		},
 		{
-			name: "simple",
+			name: "contributor_role",
 			expr: `a:1:{s:11:"contributor";b:1;}`,
 			want: []string{"contributor"},
 		},

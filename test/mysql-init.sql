@@ -15,7 +15,8 @@ CREATE TABLE users (
   account_type VARCHAR(20) DEFAULT 'human',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_login TIMESTAMP NULL,
-  manager_id INT
+  manager_id INT,
+  password_hash VARCHAR(255)
 );
 
 -- Insert sample users with different date formats for last_login (without manager relationships)

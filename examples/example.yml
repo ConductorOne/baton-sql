@@ -27,7 +27,6 @@ connect:
 # Defines the resources that can be synchronized from the data source.
 # Each resource type represents a distinct entity type (e.g., users, groups, roles).
 resource_types:
-
   # Example User Resource
   # -------------------
   user:
@@ -74,9 +73,9 @@ resource_types:
           user:
             # The trait name defines the schema
             emails:
-            # Array fields
-            - ".email" # Direct field mapping
-            - "lowercase(.email)" # CEL transformation
+              # Array fields
+              - ".email" # Direct field mapping
+              - "lowercase(.email)" # CEL transformation
             status: ".status" # Simple field mapping
             profile:
               department: ".department"
@@ -95,65 +94,63 @@ resource_types:
     # ------------------
     # Pre-defined permissions that can be granted
     static_entitlements:
-    - id: "access" # Unique identifier for this entitlement
-      display_name: "Basic Access"
-      description: "Provides basic access to the application"
-      purpose: "access" # Purpose: "access", "assignment", "permission"
-      grantable_to:
-      # Resource types that can receive this entitlement
-      - "user"
-      - "service_account"
-      # Provisioning Configuration
-      # ------------------------
-      # Defines how to implement entitlement changes
-      provisioning:
-        vars:
-          # Variables available in provisioning queries
-          user_id: "principal.ID"
-          access_level: "'basic'"
+      - id: "access" # Unique identifier for this entitlement
+        display_name: "Basic Access"
+        description: "Provides basic access to the application"
+        purpose: "access" # Purpose: "access", "assignment", "permission"
+        grantable_to:
+          # Resource types that can receive this entitlement
+          - "user"
+          - "service_account"
+        # Provisioning Configuration
+        # ------------------------
+        # Defines how to implement entitlement changes
+        provisioning:
+          vars:
+            # Variables available in provisioning queries
+            user_id: "principal.ID"
+            access_level: "'basic'"
 
-        # Grant Operations
-        # ---------------
-        grant:
-          # SQL statements to execute when granting
-          queries:
-          - |
-            INSERT INTO user_access (user_id, level)
-            VALUES (?<user_id>, ?<access_level>)
+          # Grant Operations
+          # ---------------
+          grant:
+            # SQL statements to execute when granting
+            queries:
+              - |
+                INSERT INTO user_access (user_id, level)
+                VALUES (?<user_id>, ?<access_level>)
 
-        # Revoke Operations
-        # ----------------
-        revoke:
-          # SQL statements to execute when revoking
-          queries:
-          - |
-            DELETE FROM user_access
-            WHERE user_id = ?<user_id>
+          # Revoke Operations
+          # ----------------
+          revoke:
+            # SQL statements to execute when revoking
+            queries:
+              - |
+                DELETE FROM user_access
+                WHERE user_id = ?<user_id>
     # Grants Query Configuration
     # ------------------------
     # Defines how to discover existing entitlements
     grants:
-    - query: |
-        SELECT 
-          user_id,
-          access_level,
-          granted_at
-        FROM user_access
-        LIMIT ?<Limit> OFFSET ?<Offset>
+      - query: |
+          SELECT 
+            user_id,
+            access_level,
+            granted_at
+          FROM user_access
+          LIMIT ?<Limit> OFFSET ?<Offset>
 
-      # Grant Mapping
-      # ------------
-      # Defines how to interpret grant query results
-      map:
-      - skip_if: ".access_level != 'basic'" # CEL condition to filter results
-        principal_id: ".user_id"
-        principal_type: "user"
-        entitlement_id: "access"
-      # Grants Pagination
-      # ----------------
-      pagination:
-        strategy: "offset"
-        primary_key: "user_id"
-
-# Additional resource types would follow the same pattern
+        # Grant Mapping
+        # ------------
+        # Defines how to interpret grant query results
+        map:
+          - skip_if: ".access_level != 'basic'" # CEL condition to filter results
+            principal_id: ".user_id"
+            principal_type: "user"
+            entitlement_id: "access"
+        # Grants Pagination
+        # ----------------
+        pagination:
+          strategy: "offset"
+          primary_key: "user_id"
 # Example: groups, roles, applications, etc.

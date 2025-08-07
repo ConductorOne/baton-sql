@@ -1,10 +1,21 @@
+![Baton Logo](./baton-logo.png)
+
 # `baton-sql` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-sql.svg)](https://pkg.go.dev/github.com/conductorone/baton-sql) ![main ci](https://github.com/conductorone/baton-sql/actions/workflows/main.yaml/badge.svg)
 
 `baton-sql` is a connector for built using the [Baton SDK](https://github.com/conductorone/baton-sdk).
 
 ## Overview
 
-`baton-sql` is a connector that enables you to sync identities, resources, and permissions from SQL databases. It provides a flexible configuration system that allows you to map the results of database queries to resources and entitlements.
+`baton-sql` is a flexible connector that enables you to sync identities, resources, and permissions from SQL databases. It provides a powerful configuration system that allows you to map database queries to resources and entitlements, with full support for account provisioning and automated password management.
+
+## Key Features
+
+- **Multi-Database Support**: Works with MySQL, PostgreSQL, Oracle, SQL Server, SQLite, and WordPress
+- **Account Provisioning**: Create user accounts with automatic random password generation
+- **Secure Password Management**: Database-appropriate password hashing (SHA2, bcrypt, MD5)
+- **Flexible Configuration**: Map any SQL query results to resources and entitlements
+- **Role Management**: Sync and manage role assignments and permissions
+- **Custom Schemas**: Support for any database schema through configurable SQL queries
 
 ## Supported Database Engines
 
@@ -17,10 +28,11 @@
 
 The connector is configured using a YAML file that defines:
 
-- Database connection details via DSN or individual connection parameters
-- Resource types (e.g. users, groups, roles) mapped to database tables/queries
-- Entitlements that can be granted to resources
-- Provisioning actions for granting/revoking entitlements
+- **Database Connection**: Connection details via DSN (Data Source Name)
+- **Resource Types**: Map database tables/queries to resources (users, roles, etc.)
+- **Account Provisioning**: Define schemas and credential options for user creation
+- **Entitlements**: Permissions and roles that can be granted to resources
+- **Provisioning Actions**: SQL queries for granting/revoking entitlements
 
 See examples in the [examples](https://github.com/ConductorOne/baton-sql/tree/main/examples) directory.
 

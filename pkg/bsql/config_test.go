@@ -28,10 +28,10 @@ func TestParse(t *testing.T) {
 	}{
 		{
 			name:  "wordpress-example",
-			input: loadExampleConfig(t, "wordpress"),
+			input: loadExampleConfig(t, "wordpress-test"),
 			validate: func(t *testing.T, c *Config) {
-				require.Equal(t, "Wordpress", c.AppName)
-				require.Equal(t, "mysql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?charset=utf8mb4&parseTime=True&loc=Local", c.Connect.DSN)
+				require.Equal(t, "Wordpress Test", c.AppName)
+				require.Equal(t, "mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local", c.Connect.DSN)
 
 				require.Len(t, c.ResourceTypes, 2)
 
@@ -83,13 +83,13 @@ func TestParse(t *testing.T) {
 
 				// Validate no_password config
 				require.NotNil(t, userResourceType.AccountProvisioning.Credentials.NoPassword)
-				require.True(t, userResourceType.AccountProvisioning.Credentials.NoPassword.Preferred)
+				require.False(t, userResourceType.AccountProvisioning.Credentials.NoPassword.Preferred)
 
 				// Validate random_password config
-				// require.NotNil(t, userResourceType.AccountProvisioning.Credentials.RandomPassword)
-				// require.Equal(t, 128, userResourceType.AccountProvisioning.Credentials.RandomPassword.MaxLength)
-				// require.Equal(t, 12, userResourceType.AccountProvisioning.Credentials.RandomPassword.MinLength)
-				// require.Equal(t, "!@#$%^&*()_+", userResourceType.AccountProvisioning.Credentials.RandomPassword.DisallowedCharacters)
+				require.NotNil(t, userResourceType.AccountProvisioning.Credentials.RandomPassword)
+				require.Equal(t, 128, userResourceType.AccountProvisioning.Credentials.RandomPassword.MaxLength)
+				require.Equal(t, 12, userResourceType.AccountProvisioning.Credentials.RandomPassword.MinLength)
+				require.True(t, userResourceType.AccountProvisioning.Credentials.RandomPassword.Preferred)
 
 				// Validate account creation configuration
 				require.NotNil(t, userResourceType.AccountProvisioning.Create)
@@ -99,13 +99,13 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, userResourceType.AccountProvisioning.Create.Vars)
 				require.Equal(t, "input.username", userResourceType.AccountProvisioning.Create.Vars["username"])
 				require.Equal(t, "input.email", userResourceType.AccountProvisioning.Create.Vars["email"])
-				// require.Equal(t, "credentials.password", userResourceType.AccountProvisioning.Create.Vars["password"])
+				require.Equal(t, "password", userResourceType.AccountProvisioning.Create.Vars["password"])
 
 				// Validate creation queries
 				require.Len(t, userResourceType.AccountProvisioning.Create.Queries, 1)
 				require.Equal(t, normalizeQueryString(`
-					INSERT INTO wp_users (user_login, user_email)
-					VALUES (?<username>, ?<email>)
+					INSERT INTO wp_users (user_login, user_email, user_pass)
+					VALUES (?<username>, ?<email>, MD5(?<password>))
 				`), normalizeQueryString(userResourceType.AccountProvisioning.Create.Queries[0]))
 
 				// Validate `role` resource type

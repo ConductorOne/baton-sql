@@ -359,6 +359,11 @@ func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any,
 		inputs = make(map[string]any)
 	}
 
+	celInputs := make(map[string]any)
+	for k, v := range inputs {
+		celInputs[k] = v
+	}
+
 	for k, v := range vars {
 		// Check if the value is a direct reference to an input field
 		if inputVal, exists := inputs[v]; exists {
@@ -367,7 +372,7 @@ func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any,
 		}
 
 		// Otherwise, evaluate it as a CEL expression
-		out, err := s.env.Evaluate(ctx, v, inputs)
+		out, err := s.env.Evaluate(ctx, v, celInputs)
 		if err != nil {
 			return nil, err
 		}

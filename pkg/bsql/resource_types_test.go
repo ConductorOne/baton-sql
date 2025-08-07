@@ -9,7 +9,7 @@ import (
 
 func TestConfig_GetResourceTypes_wordpress(t *testing.T) {
 	ctx := t.Context()
-	wordpressConfig := loadExampleConfig(t, "wordpress")
+	wordpressConfig := loadExampleConfig(t, "wordpress-test")
 	c, err := Parse([]byte(wordpressConfig))
 	require.NoError(t, err)
 

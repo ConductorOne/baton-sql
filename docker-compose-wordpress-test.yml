@@ -1,0 +1,44 @@
+services:
+  # MySQL Database for WordPress
+  wordpress-mysql:
+    image: mysql:8.0
+    container_name: baton-wordpress-mysql-test
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wp_user
+      MYSQL_PASSWORD: wp_password
+    ports:
+      - "3307:3306" # Using different port to avoid conflict with regular MySQL
+    volumes:
+      - ./test/wordpress-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "wp_user",
+          "-pwp_password",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: --default-authentication-plugin=mysql_native_password
+
+  # WordPress Application (optional, for full testing)
+  wordpress:
+    image: wordpress:latest
+    container_name: baton-wordpress-test
+    depends_on:
+      - wordpress-mysql
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: wordpress-mysql:3306
+      WORDPRESS_DB_USER: wp_user
+      WORDPRESS_DB_PASSWORD: wp_password
+      WORDPRESS_DB_NAME: wordpress

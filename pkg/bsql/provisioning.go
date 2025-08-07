@@ -150,50 +150,6 @@ func (s *SQLSyncer) prepareProvisioningVars(ctx context.Context, vars map[string
 	return ret, nil
 }
 
-func (s *SQLSyncer) prepareSchemaVars(accountProvisioning *AccountProvisioning, accountInfo *v2.AccountInfo) (map[string]any, error) {
-	inputs := make(map[string]any)
-
-	for _, field := range accountProvisioning.Schema {
-		val, ok := accountInfo.Profile.Fields[field.Name]
-		if !ok {
-			continue
-		}
-
-		switch field.Type {
-		case "string":
-			if strVal := val.GetStringValue(); strVal != "" {
-				inputs[field.Name] = strVal
-			}
-
-		case "string_list":
-			if listVal := val.GetListValue(); listVal != nil {
-				var strList []string
-				for _, v := range listVal.Values {
-					if str := v.GetStringValue(); str != "" {
-						strList = append(strList, str)
-					}
-				}
-				inputs[field.Name] = strList
-			}
-
-		case "boolean":
-			inputs[field.Name] = val.GetBoolValue()
-
-		case "int":
-			if numVal := val.GetNumberValue(); numVal != 0 {
-				inputs[field.Name] = int(numVal)
-			}
-
-		case "map":
-			if structVal := val.GetStructValue(); structVal != nil {
-				inputs[field.Name] = structVal.AsMap()
-			}
-		}
-	}
-
-	return inputs, nil
-}
-
 func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *AccountProvisioning, inputs map[string]any) (*v2.Resource, bool, error) {
 	if accountProvisioning.Validate == nil {
 		return nil, false, fmt.Errorf("validation configuration is not defined for account provisioning")
