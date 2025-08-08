@@ -90,6 +90,9 @@ func (s *userSyncer) CreateAccountCapabilityDetails(ctx context.Context) (*v2.Cr
 	}, nil, nil
 }
 
+// CreateAccount creates a new user account in the database with optional credential generation.
+// It validates inputs, generates credentials if required, executes provisioning queries,
+// and validates the created account.
 func (s *userSyncer) CreateAccount(
 	ctx context.Context,
 	accountInfo *v2.AccountInfo,
@@ -100,58 +103,42 @@ func (s *userSyncer) CreateAccount(
 	annotations.Annotations,
 	error,
 ) {
-	l := ctxzap.Extract(ctx)
-	resourceTypeID, accountProvisioning, err := s.fullConfig.ExtractAccountProvisioning()
-	if err != nil {
-		if errors.Is(err, ErrNoAccountProvisioningDefined) {
-			return nil, nil, nil, nil
-		}
-		return nil, nil, nil, err
-	}
+	logger := ctxzap.Extract(ctx)
 
-	if accountProvisioning == nil {
-		return nil, nil, nil, errors.New("no account provisioning defined")
-	}
-
-	l.Debug("creating account", zap.String("resource_type_id", resourceTypeID))
-
-	if accountInfo == nil || accountInfo.Profile == nil {
-		return nil, nil, nil, errors.New("account info and profile are required")
-	}
-
-	var ptds []*v2.PlaintextData
-
-	inputs, err := s.prepareSchemaVars(accountProvisioning, accountInfo)
+	// Extract and validate account provisioning configuration
+	resourceTypeID, provisioningConfig, err := s.extractAndValidateProvisioning()
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// only support no password for now
-	switch credentialOptions.Options.(type) {
-	case *v2.CredentialOptions_NoPassword_:
-	default:
-		return nil, nil, nil, fmt.Errorf("unsupported credential options %v", credentialOptions)
+	logger.Debug("creating account", zap.String("resource_type_id", resourceTypeID))
+
+	// Validate required input parameters
+	if err := s.validateAccountInfo(accountInfo); err != nil {
+		return nil, nil, nil, err
 	}
 
-	useTx := !accountProvisioning.Create.NoTransaction
-
-	err = s.runProvisioningQueries(ctx, accountProvisioning.Create.Queries, inputs, useTx)
+	// Prepare all query inputs in one step
+	queryInputs, plaintextDataList, err := s.prepareQueryInputs(provisioningConfig, accountInfo, credentialOptions)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	accountResource, ok, err := s.validateAccount(ctx, accountProvisioning, inputs)
-	if err != nil {
+	// Execute account creation queries
+	useTransaction := !provisioningConfig.Create.NoTransaction
+	if err := s.runProvisioningQueries(ctx, provisioningConfig.Create.Queries, queryInputs, useTransaction); err != nil {
 		return nil, nil, nil, err
 	}
 
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("post account provisioning validation failed")
+	// Validate the created account
+	accountResource, err := s.validateAccount(ctx, provisioningConfig, queryInputs)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to validate created account: %w", err)
 	}
 
-	car := &v2.CreateAccountResponse_SuccessResult{
+	response := &v2.CreateAccountResponse_SuccessResult{
 		Resource: accountResource,
 	}
 
-	return car, ptds, nil, nil
+	return response, plaintextDataList, nil, nil
 }

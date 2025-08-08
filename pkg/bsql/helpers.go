@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/conductorone/baton-sql/pkg/database"
+
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/crypto"
 )
 
 // Common time formats that may be used in databases.
@@ -133,4 +136,19 @@ func parseTimeWithEngine(value string, dbEngine database.DbEngine) (*time.Time, 
 
 	// Fall back to the generic parser if prioritized formats don't match
 	return parseTime(value)
+}
+
+// generateCredentials generates a random password based on the credential options and configuration.
+func generateCredentials(credentialOptions *v2.CredentialOptions) (string, error) {
+	if credentialOptions == nil || credentialOptions.GetRandomPassword() == nil {
+		return "", errors.New("unsupported credential option: only random password is supported")
+	}
+
+	randomPasswordOpts := credentialOptions.GetRandomPassword()
+
+	password, err := crypto.GenerateRandomPassword(randomPasswordOpts)
+	if err != nil {
+		return "", err
+	}
+	return password, nil
 }

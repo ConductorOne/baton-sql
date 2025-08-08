@@ -1,3 +1,6 @@
+-- Enable pgcrypto extension for password hashing
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Drop existing tables if they exist
 DROP TABLE IF EXISTS employee_data;
 DROP TABLE IF EXISTS login_history;
@@ -16,7 +19,8 @@ CREATE TABLE users (
   account_type VARCHAR(20) DEFAULT 'human',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_login TIMESTAMP NULL,
-  manager_id INTEGER
+  manager_id INTEGER,
+  password_hash VARCHAR(255)
 );
 
 -- Insert sample users with different date formats for last_login (without manager relationships)

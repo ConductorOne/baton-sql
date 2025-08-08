@@ -150,62 +150,18 @@ func (s *SQLSyncer) prepareProvisioningVars(ctx context.Context, vars map[string
 	return ret, nil
 }
 
-func (s *SQLSyncer) prepareSchemaVars(accountProvisioning *AccountProvisioning, accountInfo *v2.AccountInfo) (map[string]any, error) {
-	inputs := make(map[string]any)
-
-	for _, field := range accountProvisioning.Schema {
-		val, ok := accountInfo.Profile.Fields[field.Name]
-		if !ok {
-			continue
-		}
-
-		switch field.Type {
-		case "string":
-			if strVal := val.GetStringValue(); strVal != "" {
-				inputs[field.Name] = strVal
-			}
-
-		case "string_list":
-			if listVal := val.GetListValue(); listVal != nil {
-				var strList []string
-				for _, v := range listVal.Values {
-					if str := v.GetStringValue(); str != "" {
-						strList = append(strList, str)
-					}
-				}
-				inputs[field.Name] = strList
-			}
-
-		case "boolean":
-			inputs[field.Name] = val.GetBoolValue()
-
-		case "int":
-			if numVal := val.GetNumberValue(); numVal != 0 {
-				inputs[field.Name] = int(numVal)
-			}
-
-		case "map":
-			if structVal := val.GetStructValue(); structVal != nil {
-				inputs[field.Name] = structVal.AsMap()
-			}
-		}
-	}
-
-	return inputs, nil
-}
-
-func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *AccountProvisioning, inputs map[string]any) (*v2.Resource, bool, error) {
+func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *AccountProvisioning, inputs map[string]any) (*v2.Resource, error) {
 	if accountProvisioning.Validate == nil {
-		return nil, false, fmt.Errorf("validation configuration is not defined for account provisioning")
+		return nil, fmt.Errorf("validation configuration is not defined for account provisioning")
 	}
 
 	if accountProvisioning.Validate.Query == "" {
-		return nil, false, fmt.Errorf("validation query is not defined for account provisioning")
+		return nil, fmt.Errorf("validation query is not defined for account provisioning")
 	}
 
 	queryVars, err := s.prepareQueryVars(ctx, inputs, accountProvisioning.Validate.Vars)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	var ret *v2.Resource
@@ -219,12 +175,135 @@ func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *Ac
 		return false, nil
 	})
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	if ret == nil {
-		return nil, false, fmt.Errorf("unable to find resource for account provisioning")
+		return nil, fmt.Errorf("unable to find resource for account provisioning")
 	}
 
-	return ret, true, nil
+	return ret, nil
+}
+
+// prepareQueryInputs prepares all query inputs including schema vars and credentials in one step.
+// This eliminates the need for complex merging logic by doing everything together.
+func (s *SQLSyncer) prepareQueryInputs(
+	provisioningConfig *AccountProvisioning,
+	accountInfo *v2.AccountInfo,
+	credentialOptions *v2.CredentialOptions,
+) (map[string]any, []*v2.PlaintextData, error) {
+	queryInputs := make(map[string]any)
+	var plaintextDataList []*v2.PlaintextData
+
+	// 1. Add schema variables (profile data) directly
+	schemaVars := make(map[string]any)
+	for _, field := range provisioningConfig.Schema {
+		if value, exists := accountInfo.Profile.Fields[field.Name]; exists {
+			var parsedValue any
+			switch field.Type {
+			case "string":
+				if strValue := value.GetStringValue(); strValue != "" {
+					parsedValue = strValue
+				}
+			case "string_list":
+				if listValue := value.GetListValue(); listValue != nil {
+					var strList []string
+					for _, v := range listValue.Values {
+						if strValue := v.GetStringValue(); strValue != "" {
+							strList = append(strList, strValue)
+						}
+					}
+					parsedValue = strList
+				}
+			case "boolean":
+				parsedValue = value.GetBoolValue()
+			case "int":
+				if numValue := value.GetNumberValue(); numValue != 0 {
+					parsedValue = int(numValue)
+				}
+			case "map":
+				if structValue := value.GetStructValue(); structValue != nil {
+					parsedValue = structValue.AsMap()
+				}
+			}
+
+			if parsedValue != nil {
+				queryInputs[field.Name] = parsedValue
+				schemaVars[field.Name] = parsedValue
+			}
+		}
+	}
+
+	// 2. Add credentials if required
+	credentials := make(map[string]any)
+	if credentialOptions != nil {
+		switch credentialOptions.Options.(type) {
+		case *v2.CredentialOptions_NoPassword_:
+		case *v2.CredentialOptions_RandomPassword_:
+			password, err := generateCredentials(credentialOptions)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to generate password: %w", err)
+			}
+
+			// Add password to queryInputs and credentials map
+			// NOTE: For future credential types (SSO, API keys), consider using only the
+			// 'credentials' namespace to avoid conflicts with user-defined schema fields
+			queryInputs["password"] = password
+			credentials["password"] = password
+
+			// Create plaintext data for return
+			passwordData := &v2.PlaintextData{
+				Name:  "password",
+				Bytes: []byte(password),
+			}
+			plaintextDataList = append(plaintextDataList, passwordData)
+		default:
+			return nil, nil, fmt.Errorf("unsupported credential options: %v", credentialOptions)
+		}
+	}
+
+	// 3. Add namespaced access for advanced CEL expressions
+	// Only add namespaces if they don't conflict with user-defined schema fields
+	if len(schemaVars) > 0 {
+		if _, exists := queryInputs["input"]; !exists {
+			queryInputs["input"] = schemaVars
+		}
+	}
+	if len(credentials) > 0 {
+		if _, exists := queryInputs["credentials"]; !exists {
+			queryInputs["credentials"] = credentials
+		}
+	}
+
+	return queryInputs, plaintextDataList, nil
+}
+
+// validateAccountInfo validates that the required account information is provided.
+func (s *SQLSyncer) validateAccountInfo(accountInfo *v2.AccountInfo) error {
+	if accountInfo == nil {
+		return errors.New("account info is required")
+	}
+
+	if accountInfo.Profile == nil {
+		return errors.New("account profile is required")
+	}
+
+	return nil
+}
+
+// extractAndValidateProvisioning extracts and validates the account provisioning configuration.
+func (s *SQLSyncer) extractAndValidateProvisioning() (string, *AccountProvisioning, error) {
+	resourceTypeID, accountProvisioning, err := s.fullConfig.ExtractAccountProvisioning()
+	if err != nil {
+		if errors.Is(err, ErrNoAccountProvisioningDefined) {
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+
+	if accountProvisioning == nil {
+		return "", nil, errors.New("no account provisioning defined")
+	}
+
+	return resourceTypeID, accountProvisioning, nil
 }

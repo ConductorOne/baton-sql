@@ -1,0 +1,231 @@
+---
+# Application name for this connector configuration
+app_name: SQL Server Test
+app_description: Test configuration for SQL Server with random password generation and account provisioning
+
+# Connection settings for the SQL Server database
+connect:
+  # Data Source Name (DSN) for our test SQL Server instance
+  dsn: "sqlserver://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}?database=${DB_DATABASE}"
+
+# Definition of different resource types managed by this connector
+resource_types:
+  # Configuration for "user" resources in SQL Server
+  user:
+    # Display name for this resource type
+    name: "User"
+    # Description providing context about what a user represents
+    description: "A user within the SQL Server system"
+    # Settings for listing user records from the database
+    list:
+      # SQL query to fetch user-related data including employee_id, last_login, and manager information
+      query: |
+        SELECT
+          u.UserID as id, 
+          u.Username as username,
+          u.Email as email,
+          u.EmployeeID as employee_id,
+          CASE 
+            WHEN u.IsActive = 1 THEN 'active'
+            ELSE 'inactive'
+          END as status,
+          u.AccountType as account_type,
+          u.CreatedAt as created_at,
+          CASE 
+            WHEN u.LastLogin IS NULL THEN ''
+            ELSE FORMAT(u.LastLogin, 'yyyy-MM-ddTHH:mm:ssZ')
+          END as last_login,
+          u.ManagerID as manager_id,
+          m.Username as manager_username,
+          m.Email as manager_email
+        FROM
+          Users u
+        LEFT JOIN 
+          Users m ON u.ManagerID = m.UserID
+        ORDER BY u.UserID
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      # Pagination configuration (using offset for SQL Server)
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      # Mapping of query results to resource fields
+      map:
+        # Unique identifier for the user resource
+        id: ".username"
+        # Field to display as the resource's name
+        display_name: ".username"
+        # Additional description for the user resource
+        description: ".username"
+        # User-specific traits for detailed information
+        traits:
+          user:
+            # User's email addresses (array format)
+            emails:
+              - ".email"
+            # Account status (active, inactive, etc.)
+            status: ".status"
+            # Login identifier (usually username)
+            login: ".username"
+            # Last login timestamp
+            last_login: ".last_login"
+            # User profile information
+            profile:
+              employee_id: ".employee_id"
+              account_type: ".account_type"
+              created_at: ".created_at"
+              manager_id: ".manager_id"
+              manager_username: ".manager_username"
+              manager_email: ".manager_email"
+
+    # Account provisioning configuration for creating new user accounts
+    account_provisioning:
+      # Schema definition for required and optional fields during user creation
+      schema:
+        - name: "username"
+          description: "The username for the new user"
+          type: "string"
+          placeholder: "new_user"
+          required: true
+        - name: "email"
+          description: "Email address for the new user"
+          type: "string"
+          placeholder: "user@example.com"
+          required: true
+        - name: "employee_id"
+          description: "Employee ID for the new user"
+          type: "string"
+          placeholder: "EMP001"
+          required: false
+      # Credential options for password management
+      credentials:
+        random_password:
+          max_length: 32
+          min_length: 16
+          preferred: true
+        no_password:
+          preferred: false
+      # Validation query to check if user already exists
+      validate:
+        vars:
+          username: "username"
+          email: "email"
+        query: |
+          SELECT
+            u.UserID as id, 
+            u.Username as username,
+            u.Email as email,
+            u.EmployeeID as employee_id,
+            CASE 
+              WHEN u.IsActive = 1 THEN 'active'
+              ELSE 'inactive'
+            END as status,
+            u.AccountType as account_type,
+            u.CreatedAt as created_at,
+            CASE 
+              WHEN u.LastLogin IS NULL THEN ''
+              ELSE FORMAT(u.LastLogin, 'yyyy-MM-ddTHH:mm:ssZ')
+            END as last_login,
+            u.ManagerID as manager_id,
+            m.Username as manager_username,
+            m.Email as manager_email
+          FROM Users u
+          LEFT JOIN Users m ON u.ManagerID = m.UserID
+          WHERE u.Username = ?<username>
+      # Account creation configuration
+      create:
+        vars:
+          username: "input.username"
+          email: "input.email"
+          employee_id: "has(input.employee_id) ? input.employee_id : null"
+          password: "password"
+        queries:
+          # Insert the new user with generated password (SQL Server style with HASHBYTES)
+          - |
+            INSERT INTO Users (Username, Email, EmployeeID, IsActive, AccountType, CreatedAt, PasswordHash) 
+            VALUES (?<username>, ?<email>, ?<employee_id>, 1, 'human', GETDATE(), HASHBYTES('SHA2_256', ?<password>))
+
+  # Configuration for "role" resources
+  role:
+    # Display name for the role resource type
+    name: "Role"
+    # Brief description of what a role signifies
+    description: "A role within the SQL Server system"
+    # Settings for listing roles from the database
+    list:
+      # SQL query to retrieve roles
+      query: |
+        SELECT
+          RoleID as id,
+          RoleName as role_name,
+          Description as description
+        FROM Roles
+        ORDER BY RoleID
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      # Pagination settings for role listing
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      # Field mappings for role data
+      map:
+        id: ".role_name"
+        display_name: ".role_name"
+        description: ".description"
+        traits:
+          role:
+            profile:
+              role_name: ".role_name"
+
+    # Static entitlements that can be granted for roles
+    static_entitlements:
+      - id: "member"
+        display_name: "resource.DisplayName + ' Membership'"
+        description: "'Member of the ' + resource.DisplayName + ' role'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+        # Provisioning settings for granting/revoking role membership
+        provisioning:
+          vars:
+            username: "principal.ID"
+            role_name: "resource.ID"
+          grant:
+            queries:
+              - |
+                INSERT INTO UserRoles (
+                  UserID, 
+                  RoleID
+                ) 
+                SELECT 
+                  u.UserID, 
+                  r.RoleID 
+                FROM Users u, Roles r 
+                WHERE u.Username = ?<username> 
+                AND r.RoleName = ?<role_name>
+          revoke:
+            queries:
+              - |
+                DELETE ur FROM UserRoles ur
+                INNER JOIN Users u ON ur.UserID = u.UserID
+                INNER JOIN Roles r ON ur.RoleID = r.RoleID
+                WHERE u.Username = ?<username>
+                AND r.RoleName = ?<role_name>
+
+    # Grant discovery for existing role assignments
+    grants:
+      - query: |
+          SELECT 
+            u.Username as username,
+            r.RoleName as role_name
+          FROM UserRoles ur
+          INNER JOIN Users u ON ur.UserID = u.UserID
+          INNER JOIN Roles r ON ur.RoleID = r.RoleID
+          ORDER BY r.RoleID
+          OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "member"
+        pagination:
+          strategy: "offset"
+          primary_key: "role_name"

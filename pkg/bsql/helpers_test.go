@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/stretchr/testify/require"
 )
@@ -158,6 +159,181 @@ func TestParseTimeWithEngine(t *testing.T) {
 				require.True(t, result.Equal(tt.expected), "Expected %v, got %v", tt.expected, result)
 			} else {
 				require.Error(t, err)
+			}
+		})
+	}
+}
+
+func TestGenerateCredentials(t *testing.T) {
+	tests := []struct {
+		name              string
+		credentialOptions *v2.CredentialOptions
+		expectError       bool
+		expectNonEmpty    bool
+	}{
+		{
+			name:        "nil credential options",
+			expectError: true,
+		},
+		{
+			name: "no random password",
+			credentialOptions: &v2.CredentialOptions{
+				Options: &v2.CredentialOptions_NoPassword_{
+					NoPassword: &v2.CredentialOptions_NoPassword{},
+				},
+			},
+			expectError: true,
+		},
+		{
+			name: "valid random password with constraints",
+			credentialOptions: &v2.CredentialOptions{
+				Options: &v2.CredentialOptions_RandomPassword_{
+					RandomPassword: &v2.CredentialOptions_RandomPassword{
+						Length: 16,
+						Constraints: []*v2.PasswordConstraint{
+							{
+								CharSet:  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+								MinCount: 2,
+							},
+							{
+								CharSet:  "abcdefghijklmnopqrstuvwxyz",
+								MinCount: 2,
+							},
+							{
+								CharSet:  "0123456789",
+								MinCount: 1,
+							},
+							{
+								CharSet:  "!@#$%^&*()_+-=[]{}|;:,.<>?",
+								MinCount: 1,
+							},
+						},
+					},
+				},
+			},
+			expectError:    false,
+			expectNonEmpty: true,
+		},
+		{
+			name: "simple random password without constraints",
+			credentialOptions: &v2.CredentialOptions{
+				Options: &v2.CredentialOptions_RandomPassword_{
+					RandomPassword: &v2.CredentialOptions_RandomPassword{
+						Length: 20,
+					},
+				},
+			},
+			expectError:    false,
+			expectNonEmpty: true,
+		},
+		{
+			name: "very long password",
+			credentialOptions: &v2.CredentialOptions{
+				Options: &v2.CredentialOptions_RandomPassword_{
+					RandomPassword: &v2.CredentialOptions_RandomPassword{
+						Length: 32,
+						Constraints: []*v2.PasswordConstraint{
+							{
+								CharSet:  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+								MinCount: 5,
+							},
+						},
+					},
+				},
+			},
+			expectError:    false,
+			expectNonEmpty: true,
+		},
+		{
+			name: "minimum practical length",
+			credentialOptions: &v2.CredentialOptions{
+				Options: &v2.CredentialOptions_RandomPassword_{
+					RandomPassword: &v2.CredentialOptions_RandomPassword{
+						Length: 8,
+					},
+				},
+			},
+			expectError:    false,
+			expectNonEmpty: true,
+		},
+		{
+			name: "database-style password (medium length)",
+			credentialOptions: &v2.CredentialOptions{
+				Options: &v2.CredentialOptions_RandomPassword_{
+					RandomPassword: &v2.CredentialOptions_RandomPassword{
+						Length: 20,
+						Constraints: []*v2.PasswordConstraint{
+							{
+								CharSet:  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+								MinCount: 8,
+							},
+							{
+								CharSet:  "0123456789",
+								MinCount: 2,
+							},
+							{
+								CharSet:  "!@#$%^&*()_+-=[]{}|;:,.<>?",
+								MinCount: 4,
+							},
+						},
+					},
+				},
+			},
+			expectError:    false,
+			expectNonEmpty: true,
+		},
+		{
+			name: "enterprise-grade password",
+			credentialOptions: &v2.CredentialOptions{
+				Options: &v2.CredentialOptions_RandomPassword_{
+					RandomPassword: &v2.CredentialOptions_RandomPassword{
+						Length: 24,
+						Constraints: []*v2.PasswordConstraint{
+							{
+								CharSet:  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+								MinCount: 3,
+							},
+							{
+								CharSet:  "abcdefghijklmnopqrstuvwxyz",
+								MinCount: 3,
+							},
+							{
+								CharSet:  "0123456789",
+								MinCount: 2,
+							},
+							{
+								CharSet:  "!@#$%^&*",
+								MinCount: 2,
+							},
+						},
+					},
+				},
+			},
+			expectError:    false,
+			expectNonEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			password, err := generateCredentials(tt.credentialOptions)
+
+			if tt.expectError {
+				require.Error(t, err)
+				require.Empty(t, password)
+				return
+			}
+
+			require.NoError(t, err)
+			if tt.expectNonEmpty {
+				require.NotEmpty(t, password)
+				// Verify the password length matches the requested length
+				if tt.credentialOptions.GetRandomPassword() != nil {
+					expectedLength := tt.credentialOptions.GetRandomPassword().GetLength()
+					if expectedLength > 0 {
+						require.Equal(t, int(expectedLength), len(password), "Password length should match requested length")
+					}
+				}
 			}
 		})
 	}
