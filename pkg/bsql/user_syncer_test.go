@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-func TestUserSyncer_prepareAllQueryInputs_KeyCollision(t *testing.T) {
+func TestUserSyncer_prepareQueryInputs_KeyCollision(t *testing.T) {
 	tests := []struct {
 		name              string
 		schema            []*AccountProvisioningField
@@ -109,8 +109,8 @@ func TestUserSyncer_prepareAllQueryInputs_KeyCollision(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create userSyncer instance
-			syncer := &userSyncer{}
+			// Create SQLSyncer instance
+			syncer := &SQLSyncer{}
 
 			// Create provisioning config
 			provisioningConfig := &AccountProvisioning{
@@ -125,7 +125,7 @@ func TestUserSyncer_prepareAllQueryInputs_KeyCollision(t *testing.T) {
 			}
 
 			// Call the method under test
-			queryInputs, _, err := syncer.prepareAllQueryInputs(
+			queryInputs, _, err := syncer.prepareQueryInputs(
 				provisioningConfig,
 				accountInfo,
 				tt.credentialOptions,

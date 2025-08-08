@@ -119,7 +119,7 @@ func (s *userSyncer) CreateAccount(
 	}
 
 	// Prepare all query inputs in one step
-	queryInputs, plaintextDataList, err := s.prepareAllQueryInputs(provisioningConfig, accountInfo, credentialOptions)
+	queryInputs, plaintextDataList, err := s.prepareQueryInputs(provisioningConfig, accountInfo, credentialOptions)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -131,9 +131,9 @@ func (s *userSyncer) CreateAccount(
 	}
 
 	// Validate the created account
-	accountResource, err := s.validateCreatedAccount(ctx, provisioningConfig, queryInputs)
+	accountResource, err := s.validateAccount(ctx, provisioningConfig, queryInputs)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("failed to validate created account: %w", err)
 	}
 
 	response := &v2.CreateAccountResponse_SuccessResult{
@@ -141,139 +141,4 @@ func (s *userSyncer) CreateAccount(
 	}
 
 	return response, plaintextDataList, nil, nil
-}
-
-// extractAndValidateProvisioning extracts and validates the account provisioning configuration.
-func (s *userSyncer) extractAndValidateProvisioning() (string, *AccountProvisioning, error) {
-	resourceTypeID, accountProvisioning, err := s.fullConfig.ExtractAccountProvisioning()
-	if err != nil {
-		if errors.Is(err, ErrNoAccountProvisioningDefined) {
-			return "", nil, nil
-		}
-		return "", nil, err
-	}
-
-	if accountProvisioning == nil {
-		return "", nil, errors.New("no account provisioning defined")
-	}
-
-	return resourceTypeID, accountProvisioning, nil
-}
-
-// validateAccountInfo validates that the required account information is provided.
-func (s *userSyncer) validateAccountInfo(accountInfo *v2.AccountInfo) error {
-	if accountInfo == nil {
-		return errors.New("account info is required")
-	}
-
-	if accountInfo.Profile == nil {
-		return errors.New("account profile is required")
-	}
-
-	return nil
-}
-
-// prepareAllQueryInputs prepares all query inputs including schema vars and credentials in one step.
-// This eliminates the need for complex merging logic by doing everything together.
-func (s *userSyncer) prepareAllQueryInputs(
-	provisioningConfig *AccountProvisioning,
-	accountInfo *v2.AccountInfo,
-	credentialOptions *v2.CredentialOptions,
-) (map[string]any, []*v2.PlaintextData, error) {
-	queryInputs := make(map[string]any)
-	var plaintextDataList []*v2.PlaintextData
-
-	// 1. Add schema variables (profile data) directly
-	schemaVars := make(map[string]any)
-	for _, field := range provisioningConfig.Schema {
-		if value, exists := accountInfo.Profile.Fields[field.Name]; exists {
-			var parsedValue any
-			switch field.Type {
-			case "string":
-				if strValue := value.GetStringValue(); strValue != "" {
-					parsedValue = strValue
-				}
-			case "string_list":
-				if listValue := value.GetListValue(); listValue != nil {
-					var strList []string
-					for _, v := range listValue.Values {
-						if strValue := v.GetStringValue(); strValue != "" {
-							strList = append(strList, strValue)
-						}
-					}
-					parsedValue = strList
-				}
-			case "boolean":
-				parsedValue = value.GetBoolValue()
-			case "int":
-				if numValue := value.GetNumberValue(); numValue != 0 {
-					parsedValue = int(numValue)
-				}
-			case "map":
-				if structValue := value.GetStructValue(); structValue != nil {
-					parsedValue = structValue.AsMap()
-				}
-			}
-
-			if parsedValue != nil {
-				queryInputs[field.Name] = parsedValue
-				schemaVars[field.Name] = parsedValue
-			}
-		}
-	}
-
-	// 2. Add credentials if required
-	credentials := make(map[string]any)
-	if credentialOptions != nil {
-		switch credentialOptions.Options.(type) {
-		case *v2.CredentialOptions_NoPassword_:
-		case *v2.CredentialOptions_RandomPassword_:
-			password, err := generateCredentials(credentialOptions)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to generate password: %w", err)
-			}
-
-			// Add password to queryInputs and credentials map
-			queryInputs["password"] = password
-			credentials["password"] = password
-
-			// Create plaintext data for return
-			passwordData := &v2.PlaintextData{
-				Name:  "password",
-				Bytes: []byte(password),
-			}
-			plaintextDataList = append(plaintextDataList, passwordData)
-		default:
-			return nil, nil, fmt.Errorf("unsupported credential options: %v", credentialOptions)
-		}
-	}
-
-	// 3. Add namespaced access for advanced CEL expressions
-	// Only add namespaces if they don't conflict with user-defined schema fields
-	if len(schemaVars) > 0 {
-		if _, exists := queryInputs["input"]; !exists {
-			queryInputs["input"] = schemaVars
-		}
-	}
-	if len(credentials) > 0 {
-		if _, exists := queryInputs["credentials"]; !exists {
-			queryInputs["credentials"] = credentials
-		}
-	}
-
-	return queryInputs, plaintextDataList, nil
-}
-
-// validateCreatedAccount validates that the account was created successfully.
-func (s *userSyncer) validateCreatedAccount(ctx context.Context, provisioningConfig *AccountProvisioning, queryInputs map[string]any) (*v2.Resource, error) {
-	accountResource, isValid, err := s.validateAccount(ctx, provisioningConfig, queryInputs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to validate created account: %w", err)
-	}
-
-	if !isValid {
-		return nil, errors.New("account validation failed after creation")
-	}
-
-	return accountResource, nil
 }
