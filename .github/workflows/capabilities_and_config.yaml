@@ -22,12 +22,18 @@ jobs:
           go-version-file: "go.mod"
 
       - name: Build
-        run: go build -o connector ./cmd/baton-miro
+        run: go build -o connector ./cmd/baton-sql
 
       - name: Run and save config output
         run: ./connector config > config_schema.json
 
       - name: Run and save capabilities output
+        env:
+          DB_USER: example
+          DB_PASS: example
+          DB_HOST: example
+          DB_NAME: example
+          BATON_CONFIG_PATH: examples/example.yml
         run: ./connector capabilities > baton_capabilities.json
 
       - name: Commit changes
