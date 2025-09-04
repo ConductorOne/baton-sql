@@ -1,0 +1,62 @@
+---
+app_name: PeopleSoft
+connect:
+  dsn: "postgres://testuserc1:testpasswordc1@localhost:5432/testpeoplesoft?sslmode=disable"
+  user: 
+  password: 
+resource_types:
+  account:
+    name: "Account"
+    description: "An account within PeopleSoft"
+    list:
+      query: |
+        SELECT PSOPRDEFN.OPRID, PSOPRDEFN.USERIDALIAS, PSOPRDEFN.EMPLID, PSOPRDEFN.EMAILID, PSOPRDEFN.SYMBOLICID, PSOPRDEFN.DEFAULTNAVHP, PSOPRDEFN.ROWSECCLASS, PSOPRDEFN.PRCSPRFLCLS, PSOPRDEFN.OPRCLASS, 
+        PS_OPR_DEF_TBL_AP.ORIGIN AS APORIGIN, 
+        PS_OPR_DEF_TBL_PM.ORIGIN AS PMORIGIN
+        FROM PSOPRDEFN
+        LEFT OUTER JOIN PS_OPR_DEF_TBL_AP ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_AP.OPRID
+        LEFT OUTER JOIN PS_OPR_DEF_TBL_FS ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_FS.OPRID
+        LEFT OUTER JOIN PS_OPR_DEF_TBL_GL ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_GL.OPRID
+        LEFT OUTER JOIN PS_OPR_DEF_TBL_PM ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_PM.OPRID
+        LEFT OUTER JOIN PS_OPR_DEF_TBL_VND ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_VND.OPRID
+      map:
+        id: ".oprid"
+        display_name: ".oprid"
+        description: ""
+        traits:
+          user:
+            emails:
+              - ".emailid"
+            status: "active"
+            login: ".useridalias"
+            profile:
+              username: ".useridalias"
+              employee_id: ".emplid"
+              PSOPRDEFN-SYMBOLICID: ".symbolicid"
+              PSOPRDEFN-DEFAULTNAVHP: ".defaultnavhp"
+              PSOPRDEFN-ROWSECCLASS: ".rowsecclass"
+              PSOPRDEFN-PRCSPRFLCLS: ".prcsprflcls"
+              PSOPRDEFN-OPRCLASS: ".oprclass"
+              PS_OPR_DEF_TBL_AP-ORIGIN: ".aporigin"
+              PS_OPR_DEF_TBL_PM-ORIGIN: ".pmorigin"
+  role:
+    name: "Role"
+    description: "A role within PeopleSoft"
+    list:
+      query: |
+        SELECT ROLENAME, ROLEUSER FROM PSROLEUSER
+      map:
+        id: ".rolename"
+        display_name: ".rolename"
+        description: ""
+    static_entitlements:
+      - id: "member"
+        display_name: "resource.DisplayName + ' Role Member'"
+    grants:
+      - query: |
+          SELECT ROLENAME, ROLEUSER FROM PSROLEUSER
+        map:
+          - skip_if: ".rolename != resource.ID"
+            principal_id: ".roleuser"
+            principal_type: "account"
+            entitlement_id: "member"
