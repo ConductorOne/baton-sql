@@ -209,8 +209,11 @@ type syncer struct {
 	counts                              *ProgressCounts
 	targetedSyncResourceIDs             []string
 	onlyExpandGrants                    bool
+	dontExpandGrants                    bool
 	syncID                              string
 	skipEGForResourceType               map[string]bool
+	skipEntitlementsAndGrants           bool
+	resourceTypeTraits                  map[string][]v2.ResourceType_Trait
 }
 
 const minCheckpointInterval = 10 * time.Second
@@ -412,6 +415,9 @@ func (s *syncer) Sync(ctx context.Context) error {
 		case InitOp:
 			s.state.FinishAction(ctx)
 
+			if s.skipEntitlementsAndGrants {
+				s.state.SetShouldSkipEntitlementsAndGrants()
+			}
 			if len(targetedResources) > 0 {
 				for _, r := range targetedResources {
 					s.state.PushAction(ctx, Action{
@@ -434,7 +440,9 @@ func (s *syncer) Sync(ctx context.Context) error {
 
 			// FIXME(jirwin): Disabling syncing assets for now
 			// s.state.PushAction(ctx, Action{Op: SyncAssetsOp})
-			s.state.PushAction(ctx, Action{Op: SyncGrantExpansionOp})
+			if !s.state.ShouldSkipEntitlementsAndGrants() {
+				s.state.PushAction(ctx, Action{Op: SyncGrantExpansionOp})
+			}
 			if s.externalResourceReader != nil {
 				s.state.PushAction(ctx, Action{Op: SyncExternalResourcesOp})
 			}
@@ -446,8 +454,10 @@ func (s *syncer) Sync(ctx context.Context) error {
 				}
 				continue
 			}
-			s.state.PushAction(ctx, Action{Op: SyncGrantsOp})
-			s.state.PushAction(ctx, Action{Op: SyncEntitlementsOp})
+			if !s.state.ShouldSkipEntitlementsAndGrants() {
+				s.state.PushAction(ctx, Action{Op: SyncGrantsOp})
+				s.state.PushAction(ctx, Action{Op: SyncEntitlementsOp})
+			}
 			s.state.PushAction(ctx, Action{Op: SyncResourcesOp})
 			s.state.PushAction(ctx, Action{Op: SyncResourceTypesOp})
 
@@ -524,7 +534,7 @@ func (s *syncer) Sync(ctx context.Context) error {
 			continue
 
 		case SyncGrantExpansionOp:
-			if !s.state.NeedsExpansion() {
+			if s.dontExpandGrants || !s.state.NeedsExpansion() {
 				l.Debug("skipping grant expansion, no grants to expand")
 				s.state.FinishAction(ctx)
 				continue
@@ -814,7 +824,7 @@ func (s *syncer) SyncResources(ctx context.Context) error {
 		for _, rt := range resp.List {
 			action := Action{Op: SyncResourcesOp, ResourceTypeID: rt.Id}
 			// If this request specified a parent resource, only queue up syncing resources for children of the parent resource
-			if s.state.Current().ParentResourceTypeID != "" && s.state.Current().ParentResourceID != "" {
+			if s.state.Current() != nil && s.state.Current().ParentResourceTypeID != "" && s.state.Current().ParentResourceID != "" {
 				action.ParentResourceID = s.state.Current().ParentResourceID
 				action.ParentResourceTypeID = s.state.Current().ParentResourceTypeID
 			}
@@ -908,14 +918,19 @@ func (s *syncer) validateResourceTraits(ctx context.Context, r *v2.Resource) err
 	ctx, span := tracer.Start(ctx, "syncer.validateResourceTraits")
 	defer span.End()
 
-	resourceTypeResponse, err := s.store.GetResourceType(ctx, &reader_v2.ResourceTypesReaderServiceGetResourceTypeRequest{
-		ResourceTypeId: r.Id.ResourceType,
-	})
-	if err != nil {
-		return err
+	resourceTypeTraits, ok := s.resourceTypeTraits[r.Id.ResourceType]
+	if !ok {
+		resourceTypeResponse, err := s.store.GetResourceType(ctx, &reader_v2.ResourceTypesReaderServiceGetResourceTypeRequest{
+			ResourceTypeId: r.Id.ResourceType,
+		})
+		if err != nil {
+			return err
+		}
+		resourceTypeTraits = resourceTypeResponse.ResourceType.Traits
+		s.resourceTypeTraits[r.Id.ResourceType] = resourceTypeTraits
 	}
 
-	for _, t := range resourceTypeResponse.ResourceType.Traits {
+	for _, t := range resourceTypeTraits {
 		var trait proto.Message
 		switch t {
 		case v2.ResourceType_TRAIT_APP:
@@ -953,6 +968,10 @@ func (s *syncer) validateResourceTraits(ctx context.Context, r *v2.Resource) err
 func (s *syncer) shouldSkipEntitlementsAndGrants(ctx context.Context, r *v2.Resource) (bool, error) {
 	ctx, span := tracer.Start(ctx, "syncer.shouldSkipEntitlementsAndGrants")
 	defer span.End()
+
+	if s.state.ShouldSkipEntitlementsAndGrants() {
+		return true, nil
+	}
 
 	rAnnos := annotations.Annotations(r.GetAnnotations())
 	if rAnnos.Contains(&v2.SkipEntitlementsAndGrants{}) {
@@ -1267,7 +1286,7 @@ func (s *syncer) SyncGrantExpansion(ctx context.Context) error {
 				return err
 			}
 		} else {
-			l.Info("Finished loading entitlement graph", zap.Int("edges", len(entitlementGraph.Edges)))
+			l.Debug("Finished loading grants to expand")
 			entitlementGraph.Loaded = true
 		}
 
@@ -1335,6 +1354,9 @@ func (s *syncer) SyncGrantExpansion(ctx context.Context) error {
 					return fmt.Errorf("error adding edge to graph: %w", err)
 				}
 			}
+		}
+		if entitlementGraph.Loaded {
+			l.Info("Finished loading entitlement graph", zap.Int("edges", len(entitlementGraph.Edges)))
 		}
 		return nil
 	}
@@ -1593,7 +1615,7 @@ func (s *syncer) syncGrantsForResource(ctx context.Context, resourceID *v2.Resou
 	l := ctxzap.Extract(ctx)
 	for _, grant := range grants {
 		grantAnnos := annotations.Annotations(grant.GetAnnotations())
-		if grantAnnos.Contains(&v2.GrantExpandable{}) {
+		if !s.dontExpandGrants && grantAnnos.Contains(&v2.GrantExpandable{}) {
 			s.state.SetNeedsExpansion()
 		}
 		if grantAnnos.ContainsAny(&v2.ExternalResourceMatchAll{}, &v2.ExternalResourceMatch{}, &v2.ExternalResourceMatchID{}) {
@@ -2743,9 +2765,20 @@ func WithOnlyExpandGrants() SyncOpt {
 	}
 }
 
+func WithDontExpandGrants() SyncOpt {
+	return func(s *syncer) {
+		s.dontExpandGrants = true
+	}
+}
 func WithSyncID(syncID string) SyncOpt {
 	return func(s *syncer) {
 		s.syncID = syncID
+	}
+}
+
+func WithSkipEntitlementsAndGrants(skip bool) SyncOpt {
+	return func(s *syncer) {
+		s.skipEntitlementsAndGrants = skip
 	}
 }
 
@@ -2754,6 +2787,7 @@ func NewSyncer(ctx context.Context, c types.ConnectorClient, opts ...SyncOpt) (S
 	s := &syncer{
 		connector:             c,
 		skipEGForResourceType: make(map[string]bool),
+		resourceTypeTraits:    make(map[string][]v2.ResourceType_Trait),
 		counts:                NewProgressCounts(),
 	}
 
