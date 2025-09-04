@@ -19,6 +19,13 @@ resource_types:
         LEFT OUTER JOIN PS_OPR_DEF_TBL_GL ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_GL.OPRID
         LEFT OUTER JOIN PS_OPR_DEF_TBL_PM ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_PM.OPRID
         LEFT OUTER JOIN PS_OPR_DEF_TBL_VND ON PSOPRDEFN.OPRID = PS_OPR_DEF_TBL_VND.OPRID
+        WHERE PSOPRDEFN.OPRID > ?<Cursor>
+        ORDER BY PSOPRDEFN.OPRID ASC
+        LIMIT ?<Limit>
+      pagination:
+        strategy: "cursor"
+        primary_key: "oprid"
+        page_size: 1000
       map:
         id: ".oprid"
         display_name: ".oprid"
@@ -45,6 +52,13 @@ resource_types:
     list:
       query: |
         SELECT ROLENAME, ROLEUSER FROM PSROLEUSER
+        WHERE ROLENAME > ?<Cursor>
+        ORDER BY ROLENAME ASC
+        LIMIT ?<Limit>
+      pagination:
+        strategy: "cursor"
+        primary_key: "rolename"
+        page_size: 1000
       map:
         id: ".rolename"
         display_name: ".rolename"
@@ -55,6 +69,14 @@ resource_types:
     grants:
       - query: |
           SELECT ROLENAME, ROLEUSER FROM PSROLEUSER
+          WHERE ROLENAME = ?<resource.ID>
+          AND (CASE WHEN ?<Cursor> = '' THEN TRUE ELSE ROLEUSER > ?<Cursor> END)
+          ORDER BY ROLEUSER ASC
+          LIMIT ?<Limit>
+        pagination:
+          strategy: "cursor"
+          primary_key: "roleuser"
+          page_size: 1000
         map:
           - skip_if: ".rolename != resource.ID"
             principal_id: ".roleuser"
