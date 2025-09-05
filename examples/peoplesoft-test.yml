@@ -69,13 +69,12 @@ resource_types:
     grants:
       - query: |
           SELECT ROLENAME, ROLEUSER FROM PSROLEUSER
-          WHERE ROLENAME = ?<resource.ID>
-          AND (CASE WHEN ?<Cursor> = '' THEN TRUE ELSE ROLEUSER > ?<Cursor> END)
-          ORDER BY ROLEUSER ASC
+          ORDER BY ROLENAME, ROLEUSER ASC
+          OFFSET ?<Offset>
           LIMIT ?<Limit>
         pagination:
-          strategy: "cursor"
-          primary_key: "roleuser"
+          strategy: "offset"
+          primary_key: "rolename"
           page_size: 1000
         map:
           - skip_if: ".rolename != resource.ID"
