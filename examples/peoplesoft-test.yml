@@ -25,7 +25,6 @@ resource_types:
       pagination:
         strategy: "cursor"
         primary_key: "oprid"
-        page_size: 1000
       map:
         id: ".oprid"
         display_name: ".oprid"
@@ -51,14 +50,13 @@ resource_types:
     description: "A role within PeopleSoft"
     list:
       query: |
-        SELECT ROLENAME, ROLEUSER FROM PSROLEUSER
+        SELECT DISTINCT ROLENAME FROM PSROLEUSER
         WHERE ROLENAME > ?<Cursor>
         ORDER BY ROLENAME ASC
         LIMIT ?<Limit>
       pagination:
         strategy: "cursor"
         primary_key: "rolename"
-        page_size: 1000
       map:
         id: ".rolename"
         display_name: ".rolename"
@@ -69,15 +67,16 @@ resource_types:
     grants:
       - query: |
           SELECT ROLENAME, ROLEUSER FROM PSROLEUSER
-          ORDER BY ROLENAME, ROLEUSER ASC
-          OFFSET ?<Offset>
+          WHERE ROLENAME = ?<resource_id>
+          AND ROLEUSER > ?<Cursor>
+          ORDER BY ROLEUSER ASC
           LIMIT ?<Limit>
+        vars:
+          resource_id: "resource.ID"
         pagination:
-          strategy: "offset"
-          primary_key: "rolename"
-          page_size: 1000
+          strategy: "cursor"
+          primary_key: "roleuser"
         map:
-          - skip_if: ".rolename != resource.ID"
-            principal_id: ".roleuser"
+          - principal_id: ".roleuser"
             principal_type: "account"
             entitlement_id: "member"
