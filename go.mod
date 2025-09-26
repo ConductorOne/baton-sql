@@ -1,9 +1,9 @@
 module github.com/conductorone/baton-sql
 
-go 1.24
+go 1.25
 
 require (
-	github.com/conductorone/baton-sdk v0.3.48
+	github.com/conductorone/baton-sdk v0.4.5
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.9.2
@@ -25,6 +25,7 @@ require (
 	cel.dev/expr v0.23.1 // indirect
 	filippo.io/age v1.2.1 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/aws/aws-lambda-go v1.48.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.36.3 // indirect
