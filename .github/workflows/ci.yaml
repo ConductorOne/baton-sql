@@ -49,6 +49,8 @@ jobs:
           - "5432:5432"
         env:
           POSTGRES_PASSWORD: secretpassword
+          POSTGRES_DB: batondb
+
     env:
       BATON_LOG_LEVEL: debug
       BATON_CONFIG_PATH: ./examples/postgres-test.yml
@@ -67,7 +69,7 @@ jobs:
       - name: Install postgres client
         run: sudo apt install postgresql-client
       - name: Import sql into postgres
-        run: psql -h localhost --user postgres -f ./test/postgres-init.sql
+        run: psql -h localhost --user postgres -d batondb -f ./test/postgres-init.sql
         env:
           PGPASSWORD: secretpassword
       - name: Build baton-sql
