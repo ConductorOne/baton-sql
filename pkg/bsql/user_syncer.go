@@ -156,7 +156,7 @@ func (s *userSyncer) CreateAccount(
 }
 
 func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, credentialOptions *v2.LocalCredentialOptions) ([]*v2.PlaintextData, annotations.Annotations, error) {
-	logger := ctxzap.Extract(ctx)
+	l := ctxzap.Extract(ctx)
 
 	// Extract and validate account provisioning configuration
 	resourceTypeID, rotationConfig, err := s.extractAndValidateCredentialRotation()
@@ -164,9 +164,10 @@ func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, cred
 		return nil, nil, err
 	}
 
-	logger.Debug("rotating credential", zap.String("resource_type_id", resourceTypeID))
+	l.Debug("rotating credential", zap.String("resource_type_id", resourceTypeID))
 
 	queryInputs := make(map[string]any)
+	queryInputs["resource_id"] = resourceId.Resource
 	credentials := make(map[string]any)
 	var plaintextDataList []*v2.PlaintextData
 	password, err := generatePassword(ctx, credentialOptions)

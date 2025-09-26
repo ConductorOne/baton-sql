@@ -398,8 +398,6 @@ type CredentialRotation struct {
 	Credentials *AccountCredentials `yaml:"credentials" json:"credentials"`
 	// Update defines the SQL queries and configuration for updating credentials.
 	Update *AccountCreationConfig `yaml:"update" json:"update"`
-	// Validate defines the SQL queries and configuration for validating new accounts.
-	Validate *AccountValidationConfig `yaml:"validate" json:"validate"`
 }
 
 func (c Config) ExtractAccountProvisioning() (string, *AccountProvisioning, error) {

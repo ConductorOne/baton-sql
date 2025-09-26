@@ -147,34 +147,14 @@ resource_types:
           preferred: false
         encrypted_password:
           preferred: false
-      validate:
-        vars:
-          username: "username"
-          email: "email"
-        query: |
-          SELECT
-            u.id,
-            u.username,
-            u.email,
-            u.employee_id,
-            u.status,
-            u.account_type,
-            u.created_at,
-            u.last_login,
-            u.manager_id,
-            m.username as manager_username,
-            m.email as manager_email
-          FROM users u
-          LEFT JOIN users m ON u.manager_id = m.id
-          WHERE u.username = ?<username>
       update:
         vars:
-          username: "input.username"
+          username: "resource_id"
           password: "password"
         queries:
           # Update the user with generated password (PostgreSQL style)
           - |
-            UPDATE users SET password_hash = crypt(?<password>, gen_salt('bf')) WHERE username = ?<username>
+            UPDATE users SET password_hash = crypt(?<password>, gen_salt('bf')) WHERE username = ?<resource_id>
 
   # Configuration for "role" resources
   role:
