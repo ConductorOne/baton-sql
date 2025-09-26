@@ -66,6 +66,9 @@ type ResourceType struct {
 
 	// AccountProvisioning defines the configuration for provisioning new accounts
 	AccountProvisioning *AccountProvisioning `yaml:"account_provisioning,omitempty" json:"account_provisioning,omitempty"`
+
+	// CredentialRotation defines the configuration for credential rotation
+	CredentialRotation *CredentialRotation `yaml:"credential_rotation,omitempty" json:"credential_rotation,omitempty"`
 }
 
 // ListQuery defines the structure for configuring resource list queries.
@@ -390,6 +393,15 @@ type AccountCreationConfig struct {
 	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
 }
 
+type CredentialRotation struct {
+	// Credentials defines the supported credential handlers.
+	Credentials *AccountCredentials `yaml:"credentials" json:"credentials"`
+	// Update defines the SQL queries and configuration for updating credentials.
+	Update *AccountCreationConfig `yaml:"update" json:"update"`
+	// Validate defines the SQL queries and configuration for validating new accounts.
+	Validate *AccountValidationConfig `yaml:"validate" json:"validate"`
+}
+
 func (c Config) ExtractAccountProvisioning() (string, *AccountProvisioning, error) {
 	for rtID, rt := range c.ResourceTypes {
 		if rt.AccountProvisioning != nil {
@@ -397,6 +409,15 @@ func (c Config) ExtractAccountProvisioning() (string, *AccountProvisioning, erro
 		}
 	}
 	return "", nil, ErrNoAccountProvisioningDefined
+}
+
+func (c Config) ExtractCredentialRotation() (string, *CredentialRotation, error) {
+	for rtID, rt := range c.ResourceTypes {
+		if rt.CredentialRotation != nil {
+			return rtID, rt.CredentialRotation, nil
+		}
+	}
+	return "", nil, ErrNoCredentialRotationDefined
 }
 
 // Parse converts YAML-encoded configuration data into a Config struct.

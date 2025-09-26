@@ -11,6 +11,7 @@ import (
 
 var (
 	ErrNoAccountProvisioningDefined = errors.New("no account provisioning defined")
+	ErrNoCredentialRotationDefined  = errors.New("no credential rotation defined")
 )
 
 func (c Config) extractTraits(rtID string) ([]v2.ResourceType_Trait, error) {

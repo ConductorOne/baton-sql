@@ -103,13 +103,15 @@ resource_types:
           preferred: true
         no_password:
           preferred: false
+        encrypted_password:
+          preferred: false
       validate:
         vars:
           username: "username"
           email: "email"
         query: |
           SELECT
-            u.id, 
+            u.id,
             u.username,
             u.email,
             u.employee_id,
@@ -134,6 +136,45 @@ resource_types:
           - |
             INSERT INTO users (username, email, employee_id, status, account_type, created_at, password_hash) 
             VALUES (?<username>, ?<email>, ?<employee_id>, 'active', 'human', NOW(), crypt(?<password>, gen_salt('bf')))
+
+    credential_rotation:
+      credentials:
+        random_password:
+          max_length: 32
+          min_length: 16
+          preferred: true
+        no_password:
+          preferred: false
+        encrypted_password:
+          preferred: false
+      validate:
+        vars:
+          username: "username"
+          email: "email"
+        query: |
+          SELECT
+            u.id,
+            u.username,
+            u.email,
+            u.employee_id,
+            u.status,
+            u.account_type,
+            u.created_at,
+            u.last_login,
+            u.manager_id,
+            m.username as manager_username,
+            m.email as manager_email
+          FROM users u
+          LEFT JOIN users m ON u.manager_id = m.id
+          WHERE u.username = ?<username>
+      update:
+        vars:
+          username: "input.username"
+          password: "password"
+        queries:
+          # Update the user with generated password (PostgreSQL style)
+          - |
+            UPDATE users SET password_hash = crypt(?<password>, gen_salt('bf')) WHERE username = ?<username>
 
   # Configuration for "role" resources
   role:

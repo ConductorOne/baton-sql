@@ -320,3 +320,19 @@ func (s *SQLSyncer) extractAndValidateProvisioning() (string, *AccountProvisioni
 
 	return resourceTypeID, accountProvisioning, nil
 }
+
+func (s *SQLSyncer) extractAndValidateCredentialRotation() (string, *CredentialRotation, error) {
+	resourceTypeID, credentialRotation, err := s.fullConfig.ExtractCredentialRotation()
+	if err != nil {
+		if errors.Is(err, ErrNoCredentialRotationDefined) {
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+
+	if credentialRotation == nil {
+		return "", nil, errors.New("no credential rotation defined")
+	}
+
+	return resourceTypeID, credentialRotation, nil
+}
