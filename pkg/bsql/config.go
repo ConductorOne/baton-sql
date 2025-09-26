@@ -343,8 +343,9 @@ type AccountProvisioningField struct {
 
 // AccountCredentials defines the supported credential handlers and their configurations.
 type AccountCredentials struct {
-	NoPassword     *NoPasswordConfig     `yaml:"no_password,omitempty" json:"no_password,omitempty"`
-	RandomPassword *RandomPasswordConfig `yaml:"random_password,omitempty" json:"random_password,omitempty"`
+	NoPassword        *NoPasswordConfig        `yaml:"no_password,omitempty" json:"no_password,omitempty"`
+	RandomPassword    *RandomPasswordConfig    `yaml:"random_password,omitempty" json:"random_password,omitempty"`
+	EncryptedPassword *EncryptedPasswordConfig `yaml:"encrypted_password,omitempty" json:"encrypted_password,omitempty"`
 }
 
 // BaseCredentialConfig contains fields common to all credential handlers.
@@ -363,6 +364,11 @@ type RandomPasswordConfig struct {
 	MaxLength            int    `yaml:"max_length" json:"max_length"`
 	MinLength            int    `yaml:"min_length" json:"min_length"`
 	DisallowedCharacters string `yaml:"disallowed_characters" json:"disallowed_characters"`
+}
+
+// EncryptedPasswordConfig defines configuration for encrypted password generation.
+type EncryptedPasswordConfig struct {
+	BaseCredentialConfig `yaml:",inline"`
 }
 
 // AccountValidationConfig defines the configuration for validating new accounts.

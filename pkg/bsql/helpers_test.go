@@ -167,9 +167,10 @@ func TestParseTimeWithEngine(t *testing.T) {
 func TestGenerateCredentials(t *testing.T) {
 	tests := []struct {
 		name              string
-		credentialOptions *v2.CredentialOptions
+		credentialOptions *v2.LocalCredentialOptions
 		expectError       bool
 		expectNonEmpty    bool
+		expectedValue     string
 	}{
 		{
 			name:        "nil credential options",
@@ -177,18 +178,31 @@ func TestGenerateCredentials(t *testing.T) {
 		},
 		{
 			name: "no random password",
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_NoPassword_{
-					NoPassword: &v2.CredentialOptions_NoPassword{},
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_NoPassword_{
+					NoPassword: &v2.LocalCredentialOptions_NoPassword{},
 				},
 			},
-			expectError: true,
+			expectError:    false,
+			expectNonEmpty: false,
+		},
+		{
+			name: "valid plaintext password",
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_PlaintextPassword_{
+					PlaintextPassword: &v2.LocalCredentialOptions_PlaintextPassword{
+						PlaintextPassword: "password",
+					},
+				},
+			},
+			expectError:    false,
+			expectNonEmpty: true,
 		},
 		{
 			name: "valid random password with constraints",
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 16,
 						Constraints: []*v2.PasswordConstraint{
 							{
@@ -216,9 +230,9 @@ func TestGenerateCredentials(t *testing.T) {
 		},
 		{
 			name: "simple random password without constraints",
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 20,
 					},
 				},
@@ -228,9 +242,9 @@ func TestGenerateCredentials(t *testing.T) {
 		},
 		{
 			name: "very long password",
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 32,
 						Constraints: []*v2.PasswordConstraint{
 							{
@@ -246,9 +260,9 @@ func TestGenerateCredentials(t *testing.T) {
 		},
 		{
 			name: "minimum practical length",
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 8,
 					},
 				},
@@ -258,9 +272,9 @@ func TestGenerateCredentials(t *testing.T) {
 		},
 		{
 			name: "database-style password (medium length)",
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 20,
 						Constraints: []*v2.PasswordConstraint{
 							{
@@ -284,9 +298,9 @@ func TestGenerateCredentials(t *testing.T) {
 		},
 		{
 			name: "enterprise-grade password",
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 24,
 						Constraints: []*v2.PasswordConstraint{
 							{
@@ -314,9 +328,10 @@ func TestGenerateCredentials(t *testing.T) {
 		},
 	}
 
+	ctx := t.Context()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			password, err := generateCredentials(tt.credentialOptions)
+			password, err := generatePassword(ctx, tt.credentialOptions)
 
 			if tt.expectError {
 				require.Error(t, err)
