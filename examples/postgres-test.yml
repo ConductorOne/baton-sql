@@ -218,6 +218,35 @@ resource_types:
         purpose: "assignment"
         grantable_to:
           - "user"
+        provisioning:
+          vars:
+            username: "principal.ID"
+            role_name: "resource.ID"
+          grant:
+            queries:
+              - |
+                INSERT INTO user_roles (
+                  user_id,
+                  role_id
+                )
+                SELECT
+                  u.id,
+                  r.id
+                FROM users u, roles r
+                WHERE u.username = ?<username>
+                AND r.role_name = ?<role_name>
+                ON CONFLICT (user_id, role_id) DO NOTHING
+          revoke:
+            queries:
+              - |
+                DELETE FROM user_roles
+                WHERE user_id IN (
+                  SELECT id FROM users
+                  WHERE username = ?<username>
+                ) AND role_id IN (
+                  SELECT id FROM roles
+                  WHERE role_name = ?<role_name>
+                )
 
     # Dynamic grants based on SQL queries to associate users with roles
     grants:
