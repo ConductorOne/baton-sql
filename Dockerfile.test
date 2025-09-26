@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine as builder
+FROM golang:1.25-alpine as builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ COPY . .
 RUN go build -o baton-sql ./cmd/baton-sql
 
 # Create final container
-FROM alpine:3.18
+FROM alpine:3.22
 
 RUN apk add --no-cache ca-certificates bash curl
 

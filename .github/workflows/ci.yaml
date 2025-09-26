@@ -78,6 +78,6 @@ jobs:
         uses: ConductorOne/github-workflows/actions/sync-test@v2
         with:
           connector: ./baton-sql
-          baton-entitlement: entitlement:group:1234:member
-          baton-principal: user:9876
+          baton-entitlement: 'role:admin:member'
+          baton-principal: john.smith
           baton-principal-type: user
