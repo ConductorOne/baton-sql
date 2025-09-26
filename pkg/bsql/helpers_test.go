@@ -350,6 +350,9 @@ func TestGenerateCredentials(t *testing.T) {
 					}
 				}
 			}
+			if tt.expectedValue != "" {
+				require.Equal(t, tt.expectedValue, password)
+			}
 		})
 	}
 }
