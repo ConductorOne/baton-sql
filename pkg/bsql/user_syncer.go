@@ -174,14 +174,16 @@ func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, cred
 	if err != nil {
 		return nil, nil, err
 	}
-	queryInputs["password"] = password
-	credentials["password"] = password
-	// Create plaintext data for return
-	passwordData := &v2.PlaintextData{
-		Name:  "password",
-		Bytes: []byte(password),
+	if password != nil {
+		queryInputs["password"] = password
+		credentials["password"] = password
+		// Create plaintext data for return
+		passwordData := &v2.PlaintextData{
+			Name:  "password",
+			Bytes: []byte(*password),
+		}
+		plaintextDataList = append(plaintextDataList, passwordData)
 	}
-	plaintextDataList = append(plaintextDataList, passwordData)
 
 	// Execute account creation queries
 	useTransaction := !rotationConfig.Update.NoTransaction

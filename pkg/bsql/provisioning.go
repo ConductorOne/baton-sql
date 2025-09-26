@@ -243,14 +243,16 @@ func (s *SQLSyncer) prepareQueryInputs(
 		if err != nil {
 			return nil, nil, err
 		}
-		queryInputs["password"] = password
-		credentials["password"] = password
-		// Create plaintext data for return
-		passwordData := &v2.PlaintextData{
-			Name:  "password",
-			Bytes: []byte(password),
+		if password != nil {
+			queryInputs["password"] = password
+			credentials["password"] = password
+			// Create plaintext data for return
+			passwordData := &v2.PlaintextData{
+				Name:  "password",
+				Bytes: []byte(*password),
+			}
+			plaintextDataList = append(plaintextDataList, passwordData)
 		}
-		plaintextDataList = append(plaintextDataList, passwordData)
 	}
 
 	// 3. Add namespaced access for advanced CEL expressions
@@ -269,26 +271,27 @@ func (s *SQLSyncer) prepareQueryInputs(
 	return queryInputs, plaintextDataList, nil
 }
 
-func generatePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (string, error) {
+func generatePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (*string, error) {
 	if credentialOptions == nil {
-		return "", errors.New("credential options are required")
+		return nil, errors.New("credential options are required")
 	}
 
 	var password string
 	var err error
 	switch credentialOptions.Options.(type) {
 	case *v2.LocalCredentialOptions_NoPassword_:
+		return nil, nil
 	case *v2.LocalCredentialOptions_RandomPassword_, *v2.LocalCredentialOptions_PlaintextPassword_:
 		password, err = crypto.GeneratePassword(ctx, credentialOptions)
 		if err != nil {
-			return "", fmt.Errorf("failed to generate password: %w", err)
+			return nil, fmt.Errorf("failed to generate password: %w", err)
 		}
 
 	default:
-		return "", fmt.Errorf("unsupported credential options: %v", credentialOptions)
+		return nil, fmt.Errorf("unsupported credential options: %v", credentialOptions)
 	}
 
-	return password, nil
+	return &password, nil
 }
 
 // validateAccountInfo validates that the required account information is provided.

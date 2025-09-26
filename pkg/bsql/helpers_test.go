@@ -341,17 +341,19 @@ func TestGenerateCredentials(t *testing.T) {
 
 			require.NoError(t, err)
 			if tt.expectNonEmpty {
-				require.NotEmpty(t, password)
+				require.NotNil(t, password)
+				require.NotEmpty(t, *password)
 				// Verify the password length matches the requested length
 				if tt.credentialOptions.GetRandomPassword() != nil {
 					expectedLength := tt.credentialOptions.GetRandomPassword().GetLength()
 					if expectedLength > 0 {
-						require.Equal(t, int(expectedLength), len(password), "Password length should match requested length")
+						require.Equal(t, int(expectedLength), len(*password), "Password length should match requested length")
 					}
 				}
 			}
 			if tt.expectedValue != "" {
-				require.Equal(t, tt.expectedValue, password)
+				require.NotNil(t, password)
+				require.Equal(t, tt.expectedValue, *password)
 			}
 		})
 	}
