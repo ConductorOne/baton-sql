@@ -7,6 +7,7 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/crypto"
 	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -188,13 +189,12 @@ func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *Ac
 // prepareQueryInputs prepares all query inputs including schema vars and credentials in one step.
 // This eliminates the need for complex merging logic by doing everything together.
 func (s *SQLSyncer) prepareQueryInputs(
+	ctx context.Context,
 	provisioningConfig *AccountProvisioning,
 	accountInfo *v2.AccountInfo,
-	credentialOptions *v2.CredentialOptions,
+	credentialOptions *v2.LocalCredentialOptions,
 ) (map[string]any, []*v2.PlaintextData, error) {
 	queryInputs := make(map[string]any)
-	var plaintextDataList []*v2.PlaintextData
-
 	// 1. Add schema variables (profile data) directly
 	schemaVars := make(map[string]any)
 	for _, field := range provisioningConfig.Schema {
@@ -236,29 +236,22 @@ func (s *SQLSyncer) prepareQueryInputs(
 
 	// 2. Add credentials if required
 	credentials := make(map[string]any)
+	var plaintextDataList []*v2.PlaintextData
 	if credentialOptions != nil {
-		switch credentialOptions.Options.(type) {
-		case *v2.CredentialOptions_NoPassword_:
-		case *v2.CredentialOptions_RandomPassword_:
-			password, err := generateCredentials(credentialOptions)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to generate password: %w", err)
-			}
-
-			// Add password to queryInputs and credentials map
-			// NOTE: For future credential types (SSO, API keys), consider using only the
-			// 'credentials' namespace to avoid conflicts with user-defined schema fields
-			queryInputs["password"] = password
-			credentials["password"] = password
-
+		var err error
+		password, err := generatePassword(ctx, credentialOptions)
+		if err != nil {
+			return nil, nil, err
+		}
+		if password != nil {
+			queryInputs["password"] = *password
+			credentials["password"] = *password
 			// Create plaintext data for return
 			passwordData := &v2.PlaintextData{
 				Name:  "password",
-				Bytes: []byte(password),
+				Bytes: []byte(*password),
 			}
 			plaintextDataList = append(plaintextDataList, passwordData)
-		default:
-			return nil, nil, fmt.Errorf("unsupported credential options: %v", credentialOptions)
 		}
 	}
 
@@ -276,6 +269,29 @@ func (s *SQLSyncer) prepareQueryInputs(
 	}
 
 	return queryInputs, plaintextDataList, nil
+}
+
+func generatePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (*string, error) {
+	if credentialOptions == nil {
+		return nil, errors.New("credential options are required")
+	}
+
+	var password string
+	var err error
+	switch credentialOptions.Options.(type) {
+	case *v2.LocalCredentialOptions_NoPassword_:
+		return nil, nil
+	case *v2.LocalCredentialOptions_RandomPassword_, *v2.LocalCredentialOptions_PlaintextPassword_:
+		password, err = crypto.GeneratePassword(ctx, credentialOptions)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate password: %w", err)
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported credential options: %v", credentialOptions)
+	}
+
+	return &password, nil
 }
 
 // validateAccountInfo validates that the required account information is provided.
@@ -306,4 +322,20 @@ func (s *SQLSyncer) extractAndValidateProvisioning() (string, *AccountProvisioni
 	}
 
 	return resourceTypeID, accountProvisioning, nil
+}
+
+func (s *SQLSyncer) extractAndValidateCredentialRotation() (string, *CredentialRotation, error) {
+	resourceTypeID, credentialRotation, err := s.fullConfig.ExtractCredentialRotation()
+	if err != nil {
+		if errors.Is(err, ErrNoCredentialRotationDefined) {
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+
+	if credentialRotation == nil {
+		return "", nil, errors.New("no credential rotation defined")
+	}
+
+	return resourceTypeID, credentialRotation, nil
 }

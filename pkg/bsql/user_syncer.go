@@ -19,6 +19,9 @@ type userSyncer struct {
 	*SQLSyncer
 }
 
+var _ connectorbuilder.AccountManager = &userSyncer{}
+var _ connectorbuilder.CredentialManager = &userSyncer{}
+
 func newUserSyncer(rt *v2.ResourceType, rtConfig ResourceType, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) *userSyncer {
 	sqlSyncer := &SQLSyncer{
 		resourceType: rt,
@@ -34,14 +37,51 @@ func newUserSyncer(rt *v2.ResourceType, rtConfig ResourceType, db *sql.DB, dbEng
 	}
 }
 
+func optionsFromCredentials(credentials *AccountCredentials) ([]v2.CapabilityDetailCredentialOption, []v2.CapabilityDetailCredentialOption, error) {
+	if credentials == nil {
+		return nil, nil, errors.New("no credential options defined")
+	}
+
+	var supportedCredentials []v2.CapabilityDetailCredentialOption
+	var preferredCredentialOption []v2.CapabilityDetailCredentialOption
+	if credentials.NoPassword != nil {
+		supportedCredentials = append(supportedCredentials, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD)
+		if credentials.NoPassword.Preferred {
+			preferredCredentialOption = append(preferredCredentialOption, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD)
+		}
+	}
+	if credentials.RandomPassword != nil {
+		supportedCredentials = append(supportedCredentials, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_RANDOM_PASSWORD)
+		if credentials.RandomPassword.Preferred {
+			preferredCredentialOption = append(preferredCredentialOption, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_RANDOM_PASSWORD)
+		}
+	}
+	if credentials.EncryptedPassword != nil {
+		supportedCredentials = append(supportedCredentials, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_ENCRYPTED_PASSWORD)
+		if credentials.EncryptedPassword.Preferred {
+			preferredCredentialOption = append(preferredCredentialOption, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_ENCRYPTED_PASSWORD)
+		}
+	}
+
+	if len(supportedCredentials) == 0 {
+		return nil, nil, nil
+	}
+	if len(preferredCredentialOption) > 1 {
+		return nil, nil, errors.New("multiple preferred credential options are not supported")
+	}
+
+	if len(preferredCredentialOption) == 0 {
+		preferredCredentialOption = []v2.CapabilityDetailCredentialOption{supportedCredentials[0]}
+	}
+
+	return supportedCredentials, preferredCredentialOption, nil
+}
+
 func (s *userSyncer) CreateAccountCapabilityDetails(ctx context.Context) (*v2.CredentialDetailsAccountProvisioning, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
-	resourceTypeID, accountProvisioning, err := s.fullConfig.ExtractAccountProvisioning()
-	if err != nil {
-		if errors.Is(err, ErrNoAccountProvisioningDefined) {
-			return nil, nil, nil
-		}
 
+	resourceTypeID, accountProvisioning, err := s.extractAndValidateProvisioning()
+	if err != nil {
 		return nil, nil, err
 	}
 
@@ -51,37 +91,9 @@ func (s *userSyncer) CreateAccountCapabilityDetails(ctx context.Context) (*v2.Cr
 		return nil, nil, errors.New("no account provisioning defined")
 	}
 
-	if accountProvisioning.Credentials == nil {
-		return nil, nil, errors.New("no credential options defined")
-	}
-
-	var supportedCredentials []v2.CapabilityDetailCredentialOption
-	var preferredCredentialOption []v2.CapabilityDetailCredentialOption
-
-	if accountProvisioning.Credentials.NoPassword != nil {
-		supportedCredentials = append(supportedCredentials, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD)
-		if accountProvisioning.Credentials.NoPassword.Preferred {
-			preferredCredentialOption = append(preferredCredentialOption, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_NO_PASSWORD)
-		}
-	}
-
-	if accountProvisioning.Credentials.RandomPassword != nil {
-		supportedCredentials = append(supportedCredentials, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_RANDOM_PASSWORD)
-		if accountProvisioning.Credentials.RandomPassword.Preferred {
-			preferredCredentialOption = append(preferredCredentialOption, v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_RANDOM_PASSWORD)
-		}
-	}
-
-	if len(supportedCredentials) == 0 {
-		return nil, nil, nil
-	}
-
-	if len(preferredCredentialOption) > 1 {
-		return nil, nil, errors.New("multiple preferred credential options are not supported")
-	}
-
-	if len(preferredCredentialOption) == 0 {
-		preferredCredentialOption = []v2.CapabilityDetailCredentialOption{supportedCredentials[0]}
+	supportedCredentials, preferredCredentialOption, err := optionsFromCredentials(accountProvisioning.Credentials)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	return &v2.CredentialDetailsAccountProvisioning{
@@ -96,7 +108,7 @@ func (s *userSyncer) CreateAccountCapabilityDetails(ctx context.Context) (*v2.Cr
 func (s *userSyncer) CreateAccount(
 	ctx context.Context,
 	accountInfo *v2.AccountInfo,
-	credentialOptions *v2.CredentialOptions,
+	credentialOptions *v2.LocalCredentialOptions,
 ) (
 	connectorbuilder.CreateAccountResponse,
 	[]*v2.PlaintextData,
@@ -119,7 +131,7 @@ func (s *userSyncer) CreateAccount(
 	}
 
 	// Prepare all query inputs in one step
-	queryInputs, plaintextDataList, err := s.prepareQueryInputs(provisioningConfig, accountInfo, credentialOptions)
+	queryInputs, plaintextDataList, err := s.prepareQueryInputs(ctx, provisioningConfig, accountInfo, credentialOptions)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -141,4 +153,71 @@ func (s *userSyncer) CreateAccount(
 	}
 
 	return response, plaintextDataList, nil, nil
+}
+
+func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, credentialOptions *v2.LocalCredentialOptions) ([]*v2.PlaintextData, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	// Extract and validate account provisioning configuration
+	resourceTypeID, rotationConfig, err := s.extractAndValidateCredentialRotation()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	l.Debug("rotating credential", zap.String("resource_type_id", resourceTypeID))
+
+	queryInputs := make(map[string]any)
+	queryInputs["resource_id"] = resourceId.Resource
+	credentials := make(map[string]any)
+	var plaintextDataList []*v2.PlaintextData
+	password, err := generatePassword(ctx, credentialOptions)
+	if err != nil {
+		return nil, nil, err
+	}
+	if password != nil {
+		queryInputs["password"] = *password
+		credentials["password"] = *password
+		// Create plaintext data for return
+		passwordData := &v2.PlaintextData{
+			Name:  "password",
+			Bytes: []byte(*password),
+		}
+		plaintextDataList = append(plaintextDataList, passwordData)
+	}
+
+	// Execute account creation queries
+	useTransaction := !rotationConfig.Update.NoTransaction
+	if err := s.runProvisioningQueries(ctx, rotationConfig.Update.Queries, queryInputs, useTransaction); err != nil {
+		return nil, nil, err
+	}
+
+	return plaintextDataList, nil, nil
+}
+
+func (s *userSyncer) RotateCapabilityDetails(ctx context.Context) (*v2.CredentialDetailsCredentialRotation, annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+	resourceTypeID, rotationConfig, err := s.fullConfig.ExtractCredentialRotation()
+	if err != nil {
+		if errors.Is(err, ErrNoCredentialRotationDefined) {
+			return nil, nil, nil
+		}
+
+		return nil, nil, err
+	}
+
+	l.Debug("credential rotation is enabled", zap.String("resource_type_id", resourceTypeID))
+
+	if rotationConfig == nil {
+		return nil, nil, errors.New("no credential rotation configuration defined")
+	}
+
+	supportedCredentials, preferredCredentialOption, err := optionsFromCredentials(rotationConfig.Credentials)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &v2.CredentialDetailsCredentialRotation{
+		SupportedCredentialOptions: supportedCredentials,
+		PreferredCredentialOption:  preferredCredentialOption[0],
+	}, nil, nil
 }

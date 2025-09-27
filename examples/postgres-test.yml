@@ -103,13 +103,15 @@ resource_types:
           preferred: true
         no_password:
           preferred: false
+        encrypted_password:
+          preferred: false
       validate:
         vars:
           username: "username"
           email: "email"
         query: |
           SELECT
-            u.id, 
+            u.id,
             u.username,
             u.email,
             u.employee_id,
@@ -134,6 +136,25 @@ resource_types:
           - |
             INSERT INTO users (username, email, employee_id, status, account_type, created_at, password_hash) 
             VALUES (?<username>, ?<email>, ?<employee_id>, 'active', 'human', NOW(), crypt(?<password>, gen_salt('bf')))
+
+    credential_rotation:
+      credentials:
+        random_password:
+          max_length: 32
+          min_length: 16
+          preferred: true
+        no_password:
+          preferred: false
+        encrypted_password:
+          preferred: false
+      update:
+        vars:
+          username: "resource_id"
+          password: "password"
+        queries:
+          # Update the user with generated password (PostgreSQL style)
+          - |
+            UPDATE users SET password_hash = crypt(?<password>, gen_salt('bf')) WHERE username = ?<resource_id>
 
   # Configuration for "role" resources
   role:
@@ -177,6 +198,35 @@ resource_types:
         purpose: "assignment"
         grantable_to:
           - "user"
+        provisioning:
+          vars:
+            username: "principal.ID"
+            role_name: "resource.ID"
+          grant:
+            queries:
+              - |
+                INSERT INTO user_roles (
+                  user_id,
+                  role_id
+                )
+                SELECT
+                  u.id,
+                  r.id
+                FROM users u, roles r
+                WHERE u.username = ?<username>
+                AND r.role_name = ?<role_name>
+                ON CONFLICT (user_id, role_id) DO NOTHING
+          revoke:
+            queries:
+              - |
+                DELETE FROM user_roles
+                WHERE user_id IN (
+                  SELECT id FROM users
+                  WHERE username = ?<username>
+                ) AND role_id IN (
+                  SELECT id FROM roles
+                  WHERE role_name = ?<role_name>
+                )
 
     # Dynamic grants based on SQL queries to associate users with roles
     grants:

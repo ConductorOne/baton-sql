@@ -66,6 +66,9 @@ type ResourceType struct {
 
 	// AccountProvisioning defines the configuration for provisioning new accounts
 	AccountProvisioning *AccountProvisioning `yaml:"account_provisioning,omitempty" json:"account_provisioning,omitempty"`
+
+	// CredentialRotation defines the configuration for credential rotation
+	CredentialRotation *CredentialRotation `yaml:"credential_rotation,omitempty" json:"credential_rotation,omitempty"`
 }
 
 // ListQuery defines the structure for configuring resource list queries.
@@ -343,8 +346,9 @@ type AccountProvisioningField struct {
 
 // AccountCredentials defines the supported credential handlers and their configurations.
 type AccountCredentials struct {
-	NoPassword     *NoPasswordConfig     `yaml:"no_password,omitempty" json:"no_password,omitempty"`
-	RandomPassword *RandomPasswordConfig `yaml:"random_password,omitempty" json:"random_password,omitempty"`
+	NoPassword        *NoPasswordConfig        `yaml:"no_password,omitempty" json:"no_password,omitempty"`
+	RandomPassword    *RandomPasswordConfig    `yaml:"random_password,omitempty" json:"random_password,omitempty"`
+	EncryptedPassword *EncryptedPasswordConfig `yaml:"encrypted_password,omitempty" json:"encrypted_password,omitempty"`
 }
 
 // BaseCredentialConfig contains fields common to all credential handlers.
@@ -363,6 +367,11 @@ type RandomPasswordConfig struct {
 	MaxLength            int    `yaml:"max_length" json:"max_length"`
 	MinLength            int    `yaml:"min_length" json:"min_length"`
 	DisallowedCharacters string `yaml:"disallowed_characters" json:"disallowed_characters"`
+}
+
+// EncryptedPasswordConfig defines configuration for encrypted password generation.
+type EncryptedPasswordConfig struct {
+	BaseCredentialConfig `yaml:",inline"`
 }
 
 // AccountValidationConfig defines the configuration for validating new accounts.
@@ -384,6 +393,13 @@ type AccountCreationConfig struct {
 	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
 }
 
+type CredentialRotation struct {
+	// Credentials defines the supported credential handlers.
+	Credentials *AccountCredentials `yaml:"credentials" json:"credentials"`
+	// Update defines the SQL queries and configuration for updating credentials.
+	Update *AccountCreationConfig `yaml:"update" json:"update"`
+}
+
 func (c Config) ExtractAccountProvisioning() (string, *AccountProvisioning, error) {
 	for rtID, rt := range c.ResourceTypes {
 		if rt.AccountProvisioning != nil {
@@ -391,6 +407,15 @@ func (c Config) ExtractAccountProvisioning() (string, *AccountProvisioning, erro
 		}
 	}
 	return "", nil, ErrNoAccountProvisioningDefined
+}
+
+func (c Config) ExtractCredentialRotation() (string, *CredentialRotation, error) {
+	for rtID, rt := range c.ResourceTypes {
+		if rt.CredentialRotation != nil {
+			return rtID, rt.CredentialRotation, nil
+		}
+	}
+	return "", nil, ErrNoCredentialRotationDefined
 }
 
 // Parse converts YAML-encoded configuration data into a Config struct.

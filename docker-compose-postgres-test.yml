@@ -1,7 +1,7 @@
 services:
   # PostgreSQL Database for testing employee_id and last_login features
   postgres:
-    image: postgres:14
+    image: postgres:16
     container_name: baton-postgres-test
     environment:
       POSTGRES_USER: baton

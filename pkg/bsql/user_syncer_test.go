@@ -9,11 +9,12 @@ import (
 )
 
 func TestUserSyncer_prepareQueryInputs_KeyCollision(t *testing.T) {
+	ctx := t.Context()
 	tests := []struct {
 		name              string
 		schema            []*AccountProvisioningField
 		profileFields     map[string]*structpb.Value
-		credentialOptions *v2.CredentialOptions
+		credentialOptions *v2.LocalCredentialOptions
 		expectInputKey    bool
 		expectCredKey     bool
 		expectedInputVal  any
@@ -29,9 +30,9 @@ func TestUserSyncer_prepareQueryInputs_KeyCollision(t *testing.T) {
 				"username": structpb.NewStringValue("test_user"),
 				"email":    structpb.NewStringValue("test@example.com"),
 			},
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 12,
 					},
 				},
@@ -49,9 +50,9 @@ func TestUserSyncer_prepareQueryInputs_KeyCollision(t *testing.T) {
 				"input":    structpb.NewStringValue("user_defined_input"),
 				"username": structpb.NewStringValue("test_user"),
 			},
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 12,
 					},
 				},
@@ -70,9 +71,9 @@ func TestUserSyncer_prepareQueryInputs_KeyCollision(t *testing.T) {
 				"credentials": structpb.NewStringValue("user_defined_creds"),
 				"username":    structpb.NewStringValue("test_user"),
 			},
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 12,
 					},
 				},
@@ -93,9 +94,9 @@ func TestUserSyncer_prepareQueryInputs_KeyCollision(t *testing.T) {
 				"credentials": structpb.NewStringValue("user_defined_creds"),
 				"username":    structpb.NewStringValue("test_user"),
 			},
-			credentialOptions: &v2.CredentialOptions{
-				Options: &v2.CredentialOptions_RandomPassword_{
-					RandomPassword: &v2.CredentialOptions_RandomPassword{
+			credentialOptions: &v2.LocalCredentialOptions{
+				Options: &v2.LocalCredentialOptions_RandomPassword_{
+					RandomPassword: &v2.LocalCredentialOptions_RandomPassword{
 						Length: 12,
 					},
 				},
@@ -126,6 +127,7 @@ func TestUserSyncer_prepareQueryInputs_KeyCollision(t *testing.T) {
 
 			// Call the method under test
 			queryInputs, _, err := syncer.prepareQueryInputs(
+				ctx,
 				provisioningConfig,
 				accountInfo,
 				tt.credentialOptions,
