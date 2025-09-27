@@ -244,8 +244,8 @@ func (s *SQLSyncer) prepareQueryInputs(
 			return nil, nil, err
 		}
 		if password != nil {
-			queryInputs["password"] = password
-			credentials["password"] = password
+			queryInputs["password"] = *password
+			credentials["password"] = *password
 			// Create plaintext data for return
 			passwordData := &v2.PlaintextData{
 				Name:  "password",
