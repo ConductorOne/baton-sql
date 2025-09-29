@@ -132,6 +132,12 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.Action
 
 	var argMap = make(map[string]any)
 	for k, v := range actionCfg.Arguments {
+		if _, ok := args.Fields[v.Name]; !ok {
+			if v.Required {
+				return nil, nil, fmt.Errorf("argument %s is required", v.Name)
+			}
+			continue
+		}
 		switch v.Type {
 		case "string":
 			argMap[k] = args.Fields[v.Name].GetStringValue()
