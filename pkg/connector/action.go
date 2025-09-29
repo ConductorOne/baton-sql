@@ -127,10 +127,22 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.Action
 		return nil, nil, err
 	}
 
-	var argMap map[string]any = make(map[string]any)
+	var argMap = make(map[string]any)
 	for k, v := range actionCfg.Arguments {
-		// TODO: handle other types
-		argMap[k] = args.Fields[v.Name].GetStringValue()
+		switch v.Type {
+		case "string":
+			argMap[k] = args.Fields[v.Name].GetStringValue()
+		case "boolean":
+			argMap[k] = args.Fields[v.Name].GetBoolValue()
+		case "number":
+			argMap[k] = args.Fields[v.Name].GetNumberValue()
+		case "string_list":
+			argMap[k] = args.Fields[v.Name].GetListValue().Values
+		case "string_map":
+			argMap[k] = args.Fields[v.Name].GetStructValue().AsMap()
+		default:
+			return nil, nil, fmt.Errorf("unsupported argument type: %s", v.Type)
+		}
 	}
 
 	queries := []string{actionCfg.Query}
