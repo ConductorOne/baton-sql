@@ -136,6 +136,9 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.Action
 			if v.Required {
 				return nil, nil, fmt.Errorf("argument %s is required", v.Name)
 			}
+			if v.Default != nil {
+				argMap[k] = v.Default
+			}
 			continue
 		}
 		switch v.Type {
