@@ -292,7 +292,7 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 	return updatedQuery, qArgs, nil
 }
 
-func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string, vars map[string]any, useTx bool) error {
+func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries []string, vars map[string]any, useTx bool) error {
 	l := ctxzap.Extract(ctx)
 
 	var committed bool

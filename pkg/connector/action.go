@@ -62,6 +62,9 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				Description: argCfg.Description,
 				IsRequired:  argCfg.Required,
 			}
+			if arg.DisplayName == "" {
+				arg.DisplayName = argCfg.Name
+			}
 			defaultValue := argCfg.Default
 			switch argCfg.Type {
 			case "string":
@@ -109,12 +112,37 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 			l.Error("failed to register action", zap.String("action", actionKey), zap.Error(err))
 			return nil, err
 		}
-		l.Info("registered action", zap.String("action", actionKey))
+		l.Info("registered action", zap.String("action", actionKey), zap.Any("actionCfg", actionCfg))
 	}
 
 	return actionManager, nil
 }
 
 func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.ActionConfig, actionSchema *v2.BatonActionSchema, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
-	return nil, nil, nil
+	l := ctxzap.Extract(ctx)
+	l.Debug("actionHandler", zap.Any("actionCfg", actionCfg), zap.Any("actionSchema", actionSchema), zap.Any("args", args))
+
+	sqlSyncer, err := bsql.NewActionSyncer(ctx, c.db, c.dbEngine, c.celEnv, *c.config)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var argMap map[string]any = make(map[string]any)
+	for k, v := range actionCfg.Arguments {
+		// TODO: handle other types
+		argMap[k] = args.Fields[v.Name].GetStringValue()
+	}
+
+	queries := []string{actionCfg.Query}
+	err = sqlSyncer.RunProvisioningQueries(ctx, queries, argMap, !actionCfg.NoTransaction)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"success": {Kind: &structpb.Value_BoolValue{BoolValue: true}},
+			"message": {Kind: &structpb.Value_StringValue{StringValue: "Action completed successfully"}},
+		},
+	}, nil, nil
 }
