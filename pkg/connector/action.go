@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	config_sdk "github.com/conductorone/baton-sdk/pb/c1/config/v1"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -81,8 +82,14 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				arg.Field = &config_sdk.Field_BoolField{BoolField: boolField}
 			case "number":
 				intField := &config_sdk.IntField{}
-				if defaultValue != nil {
-					intField.DefaultValue = defaultValue.(int64)
+				switch v := defaultValue.(type) {
+				case nil:
+				case int, int32, int64:
+					intField.DefaultValue = reflect.ValueOf(v).Int()
+				case float32, float64:
+					intField.DefaultValue = int64(reflect.ValueOf(v).Float())
+				default:
+					return nil, fmt.Errorf("invalid numeric default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_IntField{IntField: intField}
 			case "string_list":
