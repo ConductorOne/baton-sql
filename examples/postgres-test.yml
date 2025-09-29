@@ -8,6 +8,38 @@ connect:
   # Data Source Name (DSN) for our test PostgreSQL instance
   dsn: "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
 
+actions:
+  enable_user:
+    name: Enable User
+    description: Enable a disabled user account
+    action_type:
+      - account_enable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to enable
+    vars:
+      user_id: "input.user_id"
+    query: |
+      UPDATE users SET status = 'active' WHERE username = ?<user_id>
+  disable_user:
+    name: Disable User
+    description: Disable a user account
+    action_type:
+      - account_disable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to disable
+    vars:
+      user_id: "input.user_id"
+    query: |
+      UPDATE users SET status = 'disabled' WHERE username = ?<user_id>
+
 # Definition of different resource types managed by this connector
 resource_types:
   # Configuration for "user" resources in PostgreSQL

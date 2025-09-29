@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -24,6 +26,13 @@ type Config struct {
 
 	// ResourceTypes defines the set of resource types (e.g., user, role) configured in the connector.
 	ResourceTypes map[string]ResourceType `yaml:"resource_types" json:"resource_types"`
+
+	// Actions defines the set of actions configured in the connector.
+	Actions map[string]ActionConfig `yaml:"actions" json:"actions"`
+}
+
+func (c Config) HasActions() bool {
+	return len(c.Actions) > 0
 }
 
 // DatabaseConfig contains settings required to connect to the database.
@@ -398,6 +407,42 @@ type CredentialRotation struct {
 	Credentials *AccountCredentials `yaml:"credentials" json:"credentials"`
 	// Update defines the SQL queries and configuration for updating credentials.
 	Update *AccountCreationConfig `yaml:"update" json:"update"`
+}
+
+type ActionConfig struct {
+	Name          string                    `yaml:"name" json:"name" validate:"required"`
+	Description   string                    `yaml:"description,omitempty" json:"description,omitempty" validate:"omitempty"`
+	Arguments     map[string]ArgumentConfig `yaml:"arguments,omitempty" json:"arguments,omitempty" validate:"omitempty,dive"`
+	Vars          map[string]string         `yaml:"vars,omitempty" json:"vars,omitempty" validate:"omitempty"`
+	NoTransaction bool                      `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty" validate:"omitempty"`
+	Query         string                    `yaml:"query" json:"query" validate:"required"`
+	// TODO: add validation?
+	//revive:disable-next-line:line-length-limit // because it's a long field
+	ActionType []string `yaml:"action_type,omitempty" json:"action_type,omitempty" validate:"omitempty,dive,oneof=unspecified dynamic account account_update_profile account_disable account_enable"`
+}
+
+type ArgumentConfig struct {
+	Name        string `yaml:"name" json:"name" validate:"required"`
+	DisplayName string `yaml:"display_name,omitempty" json:"display_name,omitempty" validate:"omitempty"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty" validate:"omitempty"`
+	//revive:disable-next-line:line-length-limit // because it's a long field
+	Type     string `yaml:"type" json:"type" validate:"required,oneof=string boolean number string_list string_map" jsonschema:"enum=string,enum=boolean,enum=number,enum=string_list,enum=string_map"`
+	Default  any    `yaml:"default,omitempty" json:"default,omitempty" validate:"omitempty"`
+	Required bool   `yaml:"required,omitempty" json:"required,omitempty" validate:"omitempty"`
+}
+
+func (a *ActionConfig) Validate() error {
+	if a.Query == "" {
+		return status.Errorf(codes.InvalidArgument, "query is required")
+	}
+
+	for _, arg := range a.Arguments {
+		if arg.Required && arg.Default != nil {
+			return status.Errorf(codes.InvalidArgument, "action %s argument %s is required but has a default", a.Name, arg.Name)
+		}
+	}
+
+	return nil
 }
 
 func (c Config) ExtractAccountProvisioning() (string, *AccountProvisioning, error) {
