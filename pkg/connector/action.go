@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	config_sdk "github.com/conductorone/baton-sdk/pb/c1/config/v1"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -70,14 +71,28 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 			switch argCfg.Type {
 			case "string":
 				stringField := &config_sdk.StringField{}
-				if defaultValue != nil {
-					stringField.DefaultValue = defaultValue.(string)
+				switch v := defaultValue.(type) {
+				case nil:
+				case string:
+					stringField.DefaultValue = v
+				default:
+					return nil, fmt.Errorf("invalid string default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_StringField{StringField: stringField}
 			case "boolean":
 				boolField := &config_sdk.BoolField{}
-				if defaultValue != nil {
-					boolField.DefaultValue = defaultValue.(bool)
+				switch v := defaultValue.(type) {
+				case nil:
+				case bool:
+					boolField.DefaultValue = v
+				case string:
+					defaultValue, err := strconv.ParseBool(v)
+					if err != nil {
+						return nil, fmt.Errorf("invalid boolean default for %s: %T", actionKey, defaultValue)
+					}
+					boolField.DefaultValue = defaultValue
+				default:
+					return nil, fmt.Errorf("invalid boolean default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_BoolField{BoolField: boolField}
 			case "number":
@@ -94,14 +109,22 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				arg.Field = &config_sdk.Field_IntField{IntField: intField}
 			case "string_list":
 				stringSliceField := &config_sdk.StringSliceField{}
-				if defaultValue != nil {
-					stringSliceField.DefaultValue = defaultValue.([]string)
+				switch v := defaultValue.(type) {
+				case nil:
+				case []string:
+					stringSliceField.DefaultValue = v
+				default:
+					return nil, fmt.Errorf("invalid string slice default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_StringSliceField{StringSliceField: stringSliceField}
 			case "string_map":
 				stringMapField := &config_sdk.StringMapField{}
-				if defaultValue != nil {
-					stringMapField.DefaultValue = defaultValue.(map[string]*anypb.Any)
+				switch v := defaultValue.(type) {
+				case nil:
+				case map[string]*anypb.Any:
+					stringMapField.DefaultValue = v
+				default:
+					return nil, fmt.Errorf("invalid string map default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_StringMapField{StringMapField: stringMapField}
 			}
