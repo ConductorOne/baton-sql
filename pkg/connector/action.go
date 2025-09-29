@@ -105,8 +105,11 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 			return nil, fmt.Errorf("query is required for action: %s", actionKey)
 		}
 
+		cfg := actionCfg
+		schema := actionSchema
+
 		err := actionManager.RegisterAction(ctx, actionKey, actionSchema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
-			return c.handleQueryAction(ctx, actionCfg, actionSchema, args)
+			return c.handleQueryAction(ctx, cfg, schema, args)
 		})
 		if err != nil {
 			l.Error("failed to register action", zap.String("action", actionKey), zap.Error(err))
