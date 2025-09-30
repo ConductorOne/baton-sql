@@ -136,24 +136,23 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 		}
 
 		cfg := actionCfg
-		schema := actionSchema
 
 		err := actionManager.RegisterAction(ctx, actionKey, actionSchema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
-			return c.handleQueryAction(ctx, cfg, schema, args)
+			return c.handleQueryAction(ctx, cfg, args)
 		})
 		if err != nil {
 			l.Error("failed to register action", zap.String("action", actionKey), zap.Error(err))
 			return nil, err
 		}
-		l.Info("registered action", zap.String("action", actionKey), zap.Any("actionCfg", actionCfg))
+		l.Info("registered action", zap.String("action", actionKey))
 	}
 
 	return actionManager, nil
 }
 
-func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.ActionConfig, actionSchema *v2.BatonActionSchema, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
+func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.ActionConfig, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
-	l.Debug("actionHandler", zap.Any("actionCfg", actionCfg), zap.Any("actionSchema", actionSchema), zap.Any("args", args))
+	l.Debug("actionHandler", zap.String("action", actionCfg.Name))
 
 	sqlSyncer, err := bsql.NewActionSyncer(ctx, c.db, c.dbEngine, c.celEnv, *c.config)
 	if err != nil {
