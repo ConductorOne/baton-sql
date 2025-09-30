@@ -58,3 +58,13 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 
 	return ret, nil
 }
+
+func NewActionSyncer(ctx context.Context, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) (*SQLSyncer, error) {
+	return &SQLSyncer{
+		resourceType: nil,
+		db:           db,
+		dbEngine:     dbEngine,
+		env:          celEnv,
+		fullConfig:   fullConfig,
+	}, nil
+}

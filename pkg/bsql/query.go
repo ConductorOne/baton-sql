@@ -292,7 +292,7 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 	return updatedQuery, qArgs, nil
 }
 
-func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string, vars map[string]any, useTx bool) error {
+func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries []string, vars map[string]any, useTx bool) error {
 	l := ctxzap.Extract(ctx)
 
 	var committed bool
@@ -317,12 +317,12 @@ func (s *SQLSyncer) runProvisioningQueries(ctx context.Context, queries []string
 	for _, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to prepare query: %w", err)
 		}
 
 		result, err := executor.ExecContext(ctx, q, qArgs...)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to execute query: %w", err)
 		}
 
 		rowsAffected, err := result.RowsAffected()
