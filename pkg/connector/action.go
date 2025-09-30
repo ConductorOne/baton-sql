@@ -57,15 +57,12 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 			ActionType:  convertActionTypes(actionCfg.ActionType),
 		}
 
-		for _, argCfg := range actionCfg.Arguments {
+		for k, argCfg := range actionCfg.Arguments {
 			arg := &config_sdk.Field{
-				Name:        argCfg.Name,
-				DisplayName: argCfg.DisplayName,
+				Name:        k,
+				DisplayName: argCfg.Name,
 				Description: argCfg.Description,
 				IsRequired:  argCfg.Required,
-			}
-			if arg.DisplayName == "" {
-				arg.DisplayName = argCfg.Name
 			}
 			defaultValue := argCfg.Default
 			switch argCfg.Type {
@@ -138,7 +135,7 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 		cfg := actionCfg
 
 		err := actionManager.RegisterAction(ctx, actionKey, actionSchema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
-			return c.handleQueryAction(ctx, cfg, args)
+			return c.handleQueryAction(ctx, actionKey, cfg, args)
 		})
 		if err != nil {
 			l.Error("failed to register action", zap.String("action", actionKey), zap.Error(err))
@@ -150,9 +147,9 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 	return actionManager, nil
 }
 
-func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.ActionConfig, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
+func (c *Connector) handleQueryAction(ctx context.Context, actionKey string, actionCfg bsql.ActionConfig, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
-	l.Debug("actionHandler", zap.String("action", actionCfg.Name))
+	l.Debug("actionHandler", zap.String("action", actionKey))
 
 	sqlSyncer, err := bsql.NewActionSyncer(ctx, c.db, c.dbEngine, c.celEnv, *c.config)
 	if err != nil {
@@ -163,7 +160,7 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.Action
 	for k, v := range actionCfg.Arguments {
 		if _, ok := args.Fields[k]; !ok {
 			if v.Required {
-				return nil, nil, fmt.Errorf("argument %s is required", v.Name)
+				return nil, nil, fmt.Errorf("argument %s is required", k)
 			}
 			if v.Default != nil {
 				argMap[k] = v.Default
@@ -172,22 +169,22 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.Action
 		}
 		switch v.Type {
 		case "string":
-			argMap[k] = args.Fields[v.Name].GetStringValue()
+			argMap[k] = args.Fields[k].GetStringValue()
 		case "boolean":
-			argMap[k] = args.Fields[v.Name].GetBoolValue()
+			argMap[k] = args.Fields[k].GetBoolValue()
 		case "number":
-			argMap[k] = args.Fields[v.Name].GetNumberValue()
+			argMap[k] = args.Fields[k].GetNumberValue()
 		case "string_list":
-			values := args.Fields[v.Name].GetListValue().GetValues()
+			values := args.Fields[k].GetListValue().GetValues()
 			var stringList []string
 			for _, value := range values {
 				stringList = append(stringList, value.GetStringValue())
 			}
 			argMap[k] = stringList
 		case "string_map":
-			argMap[k] = args.Fields[v.Name].GetStructValue().AsMap()
+			argMap[k] = args.Fields[k].GetStructValue().AsMap()
 		default:
-			return nil, nil, fmt.Errorf("unsupported argument type: %s", v.Type)
+			return nil, nil, fmt.Errorf("argument %s has unsupported type: %s", k, v.Type)
 		}
 	}
 
