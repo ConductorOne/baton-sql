@@ -423,7 +423,6 @@ type ActionConfig struct {
 
 type ArgumentConfig struct {
 	Name        string `yaml:"name" json:"name" validate:"required"`
-	DisplayName string `yaml:"display_name,omitempty" json:"display_name,omitempty" validate:"omitempty"`
 	Description string `yaml:"description,omitempty" json:"description,omitempty" validate:"omitempty"`
 	//revive:disable-next-line:line-length-limit // because it's a long field
 	Type     string `yaml:"type" json:"type" validate:"required,oneof=string boolean number string_list string_map" jsonschema:"enum=string,enum=boolean,enum=number,enum=string_list,enum=string_map"`
