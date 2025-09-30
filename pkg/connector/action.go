@@ -41,11 +41,11 @@ func convertActionTypes(actionTypes []string) []v2.ActionType {
 func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder.CustomActionManager, error) {
 	l := ctxzap.Extract(ctx)
 
-	if !c.config.HasActions() {
-		return nil, nil
-	}
-
 	actionManager := actions.NewActionManager(ctx)
+
+	if !c.config.HasActions() {
+		return actionManager, nil
+	}
 
 	for actionKey, actionCfg := range c.config.Actions {
 		actionSchema := &v2.BatonActionSchema{
