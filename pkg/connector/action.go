@@ -161,7 +161,7 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.Action
 
 	var argMap = make(map[string]any)
 	for k, v := range actionCfg.Arguments {
-		if _, ok := args.Fields[v.Name]; !ok {
+		if _, ok := args.Fields[k]; !ok {
 			if v.Required {
 				return nil, nil, fmt.Errorf("argument %s is required", v.Name)
 			}
@@ -178,7 +178,12 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionCfg bsql.Action
 		case "number":
 			argMap[k] = args.Fields[v.Name].GetNumberValue()
 		case "string_list":
-			argMap[k] = args.Fields[v.Name].GetListValue().Values
+			values := args.Fields[v.Name].GetListValue().GetValues()
+			var stringList []string
+			for _, value := range values {
+				stringList = append(stringList, value.GetStringValue())
+			}
+			argMap[k] = stringList
 		case "string_map":
 			argMap[k] = args.Fields[v.Name].GetStructValue().AsMap()
 		default:
