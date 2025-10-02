@@ -6,15 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-)
-
-const (
-	MaxIdleConns    = 10
-	MaxOpenConns    = 10
-	MaxConnLifetime = 5 * time.Minute
 )
 
 func convertURItoDSN(uri string) (string, error) {
@@ -61,10 +54,6 @@ func Connect(ctx context.Context, dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	db.SetMaxOpenConns(MaxOpenConns)
-	db.SetMaxIdleConns(MaxIdleConns)
-	db.SetConnMaxLifetime(MaxConnLifetime)
 
 	return db, nil
 }

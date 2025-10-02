@@ -15,6 +15,19 @@ filippo.io/edwards25519/field
 # github.com/Masterminds/semver/v3 v3.4.0
 ## explicit; go 1.21
 github.com/Masterminds/semver/v3
+# github.com/SAP/go-hdb v1.14.5
+## explicit; go 1.24.0
+github.com/SAP/go-hdb/driver
+github.com/SAP/go-hdb/driver/dial
+github.com/SAP/go-hdb/driver/internal/protocol
+github.com/SAP/go-hdb/driver/internal/protocol/auth
+github.com/SAP/go-hdb/driver/internal/protocol/encoding
+github.com/SAP/go-hdb/driver/internal/protocol/julian
+github.com/SAP/go-hdb/driver/internal/protocol/levenshtein
+github.com/SAP/go-hdb/driver/internal/rand/alphanum
+github.com/SAP/go-hdb/driver/internal/unsafe
+github.com/SAP/go-hdb/driver/unicode/cesu8
+github.com/SAP/go-hdb/driver/wgroup
 # github.com/antlr4-go/antlr/v4 v4.13.1
 ## explicit; go 1.22
 github.com/antlr4-go/antlr/v4
@@ -678,8 +691,8 @@ golang.org/x/oauth2/clientcredentials
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
 golang.org/x/oauth2/jwt
-# golang.org/x/sync v0.13.0
-## explicit; go 1.23.0
+# golang.org/x/sync v0.17.0
+## explicit; go 1.24.0
 golang.org/x/sync/semaphore
 golang.org/x/sync/singleflight
 # golang.org/x/sys v0.35.0
@@ -696,8 +709,8 @@ golang.org/x/sys/windows/svc/mgr
 # golang.org/x/term v0.31.0
 ## explicit; go 1.23.0
 golang.org/x/term
-# golang.org/x/text v0.24.0
-## explicit; go 1.23.0
+# golang.org/x/text v0.29.0
+## explicit; go 1.24.0
 golang.org/x/text/cases
 golang.org/x/text/encoding
 golang.org/x/text/encoding/internal

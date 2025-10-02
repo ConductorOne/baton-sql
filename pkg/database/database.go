@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 
+	"github.com/conductorone/baton-sql/pkg/database/hdb"
 	"github.com/conductorone/baton-sql/pkg/database/mysql"
 	"github.com/conductorone/baton-sql/pkg/database/oracle"
 	"github.com/conductorone/baton-sql/pkg/database/postgres"
@@ -26,6 +27,7 @@ const (
 	SQLite
 	MSSQL
 	Oracle
+	HDB
 )
 
 func updateFromEnv(dsn string) (string, error) {
@@ -105,6 +107,14 @@ func Connect(ctx context.Context, dsn string, user string, password string) (*sq
 			return nil, Unknown, err
 		}
 		return db, PostgreSQL, nil
+
+	case "hdb":
+		db, err := hdb.Connect(ctx, parsedDsn.String())
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, HDB, nil
+
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}

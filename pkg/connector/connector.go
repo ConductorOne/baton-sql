@@ -76,7 +76,10 @@ func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 // Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
 // to be sure that they are valid.
 func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, error) {
-	// TODO: Validate SQL connection.
+	err := c.db.PingContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
