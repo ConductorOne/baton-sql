@@ -1,0 +1,51 @@
+---
+  app_name: HANA Express Test
+  
+  connect:
+    dsn: "hdb://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}"
+  
+  resource_types:
+    user:
+      name: "User"
+      description: "A user within the SAP HANA system"
+      list:
+        query: |
+          SELECT
+            USER_ID,
+            USER_NAME,
+            CASE 
+              WHEN USER_DEACTIVATED = 'TRUE' THEN 'inactive'
+              ELSE 'active'
+            END as STATUS,
+            CREATE_TIME,
+            LAST_SUCCESSFUL_CONNECT,
+            COMMENTS
+          FROM
+            "SYS"."USERS"
+          ORDER BY USER_ID
+          LIMIT ?<Limit> OFFSET ?<Offset>
+        # Pagination configuration
+        pagination:
+          strategy: "offset"
+          primary_key: "USER_ID"
+        # Mapping of query results to resource fields
+        map:
+          id: ".USER_ID"
+          display_name: ".USER_NAME"
+          description: ".USER_NAME"
+          # Extra attributes (traits) for the user resource
+          traits:
+            user:
+              status: .STATUS
+              login: .USER_NAME
+              # Email addresses
+              # emails:
+              #   - ".email"
+              # account_type: ".account_type"
+              last_login: .LAST_SUCCESSFUL_CONNECT
+              created_at: .CREATE_TIME
+              profile:
+                comments: .COMMENTS
+                user_id: .USER_ID
+                created_at: .CREATE_TIME
+                last_login: .LAST_SUCCESSFUL_CONNECT
