@@ -7,21 +7,26 @@
   resource_types:
     user:
       name: "User"
-      description: "A user within the SAP HANA system"
+      description: "A user within the SAP HANA database"
       list:
         query: |
           SELECT
             USER_ID,
-            USER_NAME,
+            "SYS"."USERS".USER_NAME AS USER_NAME,
             CASE 
               WHEN USER_DEACTIVATED = 'TRUE' THEN 'inactive'
               ELSE 'active'
             END as STATUS,
             CREATE_TIME,
             LAST_SUCCESSFUL_CONNECT,
-            COMMENTS
+            COMMENTS,
+            VALUE AS EMAIL_ADDRESS
           FROM
             "SYS"."USERS"
+            LEFT JOIN
+              "USER_PARAMETERS"
+              ON "SYS"."USERS".USER_NAME = "USER_PARAMETERS".USER_NAME
+              AND "USER_PARAMETERS".PARAMETER = 'EMAIL ADDRESS'
           ORDER BY USER_ID
           LIMIT ?<Limit> OFFSET ?<Offset>
         # Pagination configuration
@@ -38,14 +43,46 @@
             user:
               status: .STATUS
               login: .USER_NAME
-              # Email addresses
-              # emails:
-              #   - ".email"
+              emails:
+                - ".EMAIL_ADDRESS != null ? .EMAIL_ADDRESS : ''"
               # account_type: ".account_type"
-              last_login: .LAST_SUCCESSFUL_CONNECT
-              created_at: .CREATE_TIME
+              last_login: ".LAST_SUCCESSFUL_CONNECT != null ? string(.LAST_SUCCESSFUL_CONNECT) : ''"
+              created_at: ".CREATE_TIME != null ? string(.CREATE_TIME) : ''"
               profile:
-                comments: .COMMENTS
+                comments: ".COMMENTS != null ? .COMMENTS : ''"
                 user_id: .USER_ID
                 created_at: .CREATE_TIME
                 last_login: .LAST_SUCCESSFUL_CONNECT
+
+    group:
+      name: "Group"
+      description: "A group within the SAP HANA database"
+      list:
+        query: |
+          SELECT
+            USERGROUP_NAME,
+            USERGROUP_ID,
+            CREATOR,
+            IS_USER_ADMIN_ENABLED,
+            IS_CLIENT_CONNECT_ENABLED,
+            HAS_CONNECT_RESTRICTION,
+            COMMENTS
+          FROM
+            "SYS"."USERGROUPS"
+          ORDER BY USERGROUP_ID
+          LIMIT ?<Limit> OFFSET ?<Offset>
+        pagination:
+          strategy: "offset"
+          primary_key: "USERGROUP_ID"
+        map:
+          id: ".USERGROUP_ID"
+          display_name: ".USERGROUP_NAME"
+          description: ".USERGROUP_NAME"
+          traits:
+            group:
+              profile:
+                creator: ".CREATOR != null ? .CREATOR : ''"
+                is_user_admin_enabled: .IS_USER_ADMIN_ENABLED
+                is_client_connect_enabled: .IS_CLIENT_CONNECT_ENABLED
+                has_connect_restriction: .HAS_CONNECT_RESTRICTION
+                comments: ".COMMENTS != null ? .COMMENTS : ''"
