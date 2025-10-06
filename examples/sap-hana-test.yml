@@ -43,9 +43,10 @@
             user:
               status: .STATUS
               login: .USER_NAME
+              # SYS and any username starting with _SYS is a system user. Everything else is a human user.
+              account_type: 'cel:(cols["USER_NAME"] == "SYS" || string(cols["USER_NAME"]).startsWith("_SYS")) ? "system" : "human"'
               emails:
                 - ".EMAIL_ADDRESS != null ? .EMAIL_ADDRESS : ''"
-              # account_type: ".account_type"
               last_login: ".LAST_SUCCESSFUL_CONNECT != null ? string(.LAST_SUCCESSFUL_CONNECT) : ''"
               created_at: ".CREATE_TIME != null ? string(.CREATE_TIME) : ''"
               profile:
@@ -86,3 +87,33 @@
                 is_client_connect_enabled: .IS_CLIENT_CONNECT_ENABLED
                 has_connect_restriction: .HAS_CONNECT_RESTRICTION
                 comments: ".COMMENTS != null ? .COMMENTS : ''"
+      static_entitlements:
+        - id: "member"
+          display_name: "resource.DisplayName + ' Group Member'"
+          description: "'Member of the ' + resource.DisplayName + ' group'"
+          purpose: "assignment"
+          grantable_to:
+            - "user"
+      grants:
+        - vars:
+            usergroup_id: "resource.ID"
+          query: |
+            SELECT
+              USER_ID,
+              USER_NAME,
+              "SYS"."USERGROUPS".USERGROUP_NAME as USERGROUP_NAME
+            FROM
+              "SYS"."USERGROUPS"
+              LEFT JOIN
+                "SYS"."USERS"
+                ON "SYS"."USERGROUPS".USERGROUP_NAME = "SYS"."USERS".USERGROUP_NAME
+            WHERE "SYS"."USERGROUPS".USERGROUP_ID = ?<usergroup_id>
+            ORDER BY USER_ID
+            LIMIT ?<Limit> OFFSET ?<Offset>
+          pagination:
+            strategy: "offset"
+            primary_key: "USER_ID"
+          map:
+            - principal_id: ".USER_ID"
+              principal_type: "user"
+              entitlement_id: "member"
