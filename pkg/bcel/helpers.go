@@ -17,6 +17,11 @@ func isAlphaNumeric(c byte) bool {
 // It also detects 'bare strings' and automatically quotes them.
 // Example input: ".role_name == 'Admin'" -> "cols['role_name'] == 'Admin'".
 func preprocessExpressions(expr string) string {
+	if strings.HasPrefix(expr, "cel:") {
+		expr = expr[4:]
+		return expr
+	}
+
 	if bareStringRegexp.MatchString(expr) {
 		if expr == "true" || expr == "false" {
 			return expr
