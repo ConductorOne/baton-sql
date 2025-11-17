@@ -21,7 +21,7 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 		return nil, "", nil, errors.New("no resource list configuration provided")
 	}
 
-	queryVars, err := s.prepareQueryVars(ctx, nil, s.config.List.Vars)
+	queryVars, err := s.PrepareQueryVars(ctx, nil, s.config.List.Vars)
 	if err != nil {
 		return nil, "", nil, err
 	}

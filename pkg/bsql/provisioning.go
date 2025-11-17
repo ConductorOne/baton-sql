@@ -160,7 +160,7 @@ func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *Ac
 		return nil, fmt.Errorf("validation query is not defined for account provisioning")
 	}
 
-	queryVars, err := s.prepareQueryVars(ctx, inputs, accountProvisioning.Validate.Vars)
+	queryVars, err := s.PrepareQueryVars(ctx, inputs, accountProvisioning.Validate.Vars)
 	if err != nil {
 		return nil, err
 	}

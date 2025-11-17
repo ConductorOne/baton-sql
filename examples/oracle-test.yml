@@ -10,6 +10,100 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
+actions:
+  enable_user:
+    name: Enable User
+    description: Enable a disabled user account
+    action_type:
+      - account_enable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to enable
+    query: |
+      UPDATE users SET status = 'active' WHERE username = ?<user_id>
+  disable_user:
+    name: Disable User
+    description: Disable a user account
+    action_type:
+      - account_disable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to disable
+    query: |
+      UPDATE users SET status = 'disabled' WHERE username = ?<user_id>
+  update_user_attributes:
+    name: Update User Attributes
+    description: Update the attributes of a user. Only provide the attributes you want to update.
+    action_type:
+      - account
+      - account_update_profile
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to update
+      attrs:
+        name: Attributes
+        type: string_map
+        required: true
+        description: The updated attribute data (map of attribute names to values)
+      attrs_update_mask:
+        name: Attributes Update Mask
+        type: string_list
+        required: true
+        description: The attributes to update (list of attribute names from attrs to actually update)
+    vars:
+      # Map each attribute in the attrs argument to a variable and a flag to indicate if the attribute should be updated
+      manager_id: "'manager_id' in input.attrs ? input.attrs['manager_id'] : null"
+      update_manager_id: "'manager_id' in input.attrs_update_mask"
+      first_name: "'first_name' in input.attrs ? input.attrs['first_name'] : null"
+      update_first_name: "'first_name' in input.attrs_update_mask"
+      middle_name: "'middle_name' in input.attrs ? input.attrs['middle_name'] : null"
+      update_middle_name: "'middle_name' in input.attrs_update_mask"
+      last_name: "'last_name' in input.attrs ? input.attrs['last_name'] : null"
+      update_last_name: "'last_name' in input.attrs_update_mask"
+      display_name: "'display_name' in input.attrs ? input.attrs['display_name'] : null"
+      update_display_name: "'display_name' in input.attrs_update_mask"
+      job_title: "'job_title' in input.attrs ? input.attrs['job_title'] : null"
+      update_job_title: "'job_title' in input.attrs_update_mask"
+      department: "'department' in input.attrs ? input.attrs['department'] : null"
+      update_department: "'department' in input.attrs_update_mask"
+      division: "'division' in input.attrs ? input.attrs['division'] : null"
+      update_division: "'division' in input.attrs_update_mask"
+      company: "'company' in input.attrs ? input.attrs['company'] : null"
+      update_company: "'company' in input.attrs_update_mask"
+      employee_id: "'employee_id' in input.attrs ? input.attrs['employee_id'] : null"
+      update_employee_id: "'employee_id' in input.attrs_update_mask"
+      employee_number: "'employee_number' in input.attrs ? input.attrs['employee_number'] : null"
+      update_employee_number: "'employee_number' in input.attrs_update_mask"
+      employment_type: "'employment_type' in input.attrs ? input.attrs['employment_type'] : null"
+      update_employment_type: "'employment_type' in input.attrs_update_mask"
+    # We define the whole update logic with conditional attributes
+    query: |
+      UPDATE users
+      SET
+        manager_id = DECODE(?<update_manager_id>, '1', ?<manager_id>, manager_id),
+        attr_first_name = DECODE(?<update_first_name>, '1', ?<first_name>, attr_first_name),
+        attr_middle_name = DECODE(?<update_middle_name>, '1', ?<middle_name>, attr_middle_name),
+        attr_last_name = DECODE(?<update_last_name>, '1', ?<last_name>, attr_last_name),
+        attr_display_name = DECODE(?<update_display_name>, '1', ?<display_name>, attr_display_name),
+        attr_job_title = DECODE(?<update_job_title>, '1', ?<job_title>, attr_job_title),
+        attr_department = DECODE(?<update_department>, '1', ?<department>, attr_department),
+        attr_division = DECODE(?<update_division>, '1', ?<division>, attr_division),
+        attr_company = DECODE(?<update_company>, '1', ?<company>, attr_company),
+        employee_id = DECODE(?<update_employee_id>, '1', ?<employee_id>, employee_id),
+        attr_employee_number = DECODE(?<update_employee_number>, '1', ?<employee_number>, attr_employee_number),
+        attr_employment_type = DECODE(?<update_employment_type>, '1', ?<employment_type>, attr_employment_type)
+      WHERE
+        username = ?<user_id>
+
 # Definition of different resource types managed by this connector
 resource_types:
   # Configuration for "user" resources in Oracle
@@ -31,7 +125,17 @@ resource_types:
           account_type as "account_type",
           created_at as "created_at",
           last_login as "last_login",
-          manager_id as "manager_id"
+          manager_id as "manager_id",
+          attr_first_name as "attr_first_name",
+          attr_middle_name as "attr_middle_name",
+          attr_last_name as "attr_last_name",
+          attr_display_name as "attr_display_name",
+          attr_job_title as "attr_job_title",
+          attr_department as "attr_department",
+          attr_division as "attr_division",
+          attr_company as "attr_company",
+          attr_employee_number as "attr_employee_number",
+          attr_employment_type as "attr_employment_type"
         FROM
           users
         ORDER BY id
@@ -65,6 +169,25 @@ resource_types:
               - ".employee_id"
             # Last login timestamp mapping
             last_login: ".last_login"
+            # Manager information
+            manager_id: ".manager_id"
+
+            # Profile details for the user
+            profile:
+              user_id: ".id"
+              created_at: ".created_at"
+              last_login: ".last_login"
+              manager_id: ".manager_id"
+              attr_first_name: ".attr_first_name"
+              attr_middle_name: ".attr_middle_name"
+              attr_last_name: ".attr_last_name"
+              attr_display_name: ".attr_display_name"
+              attr_job_title: ".attr_job_title"
+              attr_department: ".attr_department"
+              attr_division: ".attr_division"
+              attr_company: ".attr_company"
+              attr_employee_number: ".attr_employee_number"
+              attr_employment_type: ".attr_employment_type"
     account_provisioning:
       # Schema definition for account creation form
       schema:
@@ -131,18 +254,19 @@ resource_types:
     description: "A role within the Oracle system"
     # Settings for listing roles from the database
     list:
-      # SQL query to retrieve roles
+      # SQL query to retrieve roles from custom roles table
       query: |
         SELECT
-          ROLE
+          id as "roleId",
+          role_name as "roleName"
         FROM
-          DBA_ROLES
+          ROLES
       # Mapping of each query result to role resource fields
       map:
-        # Unique role identifier (from the ROLE column)
-        id: ".ROLE"
+        # Unique role identifier (using role name to match provisioning queries)
+        id: ".roleName"
         # Display name for the role (also from the ROLE column)
-        display_name: ".ROLE"
+        display_name: ".roleName"
         # Role description; left empty for further customization
         description: ""
         # Additional role-specific traits
@@ -150,7 +274,7 @@ resource_types:
           role:
             # Profile mapping for the role; assigns the role name
             profile:
-              role_name: ".ROLE"
+              role_name: ".roleName"
     # Static entitlements that can be assigned to a role resource
     static_entitlements:
       - id: "assigned" # Entitlement identifier for a standard role assignment
@@ -170,17 +294,23 @@ resource_types:
             principal_name: principal.ID # Identifier for the user (principal) receiving the role
             role_name: resource.ID # Identifier for the role resource
           grant:
-            # Indicates that no database transaction is needed for the grant operation
-            no_transaction: true
             queries:
               - |
-                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
+                INSERT INTO user_roles (user_id, role_id)
+                SELECT u.id, r.id
+                FROM users u, roles r
+                WHERE u.username = ?<principal_name>
+                  AND r.role_name = ?<role_name>
+                  AND NOT EXISTS (
+                    SELECT 1 FROM user_roles ur
+                    WHERE ur.user_id = u.id AND ur.role_id = r.id
+                  )
           revoke:
-            # Indicates that the revoke operation runs without a transaction
-            no_transaction: true
             queries:
               - |
-                REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
+                DELETE FROM user_roles
+                WHERE user_id = (SELECT id FROM users WHERE username = ?<principal_name>)
+                  AND role_id = (SELECT id FROM roles WHERE role_name = ?<role_name>)
       - id: "admin" # Entitlement identifier for role administration privileges
         # Dynamic display name for admin entitlement, appending ' Role Admin'
         display_name: "resource.DisplayName + ' Role Admin'"
@@ -197,131 +327,35 @@ resource_types:
             principal_name: principal.ID # Maps to the user receiving the admin rights
             role_name: resource.ID # Maps to the role being administered
           grant:
-            no_transaction: true
             queries:
               - |
-                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted> WITH ADMIN OPTION
+                INSERT INTO user_roles (user_id, role_id)
+                SELECT u.id, r.id
+                FROM users u, roles r
+                WHERE u.username = ?<principal_name>
+                  AND r.role_name = ?<role_name>
+                  AND NOT EXISTS (
+                    SELECT 1 FROM user_roles ur
+                    WHERE ur.user_id = u.id AND ur.role_id = r.id
+                  )
           revoke:
-            no_transaction: true
             queries:
               - |
-                REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
-              - |
-                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
+                DELETE FROM user_roles
+                WHERE user_id = (SELECT id FROM users WHERE username = ?<principal_name>)
+                  AND role_id = (SELECT id FROM roles WHERE role_name = ?<role_name>)
     # Dynamic grants based on SQL queries to associate users with roles
     grants:
       - query: |
           SELECT
-            GRANTEE AS USERNAME,
-            GRANTED_ROLE AS ROLE,
-            ADMIN_OPTION
+            u.username AS USERNAME,
+            r.role_name AS ROLE
           FROM
-            DBA_ROLE_PRIVS
-          WHERE
-            GRANTEE IN (SELECT USERNAME FROM DBA_USERS)
+            user_roles ur
+            INNER JOIN users u ON ur.user_id = u.id
+            INNER JOIN roles r ON ur.role_id = r.id
         map:
           - skip_if: ".ROLE != resource.ID" # Only map if the role from the query matches the current resource
             principal_id: ".USERNAME" # Map the username as the principal identifier
             principal_type: "user" # Define the principal type explicitly as "user"
             entitlement_id: "assigned" # Use the 'assigned' entitlement for standard role membership
-          - skip_if: ".ROLE != resource.ID || .ADMIN_OPTION != 'YES'" # Only map if role matches and admin option is enabled
-            principal_id: ".USERNAME" # Map the user's identifier
-            principal_type: "user" # Set the principal type as user
-            entitlement_id: "admin" # Apply the 'admin' entitlement for administrative privileges
-
-  # Configuration for "privilege" resources in Oracle
-  privilege:
-    # Display name for this privilege resource type
-    name: "Privilege"
-    # Description providing context on what an Oracle privilege is
-    description: "A privilege within the Oracle system"
-    # Settings for listing privileges from the database
-    list:
-      query: |
-        SELECT NAME
-        FROM sys.system_privilege_map
-        ORDER BY NAME
-      map:
-        # Unique identifier for the privilege (from the NAME column)
-        id: ".NAME"
-        # Display name for the privilege (derived from NAME)
-        display_name: ".NAME"
-        # Additional description field for the privilege (left blank)
-        description: ""
-    # Static entitlements for privileges that can be granted to users
-    static_entitlements:
-      - id: "assigned" # Entitlement identifier for a standard privilege assignment
-        display_name: "resource.DisplayName + ' privileges'" # Dynamic display name for an assigned privilege
-        description: "'Is granted the ' + resource.DisplayName + ' privilege'" # Explanation of the assignment
-        purpose: "assignment" # Denotes that this is an assignment action
-        grantable_to:
-          - "user" # Specifies that this entitlement can be applied to user resources
-        provisioning:
-          vars:
-            principal_name: principal.ID # Maps the user identifier
-            privilege_name: resource.ID # Maps the privilege identifier
-          grant:
-            no_transaction: true
-            queries:
-              - |
-                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted>
-          # Revoke section defines how to remove a privilege from a user
-          revoke:
-            # no_transaction indicates this should execute outside a transaction block
-            no_transaction: true
-            # SQL queries to execute when revoking the privilege
-            queries:
-              - |
-                REVOKE ?<privilege_name|unquoted> FROM ?<principal_name|unquoted>
-      - id: "admin" # Entitlement identifier for administrative control over privileges
-        display_name: "resource.DisplayName + ' Privilege Admin'" # Dynamic display name for admin privileges on the resource
-        description: "'Can grant the ' + resource.DisplayName + ' privilege to other users'" # Describes the ability to manage privileges
-        purpose: "permission" # Indicates this entitlement is a permission setting
-        grantable_to:
-          - "user" # This permission can be granted to user resources
-        provisioning:
-          vars:
-            principal_name: principal.ID # User identifier for provisioning
-            privilege_name: resource.ID # Privilege identifier for provisioning
-          grant:
-            no_transaction: true
-            queries:
-              - |
-                # The ?<privilege_name|unquoted> placeholder will be replaced with the raw value of the privilege_name variable
-                # defined in the vars section above. The |unquoted flag means the value will be inserted directly into the SQL
-                # rather than using a prepared statement parameter. This is needed for DDL statements like GRANT that require
-                # the actual identifier names.
-                #
-                # Similarly, ?<principal_name|unquoted> inserts the principal_name variable's value directly into the query.
-                # Without |unquoted, the values would be passed as bind parameters like: GRANT ? TO ? WITH ADMIN OPTION
-                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted> WITH ADMIN OPTION
-          revoke:
-            no_transaction: true
-            queries:
-              - |
-                REVOKE ?<privilege_name|unquoted> FROM ?<principal_name|unquoted>
-              - |
-                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted>
-    # Dynamic grants to map privilege assignments based on database queries
-    grants:
-      - query: |
-          SELECT
-              GRANTEE AS USERNAME,
-              PRIVILEGE,
-              ADMIN_OPTION
-          FROM
-              DBA_SYS_PRIVS
-          WHERE
-              GRANTEE IN (SELECT USERNAME FROM DBA_USERS)
-          ORDER BY
-              USERNAME,
-              PRIVILEGE
-        map:
-          - skip_if: ".PRIVILEGE != resource.ID" # Skip mapping if the privilege does not match the current resource
-            principal_id: ".USERNAME" # Map the query's USERNAME field as the principal ID
-            principal_type: "user" # Explicitly set the principal type to "user"
-            entitlement_id: "assigned" # Use the 'assigned' entitlement for standard privilege assignments
-          - skip_if: ".PRIVILEGE != resource.ID || .ADMIN_OPTION != 'YES'" # Condition for admin-level privilege mapping
-            principal_id: ".USERNAME" # Map the USERNAME to the principal ID
-            principal_type: "user" # Define the principal type as user
-            entitlement_id: "admin" # Apply the 'admin' entitlement when administrative rights are present

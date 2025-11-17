@@ -188,6 +188,22 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionKey string, act
 		}
 	}
 
+	// Wrap argMap in "input" container for CEL expressions
+	celInputs := map[string]any{
+		"input": argMap,
+	}
+
+	// Evaluate CEL expressions in vars to prepare query variables
+	queryVars, err := sqlSyncer.PrepareQueryVars(ctx, celInputs, actionCfg.Vars)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to prepare query vars: %w", err)
+	}
+
+	// Merge evaluated vars into argMap (queryVars take precedence)
+	for k, v := range queryVars {
+		argMap[k] = v
+	}
+
 	queries := []string{actionCfg.Query}
 	err = sqlSyncer.RunProvisioningQueries(ctx, queries, argMap, !actionCfg.NoTransaction)
 	if err != nil {
