@@ -6,7 +6,10 @@ app_description: Test configuration for SQL Server with random password generati
 # Connection settings for the SQL Server database
 connect:
   # Data Source Name (DSN) for our test SQL Server instance
-  dsn: "sqlserver://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}?database=${DB_DATABASE}"
+  dsn: "sqlserver://${DB_HOST}:${DB_PORT}?database=${DB_DATABASE}"
+  # Username and password are provided separately so they can be properly URL encoded.
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
 
 # Definition of different resource types managed by this connector
 resource_types:

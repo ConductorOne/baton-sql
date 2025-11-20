@@ -5,7 +5,10 @@ app_name: Oracle Test
 # Connection settings for the Oracle database
 connect:
   # Data Source Name (DSN) including credentials, host, port, and service name
-  dsn: "oracle://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_SERVICE}"
+  dsn: "oracle://${DB_HOST}:${DB_PORT}/${DB_SERVICE}"
+  # Username and password are provided separately so they can be properly URL encoded.
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
 
 # Definition of different resource types managed by this connector
 resource_types:

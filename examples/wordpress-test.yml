@@ -5,7 +5,10 @@ app_description: Test configuration for WordPress with password support
 
 # Connection configuration using a MySQL DSN.
 connect:
-  dsn: "mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: "mysql://${DB_HOST}:${DB_PORT}/${DB_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local"
+  # Username and password are provided separately so they can be properly URL encoded.
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
 
 resource_types:
   user:
