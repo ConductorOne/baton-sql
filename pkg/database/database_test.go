@@ -106,6 +106,14 @@ func Test_expandDSN(t *testing.T) {
 			want: "mysql://admin:p%40ss%23123@localhost:3306/dbname",
 		},
 		{
+			name: "Port",
+			env: map[string]string{
+				"DB_PORT": "3306",
+			},
+			dsn:  "mysql://user:password@localhost:${DB_PORT}/dbname",
+			want: "mysql://user:password@localhost:3306/dbname",
+		},
+		{
 			name: "Password with multiple special characters",
 			env: map[string]string{
 				"DB_PASSWORD": "p@ss#wo:rd/123",
