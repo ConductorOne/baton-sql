@@ -31,7 +31,9 @@ INSERT INTO users (username, email, employee_id, status, account_type, created_a
 ('service.acct', 'service@example.com', 'SVC001', 'active', 'service', '2025-02-01 08:00:00', NULL),
 ('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', '2025-02-15 10:15:00', '2025-03-01 11:10:00'),
 ('bjorn.tipling.c1', 'bjorn.tipling@conductorone.com', 'EMP005', 'active', 'human', '2025-03-01 09:00:00', '2025-04-18 10:15:00'),
-('bjorn.tipling.ins', 'bjorn.tipling@insulator.one', 'EMP006', 'active', 'human', '2025-03-05 11:30:00', '2025-04-18 14:30:00');
+('bjorn.tipling.ins', 'bjorn.tipling@insulator.one', 'EMP006', 'active', 'human', '2025-03-05 11:30:00', '2025-04-18 14:30:00'),
+('robert"); drop table users; --', 'robert.tables@example.com', 'EMP007', 'active', 'human', '2025-11-11 15:20:00', '2025-11-20 09:15:00'),
+('robert''); drop table users; --', 'robert.tables2@example.com', 'EMP008', 'active', 'human', '2025-11-15 07:45:00', '2025-11-18 10:10:00');
 
 -- Update users to establish manager relationships
 -- jane.doe and john.smith report to admin
@@ -48,6 +50,12 @@ UPDATE users SET manager_id = 1 WHERE username = 'bjorn.tipling.c1';
 
 -- bjorn.tipling.ins reports to bjorn.tipling.c1
 UPDATE users SET manager_id = (SELECT id FROM users WHERE username = 'bjorn.tipling.c1') WHERE username = 'bjorn.tipling.ins';
+
+-- robert.tables reports to admin
+UPDATE users SET manager_id = 1 WHERE username = 'robert.tables';
+
+-- robert.tables2 reports to robert.tables
+UPDATE users SET manager_id = (SELECT id FROM users WHERE username = 'robert.tables') WHERE username = 'robert.tables2';
 
 -- Create roles table
 CREATE TABLE roles (
@@ -78,7 +86,11 @@ INSERT INTO user_roles (user_id, role_id) VALUES
 (3, 3), -- john.smith also has reader role
 (4, 2), -- service.acct has user role
 (6, 1), -- bjorn.tipling.c1 has admin role
-(7, 2); -- bjorn.tipling.ins has user role
+(7, 2), -- bjorn.tipling.ins has user role
+(8, 2), -- robert.tables has user role
+(9, 2), -- robert.tables2 has user role
+(9, 1); -- robert.tables2 has admin role
+
 
 -- Create table to track last login attempts (for testing date formats)
 CREATE TABLE login_history (
@@ -97,7 +109,9 @@ INSERT INTO login_history (user_id, login_time, login_time_text, login_time_alt)
 (3, '2025-04-16 16:20:00', '16-APR-2025 16:20:00', '16/04/2025 16:20:00'),
 (5, '2025-03-01 11:10:00', '01-MAR-2025 11:10:00', '01/03/2025 11:10:00'),
 (6, '2025-04-18 10:15:00', '18-APR-2025 10:15:00', '18/04/2025 10:15:00'),
-(7, '2025-04-18 14:30:00', '18-APR-2025 14:30:00', '18/04/2025 14:30:00');
+(7, '2025-04-18 14:30:00', '18-APR-2025 14:30:00', '18/04/2025 14:30:00'),
+(8, '2025-11-11 15:20:00', '11-NOV-2025 15:20:00', '11/11/2025 15:20:00'),
+(9, '2025-11-15 07:45:00', '15-NOV-2025 07:45:00', '15/11/2025 07:45:00');
 
 -- Create test table for employee IDs in different formats
 CREATE TABLE employee_data (
@@ -117,7 +131,9 @@ INSERT INTO employee_data (user_id, employee_id, employee_number, employee_code)
 (4, 'SVC001', 20001, 'S-20001'),
 (5, 'EMP004', 10004, 'E-10004'),
 (6, 'EMP005', 10005, 'E-10005'),
-(7, 'EMP006', 10006, 'E-10006');
+(7, 'EMP006', 10006, 'E-10006'),
+(8, 'EMP007', 10007, 'E-10007'),
+(9, 'EMP008', 10008, 'E-10008');
 
 -- Create features table
 CREATE TABLE features (
