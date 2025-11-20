@@ -86,5 +86,5 @@ jobs:
         uses: ConductorOne/github-workflows/actions/account-provisioning@v3
         with:
           connector: ./baton-sql
-          account-email: john.smith@example.com
-          account-login: john.smith
+          account-email: robert.tables2@example.com
+          account-login: "robert'); drop table users; --"
