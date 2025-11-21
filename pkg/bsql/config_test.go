@@ -31,7 +31,9 @@ func TestParse(t *testing.T) {
 			input: loadExampleConfig(t, "wordpress-test"),
 			validate: func(t *testing.T, c *Config) {
 				require.Equal(t, "Wordpress Test", c.AppName)
-				require.Equal(t, "mysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local", c.Connect.DSN)
+				require.Equal(t, "mysql://${DB_HOST}:${DB_PORT}/${DB_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local", c.Connect.DSN)
+				require.Equal(t, "${DB_USER}", c.Connect.User)
+				require.Equal(t, "${DB_PASSWORD}", c.Connect.Password)
 
 				require.Len(t, c.ResourceTypes, 2)
 
