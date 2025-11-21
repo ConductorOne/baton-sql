@@ -10,17 +10,27 @@ app_name: Example Application
 # Connection Configuration
 # ----------------------
 # Specifies how to connect to the data source. Supports various connection methods.
+# 
+# RECOMMENDED: Use structured fields!
 connect:
-  # Database connection string (DSN) with environment variable interpolation
-  dsn: "mysql://${DB_USER}:${DB_PASS}@${DB_HOST}:3306/${DB_NAME}?parseTime=true"
-# If your database username or password includes characters that require URL encoding,
-# you can specify them as separate options instead of embedding them directly in the DSN.
-# Environment variables are expanded.
-# For example, you might include:
-#   username: my_username
-#   password: my_secure_password
+  scheme: "mysql"
+  host: "${DB_HOST}"
+  port: "3306"
+  database: "${DB_NAME}"
+  user: "${DB_USER}"
+  password: "${DB_PASS}"
+  params:
+    parseTime: "true"
 #
-# This allows the connector to handle proper URL encoding during DSN construction.
+# ALTERNATIVE: Use DSN with separate user/password fields
+# connect:
+#   dsn: "mysql://${DB_HOST}:3306/${DB_NAME}?parseTime=true"
+#   user: "${DB_USER}"
+#   password: "${DB_PASS}"
+#
+# LEGACY: Complete DSN (not recommended if credentials contain special characters)
+# connect:
+#   dsn: "mysql://${DB_USER}:${DB_PASS}@${DB_HOST}:3306/${DB_NAME}?parseTime=true"
 
 # Resource Types
 # -------------
