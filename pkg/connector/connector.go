@@ -94,7 +94,18 @@ func New(ctx context.Context, configFilePath string) (*Connector, error) {
 }
 
 func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
-	db, dbEngine, err := database.Connect(ctx, c.Connect.DSN, c.Connect.User, c.Connect.Password)
+	opts := database.ConnectOptions{
+		DSN:      c.Connect.DSN,
+		Scheme:   c.Connect.Scheme,
+		Host:     c.Connect.Host,
+		Port:     c.Connect.Port,
+		Database: c.Connect.Database,
+		User:     c.Connect.User,
+		Password: c.Connect.Password,
+		Params:   c.Connect.Params,
+	}
+
+	db, dbEngine, err := database.Connect(ctx, opts)
 	if err != nil {
 		return nil, err
 	}

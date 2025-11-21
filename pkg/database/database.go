@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -30,6 +31,22 @@ const (
 	Oracle
 	HDB
 )
+
+// ConnectOptions represents the structured configuration used to build a DSN.
+// Any field may include ${ENV_VAR} placeholders that will be expanded before use.
+type ConnectOptions struct {
+	DSN string
+
+	Scheme   string
+	Host     string
+	Port     string
+	Database string
+
+	User     string
+	Password string
+
+	Params map[string]string
+}
 
 func updateFromEnv(dsn string) (string, error) {
 	var err error
@@ -211,34 +228,14 @@ func expandDSN(dsn string) (string, error) {
 	return parsedUrl.String(), nil
 }
 
-func Connect(ctx context.Context, dsn string, user string, password string) (*sql.DB, DbEngine, error) {
-	// Use the new expandDSN function which handles special characters correctly
-	populatedDSN, err := expandDSN(dsn)
+func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error) {
+	parsedDsn, err := buildConnectionURL(opts)
 	if err != nil {
 		return nil, Unknown, err
 	}
 
-	parsedDsn, err := url.Parse(populatedDSN)
-	if err != nil {
-		return nil, Unknown, err
-	}
-
-	if parsedDsn.User == nil {
-		if user == "" || password == "" {
-			return nil, Unknown, errors.New("user and password must be set in DSN or in the configuration")
-		}
-
-		populatedUser, err := updateFromEnv(user)
-		if err != nil {
-			return nil, Unknown, err
-		}
-
-		populatedPassword, err := updateFromEnv(password)
-		if err != nil {
-			return nil, Unknown, err
-		}
-
-		parsedDsn.User = url.UserPassword(populatedUser, populatedPassword)
+	if parsedDsn.Scheme == "" {
+		return nil, Unknown, errors.New("database scheme must be specified in DSN or configuration")
 	}
 
 	switch parsedDsn.Scheme {
@@ -280,4 +277,141 @@ func Connect(ctx context.Context, dsn string, user string, password string) (*sq
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
+}
+
+func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
+	var (
+		parsedUrl *url.URL
+		err       error
+	)
+
+	if opts.DSN != "" {
+		populatedDSN, err := expandDSN(opts.DSN)
+		if err != nil {
+			return nil, err
+		}
+		parsedUrl, err = url.Parse(populatedDSN)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		parsedUrl = &url.URL{}
+	}
+
+	scheme, err := expandValue(opts.Scheme)
+	if err != nil {
+		return nil, err
+	}
+	if scheme != "" {
+		parsedUrl.Scheme = scheme
+	}
+
+	host, err := expandValue(opts.Host)
+	if err != nil {
+		return nil, err
+	}
+
+	port, err := expandValue(opts.Port)
+	if err != nil {
+		return nil, err
+	}
+
+	hostValue := parsedUrl.Hostname()
+	if hostValue == "" && parsedUrl.Host != "" {
+		hostValue = parsedUrl.Host
+	}
+	if host != "" {
+		hostValue = host
+	}
+
+	portValue := parsedUrl.Port()
+	if portValue == "" && parsedUrl.Host != "" {
+		if _, p, err := net.SplitHostPort(parsedUrl.Host); err == nil {
+			portValue = p
+		}
+	}
+	if port != "" {
+		portValue = port
+	}
+
+	if hostValue != "" {
+		if portValue != "" {
+			// JoinHostPort expects the host without brackets for IPv6
+			// If hostValue has brackets, strip them; if it's a raw IPv6, leave as-is
+			cleanHost := hostValue
+			if len(hostValue) > 2 && hostValue[0] == '[' && hostValue[len(hostValue)-1] == ']' {
+				cleanHost = hostValue[1 : len(hostValue)-1]
+			}
+			parsedUrl.Host = net.JoinHostPort(cleanHost, portValue)
+		} else {
+			parsedUrl.Host = hostValue
+		}
+	} else if portValue != "" {
+		return nil, fmt.Errorf("port provided without host")
+	}
+
+	databaseName, err := expandValue(opts.Database)
+	if err != nil {
+		return nil, err
+	}
+	if databaseName != "" {
+		if strings.HasPrefix(databaseName, "/") {
+			parsedUrl.Path = databaseName
+		} else {
+			parsedUrl.Path = "/" + databaseName
+		}
+	}
+
+	user, err := expandValue(opts.User)
+	if err != nil {
+		return nil, err
+	}
+
+	password, err := expandValue(opts.Password)
+	if err != nil {
+		return nil, err
+	}
+
+	if user != "" || password != "" {
+		if password != "" {
+			parsedUrl.User = url.UserPassword(user, password)
+		} else {
+			parsedUrl.User = url.User(user)
+		}
+	}
+
+	if len(opts.Params) > 0 {
+		values := parsedUrl.Query()
+		if values == nil {
+			values = url.Values{}
+		}
+		for k, v := range opts.Params {
+			key, err := expandValue(k)
+			if err != nil {
+				return nil, err
+			}
+			value, err := expandValue(v)
+			if err != nil {
+				return nil, err
+			}
+			values.Set(key, value)
+		}
+		parsedUrl.RawQuery = values.Encode()
+	}
+
+	if parsedUrl.Scheme == "" && opts.DSN == "" {
+		return nil, fmt.Errorf("database scheme must be specified")
+	}
+
+	return parsedUrl, nil
+}
+
+func expandValue(s string) (string, error) {
+	if s == "" {
+		return s, nil
+	}
+	if DSNREnvRegex.MatchString(s) {
+		return updateFromEnv(s)
+	}
+	return s, nil
 }

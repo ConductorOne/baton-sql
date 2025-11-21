@@ -617,3 +617,108 @@ func Test_expandWithMapping(t *testing.T) {
 		})
 	}
 }
+
+func Test_buildConnectionURL(t *testing.T) {
+	t.Setenv("DB_HOST", "db.internal")
+	t.Setenv("DB_PORT", "5432")
+	t.Setenv("DB_NAME", "appdb")
+	t.Setenv("DB_USER", "app_user")
+	t.Setenv("DB_PASSWORD", "s3cr3t!")
+
+	tests := []struct {
+		name    string
+		opts    ConnectOptions
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "DSN only",
+			opts: ConnectOptions{
+				DSN: "postgres://user:pass@localhost:5432/db?sslmode=disable",
+			},
+			want: "postgres://user:pass@localhost:5432/db?sslmode=disable",
+		},
+		{
+			name: "Override DSN components",
+			opts: ConnectOptions{
+				DSN:      "postgres://user:pass@localhost:5432/db?sslmode=disable",
+				Host:     "override.internal",
+				Port:     "6543",
+				Database: "override_db",
+				User:     "override_user",
+				Password: "override#pass",
+				Params: map[string]string{
+					"sslmode":          "require",
+					"connect_timeout":  "10",
+					"application_name": "baton",
+				},
+			},
+			want: "postgres://override_user:override%23pass@override.internal:6543/override_db?application_name=baton&connect_timeout=10&sslmode=require",
+		},
+		{
+			name: "Structured config only",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "${DB_HOST}",
+				Port:     "${DB_PORT}",
+				Database: "${DB_NAME}",
+				User:     "${DB_USER}",
+				Password: "${DB_PASSWORD}",
+				Params: map[string]string{
+					"sslmode": "disable",
+				},
+			},
+			want: "postgres://app_user:s3cr3t%21@db.internal:5432/appdb?sslmode=disable",
+		},
+		{
+			name: "Port without host",
+			opts: ConnectOptions{
+				Scheme: "postgres",
+				Port:   "5432",
+			},
+			wantErr: true,
+		},
+		{
+			name: "IPv6 host with port",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "[::1]",
+				Port:     "5432",
+				Database: "testdb",
+				User:     "testuser",
+				Password: "testpass",
+			},
+			want: "postgres://testuser:testpass@[::1]:5432/testdb",
+		},
+		{
+			name: "IPv6 host without brackets gets brackets added by JoinHostPort",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "2001:db8::1",
+				Port:     "5432",
+				Database: "testdb",
+			},
+			want: "postgres://[2001:db8::1]:5432/testdb",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildConnectionURL(tt.opts)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error but got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if got.String() != tt.want {
+				t.Fatalf("buildConnectionURL() = %s, want %s", got.String(), tt.want)
+			}
+		})
+	}
+}

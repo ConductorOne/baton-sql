@@ -36,18 +36,36 @@ func (c Config) HasActions() bool {
 }
 
 // DatabaseConfig contains settings required to connect to the database.
+// You can specify either a complete DSN, or use structured fields, or a combination.
+// Structured fields override corresponding parts of the DSN when both are provided.
 type DatabaseConfig struct {
-	// DSN is the Database Source Name connection string used to establish the database connection.
+	// DSN is the Database Source Name connection string (optional if using structured fields).
+	// Supports environment variable expansion via ${VAR_NAME} syntax.
+	// Example: "postgres://${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
 	DSN string `yaml:"dsn" json:"dsn"`
 
-	// These fields are not required if the DSN already includes the credentials.
-	// They should only be provided if the username or password contain characters that need URL encoding.
+	// Structured connection fields (optional, override DSN components when set)
 
-	// User is the database username used for authentication.
+	// Scheme is the database type (e.g., "postgres", "mysql", "sqlserver", "oracle", "hdb")
+	Scheme string `yaml:"scheme" json:"scheme"`
+
+	// Host is the database server hostname or IP address (may include port for some databases)
+	Host string `yaml:"host" json:"host"`
+
+	// Port is the database server port number
+	Port string `yaml:"port" json:"port"`
+
+	// Database is the name of the database to connect to
+	Database string `yaml:"database" json:"database"`
+
+	// User is the database username used for authentication
 	User string `yaml:"user" json:"user"`
 
-	// Password is the database password used for authentication.
+	// Password is the database password used for authentication
 	Password string `yaml:"password" json:"password"`
+
+	// Params contains additional connection parameters (e.g., {"sslmode": "disable", "timeout": "30s"})
+	Params map[string]string `yaml:"params" json:"params"`
 }
 
 // ResourceType defines configuration for a specific type of resource.
