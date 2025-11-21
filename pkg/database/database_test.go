@@ -187,7 +187,15 @@ func Test_expandDSN(t *testing.T) {
 				"QUERY_VAL": "value&special",
 			},
 			dsn:  "postgres://user:pass@localhost/db?param=${QUERY_VAL}",
-			want: "postgres://user:pass@localhost/db?param=value&special",
+			want: "postgres://user:pass@localhost/db?param=value%26special",
+		},
+		{
+			name: "Space in query parameter value",
+			env: map[string]string{
+				"PARAM_VALUE": "foo bar",
+			},
+			dsn:  "postgres://user:pass@localhost/db?setting=${PARAM_VALUE}",
+			want: "postgres://user:pass@localhost/db?setting=foo+bar",
 		},
 		{
 			name: "Path with special characters",
@@ -261,7 +269,7 @@ func Test_expandDSN(t *testing.T) {
 				"DB_NAME":     "production_db",
 			},
 			dsn:  "postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}?sslmode=require&connect_timeout=10",
-			want: "postgres://app_user:C0mpl3x%21P%40ss%23w0rd$123@prod-db.example.com:5432/production_db?sslmode=require&connect_timeout=10",
+			want: "postgres://app_user:C0mpl3x%21P%40ss%23w0rd$123@prod-db.example.com:5432/production_db?connect_timeout=10&sslmode=require",
 		},
 		// Edge cases - security and parser confusion
 		{
@@ -343,7 +351,7 @@ func Test_expandDSN(t *testing.T) {
 				"PARAM_VALUE": "value&sneaky",
 			},
 			dsn:  "postgres://user:pass@localhost/db?setting=${PARAM_VALUE}",
-			want: "postgres://user:pass@localhost/db?setting=value&sneaky",
+			want: "postgres://user:pass@localhost/db?setting=value%26sneaky",
 		},
 		{
 			name: "Equals sign in database name",

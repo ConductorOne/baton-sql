@@ -149,7 +149,23 @@ func expandPath(parsedUrl *url.URL, mapping map[string]string) {
 // expandQuery expands environment variable placeholders in the URL's query string.
 func expandQuery(parsedUrl *url.URL, mapping map[string]string) {
 	if parsedUrl.RawQuery != "" {
-		parsedUrl.RawQuery = expandWithMapping(parsedUrl.RawQuery, mapping)
+		values, err := url.ParseQuery(parsedUrl.RawQuery)
+		if err != nil {
+			// Fallback: if parsing fails for some reason, do a direct expansion.
+			// This preserves prior behavior rather than failing entirely.
+			parsedUrl.RawQuery = expandWithMapping(parsedUrl.RawQuery, mapping)
+			return
+		}
+
+		newValues := url.Values{}
+		for key, vals := range values {
+			expandedKey := expandWithMapping(key, mapping)
+			for _, v := range vals {
+				expandedVal := expandWithMapping(v, mapping)
+				newValues.Add(expandedKey, expandedVal)
+			}
+		}
+		parsedUrl.RawQuery = newValues.Encode()
 	}
 }
 
