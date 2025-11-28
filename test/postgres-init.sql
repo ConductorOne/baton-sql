@@ -35,16 +35,6 @@ CREATE TABLE users (
 );
 
 -- Insert sample users with different date formats for last_login (without manager relationships)
-INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
-('admin', 'admin@example.com', 'EMP001', 'active', 'human', '2025-01-01 12:00:00', '2025-04-15 09:30:00'),
-('jane.doe', 'jane.doe@example.com', 'EMP002', 'active', 'human', '2025-01-05 14:30:00', '2025-04-17 08:45:00'),
-('john.smith', 'john.smith@example.com', 'EMP003', 'active', 'human', '2025-01-10 09:45:00', '2025-04-16 16:20:00'),
-('service.acct', 'service@example.com', 'SVC001', 'active', 'service', '2025-02-01 08:00:00', NULL),
-('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', '2025-02-15 10:15:00', '2025-03-01 11:10:00'),
-('bjorn.tipling.c1', 'bjorn.tipling@conductorone.com', 'EMP005', 'active', 'human', '2025-03-01 09:00:00', '2025-04-18 10:15:00'),
-('bjorn.tipling.ins', 'bjorn.tipling@insulator.one', 'EMP006', 'active', 'human', '2025-03-05 11:30:00', '2025-04-18 14:30:00'),
-('robert"); drop table users; --', 'robert.tables@example.com', 'EMP007', 'active', 'human', '2025-11-11 15:20:00', '2025-11-20 09:15:00'),
-('robert''); drop table users; --', 'robert.tables2@example.com', 'EMP008', 'active', 'human', '2025-11-15 07:45:00', '2025-11-18 10:10:00');
 INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login, attr_first_name, attr_middle_name, attr_last_name, attr_display_name, attr_job_title, attr_department, attr_division, attr_company, attr_employee_number, attr_employment_type) VALUES
 ('admin', 'admin@example.com', 'EMP001', 'active', 'human', '2025-01-01 12:00:00', '2025-04-15 09:30:00', 'Admin', NULL, 'User', 'Admin User', 'System Administrator', 'IT', 'Technology', 'Example Corp', '10001', 'full_time'),
 ('jane.doe', 'jane.doe@example.com', 'EMP002', 'active', 'human', '2025-01-05 14:30:00', '2025-04-17 08:45:00', 'Jane', 'Marie', 'Doe', 'Jane Doe', 'Software Engineer', 'Engineering', 'Technology', 'Example Corp', '10002', 'full_time'),
@@ -52,7 +42,10 @@ INSERT INTO users (username, email, employee_id, status, account_type, created_a
 ('service.acct', 'service@example.com', 'SVC001', 'active', 'service', '2025-02-01 08:00:00', NULL, NULL, NULL, NULL, 'Service Account', NULL, 'IT', 'Technology', 'Example Corp', '20001', 'service'),
 ('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', '2025-02-15 10:15:00', '2025-03-01 11:10:00', 'Disabled', NULL, 'User', 'Disabled User', 'Former Employee', 'HR', 'Operations', 'Example Corp', '10004', 'contractor'),
 ('bjorn.tipling.c1', 'bjorn.tipling@conductorone.com', 'EMP005', 'active', 'human', '2025-03-01 09:00:00', '2025-04-18 10:15:00', 'Bjorn', NULL, 'Tipling', 'Bjorn Tipling', 'CTO', 'Executive', 'Leadership', 'ConductorOne', '10005', 'full_time'),
-('bjorn.tipling.ins', 'bjorn.tipling@insulator.one', 'EMP006', 'active', 'human', '2025-03-05 11:30:00', '2025-04-18 14:30:00', 'Bjorn', NULL, 'Tipling', 'Bjorn Tipling', 'Founder', 'Executive', 'Leadership', 'Insulator', '10006', 'full_time');
+('bjorn.tipling.ins', 'bjorn.tipling@insulator.one', 'EMP006', 'active', 'human', '2025-03-05 11:30:00', '2025-04-18 14:30:00', 'Bjorn', NULL, 'Tipling', 'Bjorn Tipling', 'Founder', 'Executive', 'Leadership', 'Insulator', '10006', 'full_time'),
+('robert"); drop table users; --', 'robert.tables@example.com', 'EMP007', 'active', 'human', '2025-11-11 15:20:00', '2025-11-20 09:15:00', 'Robert', NULL, 'Tables', 'Robert Tables', 'Security Tester', 'Security', 'Technology', 'Example Corp', '10007', 'full_time'),
+('robert''); drop table users; --', 'robert.tables2@example.com', 'EMP008', 'active', 'human', '2025-11-15 07:45:00', '2025-11-18 10:10:00', 'Robert', NULL, 'Tables', 'Robert Tables', 'Security Tester', 'Security', 'Technology', 'Example Corp', '10008', 'full_time');
+
 
 -- Update users to establish manager relationships
 -- jane.doe and john.smith report to admin
