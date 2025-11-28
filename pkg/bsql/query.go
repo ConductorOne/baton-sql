@@ -383,7 +383,7 @@ func (s *SQLSyncer) PrepareQueryVars(ctx context.Context, inputs map[string]any,
 
 // normalizeValue converts CEL null types and other special values to Go nil for SQL compatibility
 // Also converts booleans to strings ("1"/"0") for Oracle compatibility when used in DECODE statements.
-func (s *SQLSyncer) normalizeValue(val interface{}) interface{} {
+func (s *SQLSyncer) normalizeValue(val any) any {
 	if val == nil {
 		return nil
 	}
