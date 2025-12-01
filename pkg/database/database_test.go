@@ -253,6 +253,47 @@ func Test_expandDSN(t *testing.T) {
 			want: "mysql://admin:@localhost:3306/dbname",
 		},
 		{
+			name: "Test full DSN",
+			env: map[string]string{
+				"DSN": "mysql://admin:1234@localhost:3306/dbname",
+			},
+			dsn:  "${DSN}",
+			want: "mysql://admin:1234@localhost:3306/dbname",
+		},
+		{
+			name: "Test DSN parts",
+			env: map[string]string{
+				"DB_ENDPOINT": "localhost:3306/dbname",
+			},
+			dsn:  "mysql://admin:password@${DB_ENDPOINT}",
+			want: "mysql://admin:password@localhost:3306/dbname",
+		},
+		{
+			name: "Test scheme",
+			env: map[string]string{
+				"DB_SCHEME": "mysql",
+			},
+			dsn:  "${DB_SCHEME}://admin:1234@localhost:3306/dbname",
+			want: "mysql://admin:1234@localhost:3306/dbname",
+		},
+		{
+			name: "Test replacing",
+			env: map[string]string{
+				"DB_PASSWORD": "1234",
+			},
+			dsn:  "mysql://admin:${DB_PASSWORD}@localhost:3306/db-999000",
+			want: "mysql://admin:1234@localhost:3306/db-999000",
+		},
+		{
+			name: "Test replacing with multiple variables",
+			env: map[string]string{
+				"DB_USER":     "user-999001",
+				"DB_PASSWORD": "1234",
+			},
+			dsn:  "mysql://${DB_USER}:9${DB_PASSWORD}@localhost:3306/dbname",
+			want: "mysql://user-999001:91234@localhost:3306/dbname",
+		},
+		{
 			name: "URL with fragment",
 			env: map[string]string{
 				"DB_FRAGMENT": "section",
