@@ -289,12 +289,14 @@ func expandDSN(dsn string) (string, error) {
 	// Check if the DSN starts with a sentinel followed by ://
 	if strings.Contains(sentinelDSN, "://") {
 		schemeEnd := strings.Index(sentinelDSN, "://")
-		schemeSentinel := sentinelDSN[:schemeEnd]
-		// Check if this is a sentinel we created
-		if strings.HasPrefix(schemeSentinel, "_PH-") {
-			if value, ok := mapping[schemeSentinel]; ok {
-				// Replace the scheme sentinel with the actual scheme
-				sentinelDSN = value + sentinelDSN[schemeEnd:]
+		if schemeEnd > 0 {
+			schemeSentinel := sentinelDSN[:schemeEnd]
+			// Check if this is a sentinel we created
+			if strings.HasPrefix(schemeSentinel, "_PH-") {
+				if value, ok := mapping[schemeSentinel]; ok {
+					// Replace the scheme sentinel with the actual scheme
+					sentinelDSN = value + sentinelDSN[schemeEnd:]
+				}
 			}
 		}
 	}
