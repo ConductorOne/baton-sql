@@ -128,8 +128,8 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 			actionSchema.Arguments = append(actionSchema.Arguments, arg)
 		}
 
-		if actionCfg.Query == "" {
-			return nil, fmt.Errorf("query is required for action: %s", actionKey)
+		if actionCfg.Query == "" && len(actionCfg.Queries) == 0 {
+			return nil, fmt.Errorf("query or queries is required for action: %s", actionKey)
 		}
 
 		cfg := actionCfg
@@ -204,7 +204,12 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionKey string, act
 		argMap[k] = v
 	}
 
-	queries := []string{actionCfg.Query}
+	var queries []string
+	if len(actionCfg.Queries) > 0 {
+		queries = actionCfg.Queries
+	} else {
+		queries = []string{actionCfg.Query}
+	}
 	err = sqlSyncer.RunProvisioningQueries(ctx, queries, argMap, !actionCfg.NoTransaction)
 	if err != nil {
 		return nil, nil, err

@@ -399,10 +399,18 @@ func (s *SQLSyncer) normalizeValue(val any) any {
 		// Convert boolean to string for Oracle compatibility (Oracle DECODE expects CHAR)
 		// Only convert for Oracle to avoid breaking other databases
 		if s.dbEngine == database.Oracle {
+			result := "0"
 			if v {
-				return "1"
+				result = "1"
 			}
-			return "0"
+			return result
+		}
+		if s.dbEngine == database.MSSQL {
+			result := 0
+			if v {
+				result = 1
+			}
+			return result
 		}
 		// For other databases, return as-is (let the driver handle it)
 		return v
