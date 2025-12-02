@@ -285,6 +285,15 @@ func Test_expandDSN(t *testing.T) {
 			want: "mysql://admin:1234@localhost:3306/db-999000",
 		},
 		{
+			name: "Test replacing with port",
+			env: map[string]string{
+				"DB_PASSWORD": "1234",
+				"DB_PORT":     "3306",
+			},
+			dsn:  "mysql://admin:${DB_PASSWORD}@localhost:${DB_PORT}/db-999001",
+			want: "mysql://admin:1234@localhost:3306/db-999001",
+		},
+		{
 			name: "Test replacing with multiple variables",
 			env: map[string]string{
 				"DB_USER":     "user-999001",
@@ -541,7 +550,7 @@ func Test_extractPlaceholders(t *testing.T) {
 			env: map[string]string{
 				"PASSWORD": "secret",
 			},
-			wantSentinel:    "mysql://user:999000@localhost/db",
+			wantSentinel:    "mysql://user:_PH-999000_@localhost/db",
 			wantMappingSize: 1,
 		},
 		{
@@ -552,7 +561,7 @@ func Test_extractPlaceholders(t *testing.T) {
 				"PASSWORD": "secret",
 				"HOST":     "localhost",
 			},
-			wantSentinel:    "mysql://999000:999001@999002/db",
+			wantSentinel:    "mysql://_PH-999000_:_PH-999001_@_PH-999002_/db",
 			wantMappingSize: 3,
 		},
 		{
@@ -561,7 +570,7 @@ func Test_extractPlaceholders(t *testing.T) {
 			env: map[string]string{
 				"VAR": "value",
 			},
-			wantSentinel:    "999000:999001",
+			wantSentinel:    "_PH-999000_:_PH-999001_",
 			wantMappingSize: 2,
 		},
 		{
@@ -570,7 +579,7 @@ func Test_extractPlaceholders(t *testing.T) {
 			env: map[string]string{
 				"PORT": "3306",
 			},
-			wantSentinel:    "mysql://user:pass@localhost:999000/db",
+			wantSentinel:    "mysql://user:pass@localhost:_PH-999000_/db",
 			wantMappingSize: 1,
 		},
 		{

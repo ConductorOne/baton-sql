@@ -68,11 +68,9 @@ func updateFromEnv(dsn string) (string, error) {
 	return result, nil
 }
 
-// extractPlaceholders replaces ${...} placeholders with unique numeric sentinels
-// and looks up the environment variable values immediately.
-// Numeric sentinels (999000, 999001, etc.) are valid in all URL components:
-// ports (must be numeric), hostnames, userinfo, paths, and query strings.
-// This allows us to parse the URL structure before expanding environment variables.
+// extractPlaceholders replaces ${...} placeholders with unique sentinels
+// using the _PH-999000_ format for all placeholders to avoid collisions.
+// Port sentinels are expanded before URL parsing (in expandDSN) since ports must be numeric.
 // Returns: the string with sentinels, a mapping of sentinel->value, and any error.
 func extractPlaceholders(s string) (string, map[string]string, error) {
 	mapping := make(map[string]string)
@@ -80,7 +78,7 @@ func extractPlaceholders(s string) (string, map[string]string, error) {
 	var err error
 
 	result := DSNREnvRegex.ReplaceAllStringFunc(s, func(match string) string {
-		sentinel := fmt.Sprintf("999%03d", counter)
+		sentinel := fmt.Sprintf("_PH-999%03d_", counter)
 		varName := match[2 : len(match)-1] // Extract VAR from ${VAR}
 
 		// Look up the environment variable immediately
@@ -103,7 +101,8 @@ func extractPlaceholders(s string) (string, map[string]string, error) {
 }
 
 // expandWithMapping expands sentinels in a string by replacing them with their
-// corresponding values from the mapping.
+// corresponding values from the mapping. The sentinel format (_PH-999000_) includes
+// a prefix and suffix to avoid collisions with literal patterns in the DSN.
 func expandWithMapping(s string, mapping map[string]string) string {
 	result := s
 	for sentinel, value := range mapping {
@@ -150,9 +149,27 @@ func expandUserInfo(parsedUrl *url.URL, mapping map[string]string) {
 }
 
 // expandHost expands environment variable placeholders in the URL's host component.
+// It also handles the case where the host variable contains a path component.
 func expandHost(parsedUrl *url.URL, mapping map[string]string) {
 	if parsedUrl.Host != "" {
-		parsedUrl.Host = expandWithMapping(parsedUrl.Host, mapping)
+		expandedHost := expandWithMapping(parsedUrl.Host, mapping)
+
+		// Check if the expanded host contains a path (e.g., "localhost:3306/dbname")
+		// If so, split it into host:port and path
+		if strings.Contains(expandedHost, "/") {
+			parts := strings.SplitN(expandedHost, "/", 2)
+			parsedUrl.Host = parts[0]
+			// Prepend the path part to the existing path
+			if parts[1] != "" {
+				if parsedUrl.Path == "" {
+					parsedUrl.Path = "/" + parts[1]
+				} else {
+					parsedUrl.Path = "/" + parts[1] + parsedUrl.Path
+				}
+			}
+		} else {
+			parsedUrl.Host = expandedHost
+		}
 	}
 }
 
@@ -193,6 +210,49 @@ func expandFragment(parsedUrl *url.URL, mapping map[string]string) {
 	}
 }
 
+// expandPortSentinel expands the port sentinel in the DSN before URL parsing.
+// Ports must be numeric for URL parsing, so we detect and expand port sentinels
+// (which use _PH-999000_ format) before passing to url.Parse.
+// The mapping is modified in place to remove the port sentinel.
+func expandPortSentinel(sentinelDSN string, mapping map[string]string) string {
+	// Pattern: host:_PH-999XXX_/ or host:_PH-999XXX_? or host:_PH-999XXX_
+	if !strings.Contains(sentinelDSN, "://") {
+		return sentinelDSN
+	}
+
+	schemeEnd := strings.Index(sentinelDSN, "://")
+	afterScheme := sentinelDSN[schemeEnd+3:]
+
+	// Find the authority part (userinfo@host:port or host:port)
+	authEnd := strings.IndexAny(afterScheme, "/?#")
+	if authEnd == -1 {
+		authEnd = len(afterScheme)
+	}
+	authority := afterScheme[:authEnd]
+
+	// Find the last colon in authority (this should be the port separator)
+	atIndex := strings.LastIndex(authority, "@")
+	colonIndex := strings.LastIndex(authority, ":")
+
+	// If there's a colon after @ (or no @), check if what follows is a sentinel
+	if colonIndex > atIndex {
+		portPart := authority[colonIndex+1:]
+		// Check if portPart matches our sentinel pattern
+		if strings.HasPrefix(portPart, "_PH-") && strings.HasSuffix(portPart, "_") {
+			if value, ok := mapping[portPart]; ok {
+				// Replace port sentinel with its value before parsing
+				beforePort := sentinelDSN[:schemeEnd+3+colonIndex+1]
+				afterPort := sentinelDSN[schemeEnd+3+len(authority):]
+				sentinelDSN = beforePort + value + afterPort
+				// Remove from mapping so it doesn't get expanded again
+				delete(mapping, portPart)
+			}
+		}
+	}
+
+	return sentinelDSN
+}
+
 // expandDSN expands environment variable placeholders in a DSN using a three-phase approach:
 // 1. Replace ${...} with safe sentinel values and lookup env vars
 // 2. Parse the URL structure with sentinels
@@ -211,6 +271,36 @@ func expandDSN(dsn string) (string, error) {
 	if len(mapping) == 0 {
 		return dsn, nil
 	}
+
+	// Special case: if the entire DSN is a single variable (e.g., "${DSN}"),
+	// just return the expanded value directly without parsing
+	matches := DSNREnvRegex.FindAllString(dsn, -1)
+	if len(matches) == 1 && strings.TrimSpace(dsn) == strings.TrimSpace(matches[0]) {
+		// Get the variable name
+		varName := matches[0][2 : len(matches[0])-1]
+		value, exists := os.LookupEnv(varName)
+		if !exists {
+			return "", fmt.Errorf("environment variable %s is not set", varName)
+		}
+		return value, nil
+	}
+
+	// Special case: if the scheme is a variable, we need to expand it before parsing
+	// Check if the DSN starts with a sentinel followed by ://
+	if strings.Contains(sentinelDSN, "://") {
+		schemeEnd := strings.Index(sentinelDSN, "://")
+		schemeSentinel := sentinelDSN[:schemeEnd]
+		// Check if this is a sentinel we created
+		if strings.HasPrefix(schemeSentinel, "_PH-") {
+			if value, ok := mapping[schemeSentinel]; ok {
+				// Replace the scheme sentinel with the actual scheme
+				sentinelDSN = value + sentinelDSN[schemeEnd:]
+			}
+		}
+	}
+
+	// Special case: Expand port sentinel before parsing (ports must be numeric for URL parsing)
+	sentinelDSN = expandPortSentinel(sentinelDSN, mapping)
 
 	// Phase 2: Parse with sentinels
 	parsedUrl, err := url.Parse(sentinelDSN)
