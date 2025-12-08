@@ -8,12 +8,12 @@ import (
 
 func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) error {
 	if query == "" {
-		return fmt.Errorf("list query is required")
+		return fmt.Errorf("query is required")
 	}
 
 	usedVars, err := s.queryVars(query)
 	if err != nil {
-		return fmt.Errorf("failed to parse list query for variables: %w", err)
+		return fmt.Errorf("failed to parse query for vars: %w", err)
 	}
 
 	if vars == nil {
@@ -25,7 +25,7 @@ func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) err
 			if v == limitKey || v == offsetKey || v == cursorKey {
 				continue
 			}
-			return fmt.Errorf("list query uses variable '%s' which is not defined in vars", v)
+			return fmt.Errorf("query uses variable '%s' which is not defined in vars", v)
 		}
 	}
 
@@ -71,7 +71,6 @@ func (l *GrantsQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
 }
 
 func (l *AccountProvisioning) StaticValidate(ctx context.Context, s *SQLSyncer) error {
-
 	if l.Credentials == nil {
 		return errors.New("no credentials defined")
 	}
@@ -139,7 +138,7 @@ func (l *ActionConfig) StaticValidate(ctx context.Context, s *SQLSyncer) error {
 	}
 
 	for k, config := range l.Arguments {
-		availableVars[k] = config.Name
+		availableVars[k] = config.Type
 	}
 
 	return validateVarsInQuery(s, l.Query, availableVars)
