@@ -2,6 +2,7 @@ package bsql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -70,20 +71,49 @@ func (l *GrantsQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
 }
 
 func (l *AccountProvisioning) StaticValidate(ctx context.Context, s *SQLSyncer) error {
-	if l.Create != nil {
-		for _, query := range l.Create.Queries {
-			err := validateVarsInQuery(s, query, l.Create.Vars)
-			if err != nil {
-				return err
-			}
+
+	if l.Credentials == nil {
+		return errors.New("no credentials defined")
+	}
+
+	if l.Credentials.EncryptedPassword == nil &&
+		l.Credentials.RandomPassword == nil &&
+		l.Credentials.NoPassword == nil {
+		return errors.New("no credential method defined")
+	}
+
+	if l.Credentials.RandomPassword != nil {
+		if l.Credentials.RandomPassword.MaxLength <= 0 {
+			return errors.New("random password max_length must be greater than zero")
+		}
+
+		if l.Credentials.RandomPassword.MinLength <= 0 {
+			return errors.New("random password min_length must be greater than zero")
+		}
+
+		if l.Credentials.RandomPassword.MinLength > l.Credentials.RandomPassword.MaxLength {
+			return errors.New("random password min_length cannot be greater than max_length")
 		}
 	}
 
-	if l.Validate != nil {
-		err := validateVarsInQuery(s, l.Validate.Query, l.Validate.Vars)
+	if l.Create == nil {
+		return errors.New("no create functions defined")
+	}
+
+	for _, query := range l.Create.Queries {
+		err := validateVarsInQuery(s, query, l.Create.Vars)
 		if err != nil {
 			return err
 		}
+	}
+
+	if l.Validate == nil {
+		return errors.New("no validate functions defined")
+	}
+
+	err := validateVarsInQuery(s, l.Validate.Query, l.Validate.Vars)
+	if err != nil {
+		return err
 	}
 
 	return nil
