@@ -30,6 +30,12 @@ type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+var identSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+
+func SanitizeIdentifier(s string) string {
+	return identSanitizer.ReplaceAllString(s, "")
+}
+
 type paginationContext struct {
 	Strategy   string
 	Limit      int64
@@ -149,7 +155,7 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 
 		// If the value is unquoted, directly insert the value as a string
 		if opts.Unquoted {
-			return fmt.Sprintf("%v", val)
+			return SanitizeIdentifier(fmt.Sprintf("%v", val))
 		}
 
 		qArgs = append(qArgs, val)
@@ -294,7 +300,7 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 		}
 
 		if opts.Unquoted {
-			return fmt.Sprintf("%v", v)
+			return SanitizeIdentifier(fmt.Sprintf("%v", v))
 		}
 
 		qArgs = append(qArgs, v)

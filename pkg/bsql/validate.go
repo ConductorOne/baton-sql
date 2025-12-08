@@ -22,7 +22,7 @@ func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) err
 
 	for _, v := range usedVars {
 		if _, ok := vars[v]; !ok {
-			if v == "limit" || v == "offset" || v == "cursor" {
+			if v == limitKey || v == offsetKey || v == cursorKey {
 				continue
 			}
 			return fmt.Errorf("list query uses variable '%s' which is not defined in vars", v)
