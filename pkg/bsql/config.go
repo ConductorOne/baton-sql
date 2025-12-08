@@ -13,6 +13,10 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
+type staticValidator interface {
+	StaticValidate(ctx context.Context, s *SQLSyncer) error
+}
+
 // Config represents the overall connector configuration.
 type Config struct {
 	// AppName is the application name that identifies the connector.
@@ -42,27 +46,27 @@ type DatabaseConfig struct {
 	// DSN is the Database Source Name connection string (optional if using structured fields).
 	// Supports environment variable expansion via ${VAR_NAME} syntax.
 	// Example: "postgres://${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
-	DSN string `yaml:"dsn" json:"dsn"`
+	DSN string `yaml:"dsn" json:"dsn" validate:"required"`
 
 	// Structured connection fields (optional, override DSN components when set)
 
 	// Scheme is the database type (e.g., "postgres", "mysql", "sqlserver", "oracle", "hdb")
-	Scheme string `yaml:"scheme" json:"scheme"`
+	Scheme string `yaml:"scheme" json:"scheme" validate:"required"`
 
 	// Host is the database server hostname or IP address (may include port for some databases)
-	Host string `yaml:"host" json:"host"`
+	Host string `yaml:"host" json:"host" validate:"required"`
 
 	// Port is the database server port number
-	Port string `yaml:"port" json:"port"`
+	Port string `yaml:"port" json:"port" validate:"required"`
 
 	// Database is the name of the database to connect to
-	Database string `yaml:"database" json:"database"`
+	Database string `yaml:"database" json:"database" validate:"required"`
 
 	// User is the database username used for authentication
-	User string `yaml:"user" json:"user"`
+	User string `yaml:"user" json:"user" validate:"required"`
 
 	// Password is the database password used for authentication
-	Password string `yaml:"password" json:"password"`
+	Password string `yaml:"password" json:"password" validate:"required"`
 
 	// Params contains additional connection parameters (e.g., {"sslmode": "disable", "timeout": "30s"})
 	Params map[string]string `yaml:"params" json:"params"`
@@ -105,7 +109,7 @@ type ListQuery struct {
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
 
 	// Query is the SQL statement used to fetch a list of resources.
-	Query string `yaml:"query" json:"query"`
+	Query string `yaml:"query" json:"query" validate:"required"`
 
 	// Pagination defines the pagination strategy and settings for the list query.
 	Pagination *Pagination `yaml:"pagination" json:"pagination"`
@@ -241,7 +245,7 @@ type EntitlementsQuery struct {
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
 
 	// Query is the SQL statement used to fetch dynamic entitlements.
-	Query string `yaml:"query" json:"query"`
+	Query string `yaml:"query" json:"query" validate:"required"`
 
 	// Pagination defines how pagination should be handled for the entitlements query.
 	Pagination *Pagination `yaml:"pagination" json:"pagination"`

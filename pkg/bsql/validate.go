@@ -1,0 +1,116 @@
+package bsql
+
+import (
+	"context"
+	"fmt"
+)
+
+func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) error {
+	if query == "" {
+		return fmt.Errorf("list query is required")
+	}
+
+	usedVars, err := s.queryVars(query)
+	if err != nil {
+		return fmt.Errorf("failed to parse list query for variables: %w", err)
+	}
+
+	if vars == nil {
+		vars = make(map[string]string)
+	}
+
+	for _, v := range usedVars {
+		if _, ok := vars[v]; !ok {
+			if v == "limit" || v == "offset" || v == "cursor" {
+				continue
+			}
+			return fmt.Errorf("list query uses variable '%s' which is not defined in vars", v)
+		}
+	}
+
+	return nil
+}
+
+func (l *ListQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+	return validateVarsInQuery(s, l.Query, l.Vars)
+}
+
+func (l *EntitlementsQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+	return validateVarsInQuery(s, l.Query, l.Vars)
+}
+
+func (l *EntitlementMapping) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+	if l.Provisioning == nil {
+		return nil
+	}
+
+	if l.Provisioning.Grant != nil {
+		for _, query := range l.Provisioning.Grant.Queries {
+			err := validateVarsInQuery(s, query, l.Provisioning.Vars)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if l.Provisioning.Revoke != nil {
+		for _, query := range l.Provisioning.Revoke.Queries {
+			err := validateVarsInQuery(s, query, l.Provisioning.Vars)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (l *GrantsQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+	return validateVarsInQuery(s, l.Query, l.Vars)
+}
+
+func (l *AccountProvisioning) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+	if l.Create != nil {
+		for _, query := range l.Create.Queries {
+			err := validateVarsInQuery(s, query, l.Create.Vars)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if l.Validate != nil {
+		err := validateVarsInQuery(s, l.Validate.Query, l.Validate.Vars)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (l *CredentialRotation) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+	if l.Update != nil {
+		for _, query := range l.Update.Queries {
+			err := validateVarsInQuery(s, query, l.Update.Vars)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (l *ActionConfig) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+	availableVars := make(map[string]string)
+	for k, v := range l.Vars {
+		availableVars[k] = v
+	}
+
+	for k, config := range l.Arguments {
+		availableVars[k] = config.Name
+	}
+
+	return validateVarsInQuery(s, l.Query, availableVars)
+}

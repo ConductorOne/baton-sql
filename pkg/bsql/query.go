@@ -95,6 +95,20 @@ func parseToken(token string) (*queryTokenOpts, error) {
 	return opts, nil
 }
 
+func (s *SQLSyncer) queryVars(query string) ([]string, error) {
+	result := make([]string, 0)
+
+	for _, token := range queryOptRegex.FindAllString(query, -1) {
+		opts, err := parseToken(token)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, opts.Key)
+	}
+
+	return result, nil
+}
+
 func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars map[string]any) (string, []interface{}, bool, error) {
 	if vars == nil {
 		vars = make(map[string]any)
