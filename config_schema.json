@@ -1,16 +1,6 @@
 {
   "fields": [
     {
-      "name": "config-path",
-      "description": "The file path to the baton-sql config to use",
-      "isRequired": true,
-      "stringField": {
-        "rules": {
-          "isRequired": true
-        }
-      }
-    },
-    {
       "name": "log-level",
       "description": "The log level: debug, info, warn, error",
       "isOps": true,
@@ -25,14 +15,16 @@
       "stringField": {}
     },
     {
-      "name": "otel-collector-endpoint",
-      "description": "The endpoint of the OpenTelemetry collector to send observability data to (used for both tracing and logging if specific endpoints are not provided)",
+      "name": "session-store-maximum-size",
+      "description": "The maximum size of the local in-memory session store cache in bytes.",
       "isOps": true,
-      "stringField": {}
+      "intField": {
+        "defaultValue": "15728640"
+      }
     },
     {
-      "name": "otel-collector-endpoint-tls-cert",
-      "description": "A PEM-encoded certificate to use as a CA for TLS connections to the OpenTelemetry collector",
+      "name": "otel-collector-endpoint",
+      "description": "The endpoint of the OpenTelemetry collector to send observability data to (used for both tracing and logging if specific endpoints are not provided)",
       "isOps": true,
       "stringField": {}
     },
@@ -43,14 +35,14 @@
       "stringField": {}
     },
     {
-      "name": "otel-collector-endpoint-tls-insecure",
-      "description": "Allow insecure connections to the OpenTelemetry collector",
+      "name": "otel-collector-endpoint-tls-cert",
+      "description": "A PEM-encoded certificate to use as a CA for TLS connections to the OpenTelemetry collector",
       "isOps": true,
-      "boolField": {}
+      "stringField": {}
     },
     {
-      "name": "otel-logging-disabled",
-      "description": "Disable OpenTelemetry logging",
+      "name": "otel-collector-endpoint-tls-insecure",
+      "description": "Allow insecure connections to the OpenTelemetry collector",
       "isOps": true,
       "boolField": {}
     },
@@ -61,11 +53,19 @@
       "boolField": {}
     },
     {
-      "name": "session-store-maximum-size",
-      "description": "The maximum size of the local in-memory session store cache in bytes.",
+      "name": "otel-logging-disabled",
+      "description": "Disable OpenTelemetry logging",
       "isOps": true,
-      "intField": {
-        "defaultValue": "15728640"
+      "boolField": {}
+    },
+    {
+      "name": "config-path",
+      "description": "The file path to the baton-sql config to use",
+      "isRequired": true,
+      "stringField": {
+        "rules": {
+          "isRequired": true
+        }
       }
     }
   ]
