@@ -254,19 +254,18 @@ resource_types:
     description: "A role within the Oracle system"
     # Settings for listing roles from the database
     list:
-      # SQL query to retrieve roles from custom roles table
+      # SQL query to retrieve roles
       query: |
         SELECT
-          id as "roleId",
-          role_name as "roleName"
+          ROLE
         FROM
-          ROLES
+          DBA_ROLES
       # Mapping of each query result to role resource fields
       map:
-        # Unique role identifier (using role name to match provisioning queries)
-        id: ".roleName"
+        # Unique role identifier (from the ROLE column)
+        id: ".ROLE"
         # Display name for the role (also from the ROLE column)
-        display_name: ".roleName"
+        display_name: ".ROLE"
         # Role description; left empty for further customization
         description: ""
         # Additional role-specific traits
@@ -274,7 +273,7 @@ resource_types:
           role:
             # Profile mapping for the role; assigns the role name
             profile:
-              role_name: ".roleName"
+              role_name: ".ROLE"
     # Static entitlements that can be assigned to a role resource
     static_entitlements:
       - id: "assigned" # Entitlement identifier for a standard role assignment
@@ -294,23 +293,17 @@ resource_types:
             principal_name: principal.ID # Identifier for the user (principal) receiving the role
             role_name: resource.ID # Identifier for the role resource
           grant:
+            # Indicates that no database transaction is needed for the grant operation
+            no_transaction: true
             queries:
               - |
-                INSERT INTO user_roles (user_id, role_id)
-                SELECT u.id, r.id
-                FROM users u, roles r
-                WHERE u.username = ?<principal_name>
-                  AND r.role_name = ?<role_name>
-                  AND NOT EXISTS (
-                    SELECT 1 FROM user_roles ur
-                    WHERE ur.user_id = u.id AND ur.role_id = r.id
-                  )
+                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
           revoke:
+            # Indicates that the revoke operation runs without a transaction
+            no_transaction: true
             queries:
               - |
-                DELETE FROM user_roles
-                WHERE user_id = (SELECT id FROM users WHERE username = ?<principal_name>)
-                  AND role_id = (SELECT id FROM roles WHERE role_name = ?<role_name>)
+                REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
       - id: "admin" # Entitlement identifier for role administration privileges
         # Dynamic display name for admin entitlement, appending ' Role Admin'
         display_name: "resource.DisplayName + ' Role Admin'"
@@ -327,35 +320,131 @@ resource_types:
             principal_name: principal.ID # Maps to the user receiving the admin rights
             role_name: resource.ID # Maps to the role being administered
           grant:
+            no_transaction: true
             queries:
               - |
-                INSERT INTO user_roles (user_id, role_id)
-                SELECT u.id, r.id
-                FROM users u, roles r
-                WHERE u.username = ?<principal_name>
-                  AND r.role_name = ?<role_name>
-                  AND NOT EXISTS (
-                    SELECT 1 FROM user_roles ur
-                    WHERE ur.user_id = u.id AND ur.role_id = r.id
-                  )
+                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted> WITH ADMIN OPTION
           revoke:
+            no_transaction: true
             queries:
               - |
-                DELETE FROM user_roles
-                WHERE user_id = (SELECT id FROM users WHERE username = ?<principal_name>)
-                  AND role_id = (SELECT id FROM roles WHERE role_name = ?<role_name>)
+                REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
+              - |
+                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
     # Dynamic grants based on SQL queries to associate users with roles
     grants:
       - query: |
           SELECT
-            u.username AS USERNAME,
-            r.role_name AS ROLE
+            GRANTEE AS USERNAME,
+            GRANTED_ROLE AS ROLE,
+            ADMIN_OPTION
           FROM
-            user_roles ur
-            INNER JOIN users u ON ur.user_id = u.id
-            INNER JOIN roles r ON ur.role_id = r.id
+            DBA_ROLE_PRIVS
+          WHERE
+            GRANTEE IN (SELECT USERNAME FROM DBA_USERS)
         map:
           - skip_if: ".ROLE != resource.ID" # Only map if the role from the query matches the current resource
             principal_id: ".USERNAME" # Map the username as the principal identifier
             principal_type: "user" # Define the principal type explicitly as "user"
             entitlement_id: "assigned" # Use the 'assigned' entitlement for standard role membership
+          - skip_if: ".ROLE != resource.ID || .ADMIN_OPTION != 'YES'" # Only map if role matches and admin option is enabled
+            principal_id: ".USERNAME" # Map the user's identifier
+            principal_type: "user" # Set the principal type as user
+            entitlement_id: "admin" # Apply the 'admin' entitlement for administrative privileges
+
+  # Configuration for "privilege" resources in Oracle
+  privilege:
+    # Display name for this privilege resource type
+    name: "Privilege"
+    # Description providing context on what an Oracle privilege is
+    description: "A privilege within the Oracle system"
+    # Settings for listing privileges from the database
+    list:
+      query: |
+        SELECT NAME
+        FROM sys.system_privilege_map
+        ORDER BY NAME
+      map:
+        # Unique identifier for the privilege (from the NAME column)
+        id: ".NAME"
+        # Display name for the privilege (derived from NAME)
+        display_name: ".NAME"
+        # Additional description field for the privilege (left blank)
+        description: ""
+    # Static entitlements for privileges that can be granted to users
+    static_entitlements:
+      - id: "assigned" # Entitlement identifier for a standard privilege assignment
+        display_name: "resource.DisplayName + ' privileges'" # Dynamic display name for an assigned privilege
+        description: "'Is granted the ' + resource.DisplayName + ' privilege'" # Explanation of the assignment
+        purpose: "assignment" # Denotes that this is an assignment action
+        grantable_to:
+          - "user" # Specifies that this entitlement can be applied to user resources
+        provisioning:
+          vars:
+            principal_name: principal.ID # Maps the user identifier
+            privilege_name: resource.ID # Maps the privilege identifier
+          grant:
+            no_transaction: true
+            queries:
+              - |
+                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted>
+          # Revoke section defines how to remove a privilege from a user
+          revoke:
+            # no_transaction indicates this should execute outside a transaction block
+            no_transaction: true
+            # SQL queries to execute when revoking the privilege
+            queries:
+              - |
+                REVOKE ?<privilege_name|unquoted> FROM ?<principal_name|unquoted>
+      - id: "admin" # Entitlement identifier for administrative control over privileges
+        display_name: "resource.DisplayName + ' Privilege Admin'" # Dynamic display name for admin privileges on the resource
+        description: "'Can grant the ' + resource.DisplayName + ' privilege to other users'" # Describes the ability to manage privileges
+        purpose: "permission" # Indicates this entitlement is a permission setting
+        grantable_to:
+          - "user" # This permission can be granted to user resources
+        provisioning:
+          vars:
+            principal_name: principal.ID # User identifier for provisioning
+            privilege_name: resource.ID # Privilege identifier for provisioning
+          grant:
+            no_transaction: true
+            queries:
+              - |
+                # The ?<privilege_name|unquoted> placeholder will be replaced with the raw value of the privilege_name variable
+                # defined in the vars section above. The |unquoted flag means the value will be inserted directly into the SQL
+                # rather than using a prepared statement parameter. This is needed for DDL statements like GRANT that require
+                # the actual identifier names.
+                #
+                # Similarly, ?<principal_name|unquoted> inserts the principal_name variable's value directly into the query.
+                # Without |unquoted, the values would be passed as bind parameters like: GRANT ? TO ? WITH ADMIN OPTION
+                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted> WITH ADMIN OPTION
+          revoke:
+            no_transaction: true
+            queries:
+              - |
+                REVOKE ?<privilege_name|unquoted> FROM ?<principal_name|unquoted>
+              - |
+                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted>
+    # Dynamic grants to map privilege assignments based on database queries
+    grants:
+      - query: |
+          SELECT
+              GRANTEE AS USERNAME,
+              PRIVILEGE,
+              ADMIN_OPTION
+          FROM
+              DBA_SYS_PRIVS
+          WHERE
+              GRANTEE IN (SELECT USERNAME FROM DBA_USERS)
+          ORDER BY
+              USERNAME,
+              PRIVILEGE
+        map:
+          - skip_if: ".PRIVILEGE != resource.ID" # Skip mapping if the privilege does not match the current resource
+            principal_id: ".USERNAME" # Map the query's USERNAME field as the principal ID
+            principal_type: "user" # Explicitly set the principal type to "user"
+            entitlement_id: "assigned" # Use the 'assigned' entitlement for standard privilege assignments
+          - skip_if: ".PRIVILEGE != resource.ID || .ADMIN_OPTION != 'YES'" # Condition for admin-level privilege mapping
+            principal_id: ".USERNAME" # Map the USERNAME to the principal ID
+            principal_type: "user" # Define the principal type as user
+            entitlement_id: "admin" # Apply the 'admin' entitlement when administrative rights are present

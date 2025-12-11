@@ -128,11 +128,12 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 			actionSchema.Arguments = append(actionSchema.Arguments, arg)
 		}
 
-		if actionCfg.Query == "" && len(actionCfg.Queries) == 0 {
-			return nil, fmt.Errorf("query or queries is required for action: %s", actionKey)
-		}
-
 		cfg := actionCfg
+
+		// Validate the action config
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid action config %s: %w", actionKey, err)
+		}
 
 		err := actionManager.RegisterAction(ctx, actionKey, actionSchema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 			return c.handleQueryAction(ctx, actionKey, cfg, args)

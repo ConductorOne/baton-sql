@@ -433,8 +433,8 @@ type ActionConfig struct {
 	Arguments     map[string]ArgumentConfig `yaml:"arguments,omitempty" json:"arguments,omitempty" validate:"omitempty,dive"`
 	Vars          map[string]string         `yaml:"vars,omitempty" json:"vars,omitempty" validate:"omitempty"`
 	NoTransaction bool                      `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty" validate:"omitempty"`
-	Query         string                    `yaml:"query,omitempty" json:"query,omitempty" validate:"omitempty"`
-	Queries       []string                  `yaml:"queries,omitempty" json:"queries,omitempty" validate:"omitempty,dive"`
+	Query         string                    `yaml:"query,omitempty" json:"query,omitempty" validate:"required_without=queries,excluded_with=queries,omitempty"`
+	Queries       []string                  `yaml:"queries,omitempty" json:"queries,omitempty" validate:"required_without=query,excluded_with=query,omitempty"`
 	// TODO: add validation?
 	//revive:disable-next-line:line-length-limit // because it's a long field
 	ActionType []string `yaml:"action_type,omitempty" json:"action_type,omitempty" validate:"omitempty,dive,oneof=unspecified dynamic account account_update_profile account_disable account_enable"`
@@ -452,6 +452,10 @@ type ArgumentConfig struct {
 func (a *ActionConfig) Validate() error {
 	if a.Query == "" && len(a.Queries) == 0 {
 		return status.Errorf(codes.InvalidArgument, "query or queries is required")
+	}
+
+	if a.Query != "" && len(a.Queries) > 0 {
+		return status.Errorf(codes.InvalidArgument, "cannot specify both query and queries; use one or the other")
 	}
 
 	for _, arg := range a.Arguments {
