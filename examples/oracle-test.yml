@@ -10,6 +10,100 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
+actions:
+  enable_user:
+    name: Enable User
+    description: Enable a disabled user account
+    action_type:
+      - account_enable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to enable
+    query: |
+      UPDATE users SET status = 'active' WHERE username = ?<user_id>
+  disable_user:
+    name: Disable User
+    description: Disable a user account
+    action_type:
+      - account_disable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to disable
+    query: |
+      UPDATE users SET status = 'disabled' WHERE username = ?<user_id>
+  update_user_attributes:
+    name: Update User Attributes
+    description: Update the attributes of a user. Only provide the attributes you want to update.
+    action_type:
+      - account
+      - account_update_profile
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to update
+      attrs:
+        name: Attributes
+        type: string_map
+        required: true
+        description: The updated attribute data (map of attribute names to values)
+      attrs_update_mask:
+        name: Attributes Update Mask
+        type: string_list
+        required: true
+        description: The attributes to update (list of attribute names from attrs to actually update)
+    vars:
+      # Map each attribute in the attrs argument to a variable and a flag to indicate if the attribute should be updated
+      manager_id: "'manager_id' in input.attrs ? input.attrs['manager_id'] : null"
+      update_manager_id: "'manager_id' in input.attrs_update_mask"
+      first_name: "'first_name' in input.attrs ? input.attrs['first_name'] : null"
+      update_first_name: "'first_name' in input.attrs_update_mask"
+      middle_name: "'middle_name' in input.attrs ? input.attrs['middle_name'] : null"
+      update_middle_name: "'middle_name' in input.attrs_update_mask"
+      last_name: "'last_name' in input.attrs ? input.attrs['last_name'] : null"
+      update_last_name: "'last_name' in input.attrs_update_mask"
+      display_name: "'display_name' in input.attrs ? input.attrs['display_name'] : null"
+      update_display_name: "'display_name' in input.attrs_update_mask"
+      job_title: "'job_title' in input.attrs ? input.attrs['job_title'] : null"
+      update_job_title: "'job_title' in input.attrs_update_mask"
+      department: "'department' in input.attrs ? input.attrs['department'] : null"
+      update_department: "'department' in input.attrs_update_mask"
+      division: "'division' in input.attrs ? input.attrs['division'] : null"
+      update_division: "'division' in input.attrs_update_mask"
+      company: "'company' in input.attrs ? input.attrs['company'] : null"
+      update_company: "'company' in input.attrs_update_mask"
+      employee_id: "'employee_id' in input.attrs ? input.attrs['employee_id'] : null"
+      update_employee_id: "'employee_id' in input.attrs_update_mask"
+      employee_number: "'employee_number' in input.attrs ? input.attrs['employee_number'] : null"
+      update_employee_number: "'employee_number' in input.attrs_update_mask"
+      employment_type: "'employment_type' in input.attrs ? input.attrs['employment_type'] : null"
+      update_employment_type: "'employment_type' in input.attrs_update_mask"
+    # We define the whole update logic with conditional attributes
+    query: |
+      UPDATE users
+      SET
+        manager_id = DECODE(?<update_manager_id>, '1', ?<manager_id>, manager_id),
+        attr_first_name = DECODE(?<update_first_name>, '1', ?<first_name>, attr_first_name),
+        attr_middle_name = DECODE(?<update_middle_name>, '1', ?<middle_name>, attr_middle_name),
+        attr_last_name = DECODE(?<update_last_name>, '1', ?<last_name>, attr_last_name),
+        attr_display_name = DECODE(?<update_display_name>, '1', ?<display_name>, attr_display_name),
+        attr_job_title = DECODE(?<update_job_title>, '1', ?<job_title>, attr_job_title),
+        attr_department = DECODE(?<update_department>, '1', ?<department>, attr_department),
+        attr_division = DECODE(?<update_division>, '1', ?<division>, attr_division),
+        attr_company = DECODE(?<update_company>, '1', ?<company>, attr_company),
+        employee_id = DECODE(?<update_employee_id>, '1', ?<employee_id>, employee_id),
+        attr_employee_number = DECODE(?<update_employee_number>, '1', ?<employee_number>, attr_employee_number),
+        attr_employment_type = DECODE(?<update_employment_type>, '1', ?<employment_type>, attr_employment_type)
+      WHERE
+        username = ?<user_id>
+
 # Definition of different resource types managed by this connector
 resource_types:
   # Configuration for "user" resources in Oracle
@@ -31,7 +125,17 @@ resource_types:
           account_type as "account_type",
           created_at as "created_at",
           last_login as "last_login",
-          manager_id as "manager_id"
+          manager_id as "manager_id",
+          attr_first_name as "attr_first_name",
+          attr_middle_name as "attr_middle_name",
+          attr_last_name as "attr_last_name",
+          attr_display_name as "attr_display_name",
+          attr_job_title as "attr_job_title",
+          attr_department as "attr_department",
+          attr_division as "attr_division",
+          attr_company as "attr_company",
+          attr_employee_number as "attr_employee_number",
+          attr_employment_type as "attr_employment_type"
         FROM
           users
         ORDER BY id
@@ -65,6 +169,25 @@ resource_types:
               - ".employee_id"
             # Last login timestamp mapping
             last_login: ".last_login"
+            # Manager information
+            manager_id: ".manager_id"
+
+            # Profile details for the user
+            profile:
+              user_id: ".id"
+              created_at: ".created_at"
+              last_login: ".last_login"
+              manager_id: ".manager_id"
+              attr_first_name: ".attr_first_name"
+              attr_middle_name: ".attr_middle_name"
+              attr_last_name: ".attr_last_name"
+              attr_display_name: ".attr_display_name"
+              attr_job_title: ".attr_job_title"
+              attr_department: ".attr_department"
+              attr_division: ".attr_division"
+              attr_company: ".attr_company"
+              attr_employee_number: ".attr_employee_number"
+              attr_employment_type: ".attr_employment_type"
     account_provisioning:
       # Schema definition for account creation form
       schema:

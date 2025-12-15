@@ -1,5 +1,6 @@
 -- Connect as SYSDBA to create test user and schema
-CONNECT sys/OraclePassword123@XE AS SYSDBA;
+-- Note: Oracle Express uses XEPDB1 as the pluggable database
+CONNECT sys/OraclePassword123@XEPDB1 AS SYSDBA;
 
 -- Create a test user for baton
 CREATE USER baton IDENTIFIED BY password 
@@ -14,9 +15,12 @@ GRANT CREATE SEQUENCE TO baton;
 GRANT CREATE VIEW TO baton;
 GRANT UNLIMITED TABLESPACE TO baton;
 GRANT DBA TO baton; -- For testing purposes, grant DBA access
+-- Grant access to DBA dictionary views (required for DBA_ROLES, DBA_USERS, etc.)
+GRANT SELECT ANY DICTIONARY TO baton;
+GRANT SELECT_CATALOG_ROLE TO baton;
 
 -- Connect as the test user
-CONNECT baton/password@XE;
+CONNECT baton/password@XEPDB1;
 
 -- Drop existing tables if they exist
 BEGIN
@@ -65,24 +69,35 @@ CREATE TABLE users (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_login TIMESTAMP,
   manager_id NUMBER,
-  password_hash VARCHAR2(255)
+  password_hash VARCHAR2(255),
+  -- Additional attributes with attr_ prefix for testing attribute mapping
+  attr_first_name VARCHAR2(100),
+  attr_middle_name VARCHAR2(100),
+  attr_last_name VARCHAR2(100),
+  attr_display_name VARCHAR2(255),
+  attr_job_title VARCHAR2(100),
+  attr_department VARCHAR2(100),
+  attr_division VARCHAR2(100),
+  attr_company VARCHAR2(100),
+  attr_employee_number VARCHAR2(50),
+  attr_employment_type VARCHAR2(50)
 );
 
--- Insert sample users
-INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
-('admin', 'admin@example.com', 'EMP001', 'active', 'human', TIMESTAMP '2025-01-01 12:00:00', TIMESTAMP '2025-04-15 09:30:00');
+-- Insert sample users with attr_* data
+INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login, attr_first_name, attr_middle_name, attr_last_name, attr_display_name, attr_job_title, attr_department, attr_division, attr_company, attr_employee_number, attr_employment_type) VALUES
+('admin', 'admin@example.com', 'EMP001', 'active', 'human', TIMESTAMP '2025-01-01 12:00:00', TIMESTAMP '2025-04-15 09:30:00', 'Admin', NULL, 'User', 'Admin User', 'System Administrator', 'IT', 'Technology', 'Example Corp', '10001', 'full_time');
 
-INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
-('jane.doe', 'jane.doe@example.com', 'EMP002', 'active', 'human', TIMESTAMP '2025-01-05 14:30:00', TIMESTAMP '2025-04-17 08:45:00');
+INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login, attr_first_name, attr_middle_name, attr_last_name, attr_display_name, attr_job_title, attr_department, attr_division, attr_company, attr_employee_number, attr_employment_type) VALUES
+('jane.doe', 'jane.doe@example.com', 'EMP002', 'active', 'human', TIMESTAMP '2025-01-05 14:30:00', TIMESTAMP '2025-04-17 08:45:00', 'Jane', 'Marie', 'Doe', 'Jane Doe', 'Software Engineer', 'Engineering', 'Technology', 'Example Corp', '10002', 'full_time');
 
-INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
-('john.smith', 'john.smith@example.com', 'EMP003', 'active', 'human', TIMESTAMP '2025-01-10 09:45:00', TIMESTAMP '2025-04-16 16:20:00');
+INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login, attr_first_name, attr_middle_name, attr_last_name, attr_display_name, attr_job_title, attr_department, attr_division, attr_company, attr_employee_number, attr_employment_type) VALUES
+('john.smith', 'john.smith@example.com', 'EMP003', 'active', 'human', TIMESTAMP '2025-01-10 09:45:00', TIMESTAMP '2025-04-16 16:20:00', 'John', 'Michael', 'Smith', 'John Smith', 'Product Manager', 'Product', 'Business', 'Example Corp', '10003', 'full_time');
 
-INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
-('service.acct', 'service@example.com', 'SVC001', 'active', 'service', TIMESTAMP '2025-02-01 08:00:00', NULL);
+INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login, attr_first_name, attr_middle_name, attr_last_name, attr_display_name, attr_job_title, attr_department, attr_division, attr_company, attr_employee_number, attr_employment_type) VALUES
+('service.acct', 'service@example.com', 'SVC001', 'active', 'service', TIMESTAMP '2025-02-01 08:00:00', NULL, NULL, NULL, NULL, 'Service Account', NULL, 'IT', 'Technology', 'Example Corp', '20001', 'service');
 
-INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login) VALUES
-('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', TIMESTAMP '2025-02-15 10:15:00', TIMESTAMP '2025-03-01 11:10:00');
+INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login, attr_first_name, attr_middle_name, attr_last_name, attr_display_name, attr_job_title, attr_department, attr_division, attr_company, attr_employee_number, attr_employment_type) VALUES
+('disabled.user', 'disabled@example.com', 'EMP004', 'disabled', 'human', TIMESTAMP '2025-02-15 10:15:00', TIMESTAMP '2025-03-01 11:10:00', 'Disabled', NULL, 'User', 'Disabled User', 'Former Employee', 'HR', 'Operations', 'Example Corp', '10004', 'contractor');
 
 -- Create roles table
 CREATE TABLE roles (

@@ -81,7 +81,7 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 
 	inputs := s.env.SyncInputsWithResource(nil, resource)
 
-	queryVars, err := s.prepareQueryVars(ctx, inputs, s.config.Entitlements.Vars)
+	queryVars, err := s.PrepareQueryVars(ctx, inputs, s.config.Entitlements.Vars)
 	if err != nil {
 		return nil, "", nil, err
 	}

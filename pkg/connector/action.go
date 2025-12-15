@@ -128,11 +128,12 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 			actionSchema.Arguments = append(actionSchema.Arguments, arg)
 		}
 
-		if actionCfg.Query == "" {
-			return nil, fmt.Errorf("query is required for action: %s", actionKey)
-		}
-
 		cfg := actionCfg
+
+		// Validate the action config
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid action config %s: %w", actionKey, err)
+		}
 
 		err := actionManager.RegisterAction(ctx, actionKey, actionSchema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 			return c.handleQueryAction(ctx, actionKey, cfg, args)
@@ -188,7 +189,28 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionKey string, act
 		}
 	}
 
-	queries := []string{actionCfg.Query}
+	// Wrap argMap in "input" container for CEL expressions
+	celInputs := map[string]any{
+		"input": argMap,
+	}
+
+	// Evaluate CEL expressions in vars to prepare query variables
+	queryVars, err := sqlSyncer.PrepareQueryVars(ctx, celInputs, actionCfg.Vars)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to prepare query vars: %w", err)
+	}
+
+	// Merge evaluated vars into argMap (queryVars take precedence)
+	for k, v := range queryVars {
+		argMap[k] = v
+	}
+
+	var queries []string
+	if len(actionCfg.Queries) > 0 {
+		queries = actionCfg.Queries
+	} else {
+		queries = []string{actionCfg.Query}
+	}
 	err = sqlSyncer.RunProvisioningQueries(ctx, queries, argMap, !actionCfg.NoTransaction)
 	if err != nil {
 		return nil, nil, err

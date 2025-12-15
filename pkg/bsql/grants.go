@@ -77,7 +77,7 @@ func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToke
 
 	inputs := s.env.SyncInputsWithResource(nil, resource)
 
-	queryVars, err := s.prepareQueryVars(ctx, inputs, grantConfig.Vars)
+	queryVars, err := s.PrepareQueryVars(ctx, inputs, grantConfig.Vars)
 	if err != nil {
 		return nil, "", err
 	}

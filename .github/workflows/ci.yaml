@@ -88,3 +88,18 @@ jobs:
           connector: ./baton-sql
           account-email: robert.tables2@example.com
           account-login: "robert'); drop table users; --"
+      - name: Run update user attributes action test
+        run: |
+          ./baton-sql --invoke-action=update_user_attributes --invoke-action-args='{
+            "user_id": "jane.doe",
+            "attrs": {
+              "first_name": "Janet",
+              "job_title": "Senior Software Engineer"
+            },
+            "attrs_update_mask": ["first_name", "job_title"]
+          }'
+      - name: Verify update user attributes action
+        run: |
+          psql -h localhost --user postgres -d batondb -t -c "SELECT attr_first_name, attr_job_title FROM users WHERE username = 'jane.doe'" | grep -q "Janet.*Senior Software Engineer"
+        env:
+          PGPASSWORD: secretpassword

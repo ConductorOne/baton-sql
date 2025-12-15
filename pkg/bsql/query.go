@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/google/cel-go/common/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
 
@@ -352,7 +354,7 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries []string
 	return nil
 }
 
-func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any, vars map[string]string) (map[string]any, error) {
+func (s *SQLSyncer) PrepareQueryVars(ctx context.Context, inputs map[string]any, vars map[string]string) (map[string]any, error) {
 	ret := make(map[string]any)
 
 	if inputs == nil {
@@ -362,7 +364,8 @@ func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any,
 	for k, v := range vars {
 		// Check if the value is a direct reference to an input field
 		if inputVal, exists := inputs[v]; exists {
-			ret[k] = inputVal
+			normalizedValue := s.normalizeValue(inputVal)
+			ret[k] = normalizedValue
 			continue
 		}
 
@@ -371,10 +374,59 @@ func (s *SQLSyncer) prepareQueryVars(ctx context.Context, inputs map[string]any,
 		if err != nil {
 			return nil, err
 		}
-		ret[k] = out
+		normalizedValue := s.normalizeValue(out)
+		ret[k] = normalizedValue
 	}
 
 	return ret, nil
+}
+
+// normalizeValue converts CEL null types and other special values to Go nil for SQL compatibility
+// Also converts booleans to strings ("1"/"0") for Oracle compatibility when used in DECODE statements.
+func (s *SQLSyncer) normalizeValue(val any) any {
+	if val == nil {
+		return nil
+	}
+
+	// Check for CEL null types
+	switch v := val.(type) {
+	case string:
+		return v
+	case types.Null:
+		// CEL Null type
+		return nil
+	case bool:
+		// Convert boolean to string for Oracle compatibility (Oracle DECODE expects CHAR)
+		// Only convert for Oracle to avoid breaking other databases
+		if s.dbEngine == database.Oracle {
+			result := "0"
+			if v {
+				result = "1"
+			}
+			return result
+		}
+		if s.dbEngine == database.MSSQL {
+			result := 0
+			if v {
+				result = 1
+			}
+			return result
+		}
+		// For other databases, return as-is (let the driver handle it)
+		return v
+	}
+
+	// Use reflection to check for CEL null value types
+	valType := reflect.TypeOf(val)
+	if valType != nil {
+		typeName := valType.String()
+		// Check for CEL null value types
+		if strings.Contains(typeName, "NullValue") || strings.Contains(typeName, "types.Null") {
+			return nil
+		}
+	}
+
+	return val
 }
 
 func (s *SQLSyncer) runQuery(

@@ -55,6 +55,9 @@ CREATE TABLE EmployeeData (
     Department NVARCHAR(100),
     JobTitle NVARCHAR(100),
     HireDate DATETIME2,
+    attr_first_name NVARCHAR(100),
+    attr_middle_name NVARCHAR(100),
+    attr_last_name NVARCHAR(100),
     FOREIGN KEY (UserID) REFERENCES Users(UserID) ON DELETE CASCADE
 );
 
@@ -114,14 +117,14 @@ INSERT INTO LoginHistory (UserID, LoginTime, LoginTimeText, LoginTimeAlt, LoginS
 ((SELECT UserID FROM Users WHERE Username = 'bob.developer'), '2025-04-18 14:30:00', '18-APR-2025 14:30:00', '18/04/2025 14:30:00', 1);
 
 -- Insert sample employee data
-INSERT INTO EmployeeData (UserID, EmployeeID, EmployeeNumber, EmployeeCode, Department, JobTitle, HireDate) VALUES
-((SELECT UserID FROM Users WHERE Username = 'admin'), 'EMP001', 10001, 'E-10001', 'IT', 'System Administrator', '2025-01-01'),
-((SELECT UserID FROM Users WHERE Username = 'jane.doe'), 'EMP002', 10002, 'E-10002', 'HR', 'HR Specialist', '2025-01-05'),
-((SELECT UserID FROM Users WHERE Username = 'john.smith'), 'EMP003', 10003, 'E-10003', 'Finance', 'Financial Analyst', '2025-01-10'),
-((SELECT UserID FROM Users WHERE Username = 'service.acct'), 'SVC001', 20001, 'S-20001', 'IT', 'Service Account', '2025-02-01'),
-((SELECT UserID FROM Users WHERE Username = 'disabled.user'), 'EMP004', 10004, 'E-10004', 'Marketing', 'Marketing Coordinator', '2025-02-15'),
-((SELECT UserID FROM Users WHERE Username = 'alice.manager'), 'EMP005', 10005, 'E-10005', 'IT', 'IT Manager', '2025-03-01'),
-((SELECT UserID FROM Users WHERE Username = 'bob.developer'), 'EMP006', 10006, 'E-10006', 'IT', 'Software Developer', '2025-03-05');
+INSERT INTO EmployeeData (UserID, EmployeeID, EmployeeNumber, EmployeeCode, Department, JobTitle, HireDate, attr_first_name, attr_middle_name, attr_last_name) VALUES
+((SELECT UserID FROM Users WHERE Username = 'admin'), 'EMP001', 10001, 'E-10001', 'IT', 'System Administrator', '2025-01-01', 'Admin', NULL, 'User'),
+((SELECT UserID FROM Users WHERE Username = 'jane.doe'), 'EMP002', 10002, 'E-10002', 'HR', 'HR Specialist', '2025-01-05', 'Jane', 'Marie', 'Doe'),
+((SELECT UserID FROM Users WHERE Username = 'john.smith'), 'EMP003', 10003, 'E-10003', 'Finance', 'Financial Analyst', '2025-01-10', 'John', 'Michael', 'Smith'),
+((SELECT UserID FROM Users WHERE Username = 'service.acct'), 'SVC001', 20001, 'S-20001', 'IT', 'Service Account', '2025-02-01', NULL, NULL, NULL),
+((SELECT UserID FROM Users WHERE Username = 'disabled.user'), 'EMP004', 10004, 'E-10004', 'Marketing', 'Marketing Coordinator', '2025-02-15', 'Disabled', NULL, 'User'),
+((SELECT UserID FROM Users WHERE Username = 'alice.manager'), 'EMP005', 10005, 'E-10005', 'IT', 'IT Manager', '2025-03-01', 'Alice', NULL, 'Manager'),
+((SELECT UserID FROM Users WHERE Username = 'bob.developer'), 'EMP006', 10006, 'E-10006', 'IT', 'Software Developer', '2025-03-05', 'Bob', NULL, 'Developer');
 
 -- Create indexes for better performance
 CREATE INDEX IX_Users_Username ON Users(Username);

@@ -27,6 +27,7 @@ func NewEnv(ctx context.Context) (*Env, error) {
 		cel.Variable("resource", cel.MapType(types.StringType, types.StringType)),
 		cel.Variable("principal", cel.MapType(types.StringType, types.StringType)),
 		cel.Variable("entitlement", cel.MapType(types.StringType, types.StringType)),
+		cel.Variable("input", cel.MapType(cel.StringType, cel.AnyType)), // For action vars and account provisioning
 	)
 
 	// CEL functions

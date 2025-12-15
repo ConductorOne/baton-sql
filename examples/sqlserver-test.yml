@@ -11,6 +11,98 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
+actions:
+  update_user_attributes:
+    name: Update User Attributes
+    description: Update the attributes of a user. Only provide the attributes you want to update.
+    action_type:
+      - account
+      - account_update_profile
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to update
+      attrs:
+        name: Attributes
+        type: string_map
+        required: true
+        description: The updated attribute data (map of attribute names to values)
+      attrs_update_mask:
+        name: Attributes Update Mask
+        type: string_list
+        required: true
+        description: The attributes to update (list of attribute names from attrs to actually update)
+    vars:
+      # Map each attribute in the attrs argument to a variable and a flag to indicate if the attribute should be updated
+      manager_id: "'manager_id' in input.attrs ? input.attrs['manager_id'] : null"
+      update_manager_id: "'manager_id' in input.attrs_update_mask"
+      first_name: "'first_name' in input.attrs ? input.attrs['first_name'] : null"
+      update_first_name: "'first_name' in input.attrs_update_mask"
+      middle_name: "'middle_name' in input.attrs ? input.attrs['middle_name'] : null"
+      update_middle_name: "'middle_name' in input.attrs_update_mask"
+      last_name: "'last_name' in input.attrs ? input.attrs['last_name'] : null"
+      update_last_name: "'last_name' in input.attrs_update_mask"
+      job_title: "'job_title' in input.attrs ? input.attrs['job_title'] : null"
+      update_job_title: "'job_title' in input.attrs_update_mask"
+      department: "'department' in input.attrs ? input.attrs['department'] : null"
+      update_department: "'department' in input.attrs_update_mask"
+      employee_id: "'employee_id' in input.attrs ? input.attrs['employee_id'] : null"
+      update_employee_id: "'employee_id' in input.attrs_update_mask"
+      employee_number: "'employee_number' in input.attrs ? input.attrs['employee_number'] : null"
+      update_employee_number: "'employee_number' in input.attrs_update_mask"
+    # We define the whole update logic with conditional attributes using CASE statements
+    # Note: SQL Server examples has the attributes split between Users and EmployeeData tables
+    queries: 
+      - |
+        -- Update Users table fields
+        UPDATE Users
+        SET
+          ManagerID = CASE 
+            WHEN ?<update_manager_id> = 1 THEN CAST(?<manager_id> AS INT)
+            ELSE ManagerID
+          END,
+          EmployeeID = CASE 
+            WHEN ?<update_employee_id> = 1 THEN ?<employee_id>
+            ELSE EmployeeID
+          END
+        WHERE Username = ?<user_id>;
+      - |
+        -- Update EmployeeData table fields
+        UPDATE ed
+        SET
+          attr_first_name = CASE 
+            WHEN ?<update_first_name> = 1 THEN ?<first_name>
+            ELSE ed.attr_first_name
+          END,
+          attr_middle_name = CASE 
+            WHEN ?<update_middle_name> = 1 THEN ?<middle_name>
+            ELSE ed.attr_middle_name
+          END,
+          attr_last_name = CASE 
+            WHEN ?<update_last_name> = 1 THEN ?<last_name>
+            ELSE ed.attr_last_name
+          END,
+          JobTitle = CASE 
+            WHEN ?<update_job_title> = 1 THEN ?<job_title>
+            ELSE ed.JobTitle
+          END,
+          Department = CASE 
+            WHEN ?<update_department> = 1 THEN ?<department>
+            ELSE ed.Department
+          END,
+          EmployeeNumber = CASE 
+            WHEN ?<update_employee_number> = 1 THEN CAST(?<employee_number> AS INT)
+            ELSE ed.EmployeeNumber
+          END
+        FROM (
+          SELECT TOP 1 EmployeeDataID, UserID
+          FROM EmployeeData
+          WHERE UserID = (SELECT UserID FROM Users WHERE Username = ?<user_id>)
+        ) ed_sub
+        INNER JOIN EmployeeData ed ON ed.EmployeeDataID = ed_sub.EmployeeDataID
+
 # Definition of different resource types managed by this connector
 resource_types:
   # Configuration for "user" resources in SQL Server
@@ -40,11 +132,19 @@ resource_types:
           END as last_login,
           u.ManagerID as manager_id,
           m.Username as manager_username,
-          m.Email as manager_email
+          m.Email as manager_email,
+          ed.attr_first_name,
+          ed.attr_middle_name,
+          ed.attr_last_name,
+          ed.JobTitle as attr_job_title,
+          ed.Department as attr_department,
+          ed.EmployeeNumber as attr_employee_number
         FROM
           Users u
         LEFT JOIN 
           Users m ON u.ManagerID = m.UserID
+        LEFT JOIN
+          EmployeeData ed ON u.UserID = ed.UserID
         ORDER BY u.UserID
         OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
       # Pagination configuration (using offset for SQL Server)
@@ -79,6 +179,12 @@ resource_types:
               manager_id: ".manager_id"
               manager_username: ".manager_username"
               manager_email: ".manager_email"
+              attr_first_name: ".attr_first_name"
+              attr_middle_name: ".attr_middle_name"
+              attr_last_name: ".attr_last_name"
+              attr_job_title: ".attr_job_title"
+              attr_department: ".attr_department"
+              attr_employee_number: ".attr_employee_number != null ? string(.attr_employee_number) : ''"
 
     # Account provisioning configuration for creating new user accounts
     account_provisioning:
@@ -130,9 +236,16 @@ resource_types:
             END as last_login,
             u.ManagerID as manager_id,
             m.Username as manager_username,
-            m.Email as manager_email
+            m.Email as manager_email,
+            ed.attr_first_name,
+            ed.attr_middle_name,
+            ed.attr_last_name,
+            ed.JobTitle as attr_job_title,
+            ed.Department as attr_department,
+            ed.EmployeeNumber as attr_employee_number
           FROM Users u
           LEFT JOIN Users m ON u.ManagerID = m.UserID
+          LEFT JOIN EmployeeData ed ON u.UserID = ed.UserID
           WHERE u.Username = ?<username>
       # Account creation configuration
       create:
