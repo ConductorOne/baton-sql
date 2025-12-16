@@ -139,7 +139,7 @@ func (s *userSyncer) CreateAccount(
 	previousAccountResource, err := s.validateAccount(ctx, provisioningConfig, queryInputs)
 	if err != nil {
 		if !errors.Is(err, ErrUnableFindResourceProvisioning) {
-			return nil, nil, nil, fmt.Errorf("failed to validate created account: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to check existing account: %w", err)
 		}
 	}
 
@@ -164,7 +164,8 @@ func (s *userSyncer) CreateAccount(
 	}
 
 	response := &v2.CreateAccountResponse_SuccessResult{
-		Resource: accountResource,
+		IsCreateAccountResult: true,
+		Resource:              accountResource,
 	}
 
 	return response, plaintextDataList, nil, nil
