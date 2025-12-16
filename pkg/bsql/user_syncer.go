@@ -148,7 +148,7 @@ func (s *userSyncer) CreateAccount(
 
 		return &v2.CreateAccountResponse_SuccessResult{
 			Resource: previousAccountResource,
-		}, plaintextDataList, nil, nil
+		}, nil, nil, nil
 	}
 
 	// Execute account creation queries
