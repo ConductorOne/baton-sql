@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var ErrUnableFindResourceProvisioning = errors.New("unable to find resource for account provisioning")
+
 // getProvisioningConfig fetches the provisioning config for the given entitlement if it exists.
 func (s *SQLSyncer) getProvisioningConfig(ctx context.Context, entitlementID string) (*EntitlementProvisioning, bool) {
 	l := ctxzap.Extract(ctx)
@@ -180,7 +182,7 @@ func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *Ac
 	}
 
 	if ret == nil {
-		return nil, fmt.Errorf("unable to find resource for account provisioning")
+		return nil, ErrUnableFindResourceProvisioning
 	}
 
 	return ret, nil
