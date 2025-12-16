@@ -147,7 +147,7 @@ func (s *userSyncer) CreateAccount(
 		logger.Info("account resource is already created", zap.String("resource_id", previousAccountResource.GetId().GetResource()))
 
 		return &v2.CreateAccountResponse_SuccessResult{
-			Resource: nil,
+			Resource: previousAccountResource,
 		}, plaintextDataList, nil, nil
 	}
 
