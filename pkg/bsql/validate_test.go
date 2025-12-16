@@ -40,7 +40,7 @@ func TestValidate(t *testing.T) {
 
 			syncer := &SQLSyncer{}
 
-			err := tc.validator.StaticValidate(ctx, syncer)
+			err := tc.validator.staticValidate(ctx, syncer)
 			if tc.expectErr {
 				require.Error(t, err)
 			} else {

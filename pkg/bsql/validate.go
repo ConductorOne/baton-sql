@@ -32,15 +32,39 @@ func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) err
 	return nil
 }
 
-func (l *ListQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *ListQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	return validateVarsInQuery(s, l.Query, l.Vars)
 }
 
-func (l *EntitlementsQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *EntitlementsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	for _, mapping := range l.Map {
+		if mapping.Provisioning == nil {
+			continue
+		}
+
+		if mapping.Provisioning.Grant != nil {
+			for _, query := range mapping.Provisioning.Grant.Queries {
+				err := validateVarsInQuery(s, query, mapping.Provisioning.Vars)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if mapping.Provisioning.Revoke != nil {
+			for _, query := range mapping.Provisioning.Revoke.Queries {
+				err := validateVarsInQuery(s, query, mapping.Provisioning.Vars)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	return validateVarsInQuery(s, l.Query, l.Vars)
 }
 
-func (l *EntitlementMapping) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if l.Provisioning == nil {
 		return nil
 	}
@@ -66,11 +90,11 @@ func (l *EntitlementMapping) StaticValidate(ctx context.Context, s *SQLSyncer) e
 	return nil
 }
 
-func (l *GrantsQuery) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *GrantsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	return validateVarsInQuery(s, l.Query, l.Vars)
 }
 
-func (l *AccountProvisioning) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *AccountProvisioning) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if l.Credentials == nil {
 		return errors.New("no credentials defined")
 	}
@@ -118,7 +142,7 @@ func (l *AccountProvisioning) StaticValidate(ctx context.Context, s *SQLSyncer) 
 	return nil
 }
 
-func (l *CredentialRotation) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *CredentialRotation) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if l.Update != nil {
 		for _, query := range l.Update.Queries {
 			err := validateVarsInQuery(s, query, l.Update.Vars)
@@ -131,7 +155,7 @@ func (l *CredentialRotation) StaticValidate(ctx context.Context, s *SQLSyncer) e
 	return nil
 }
 
-func (l *ActionConfig) StaticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *ActionConfig) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	availableVars := make(map[string]string)
 	for k, v := range l.Vars {
 		availableVars[k] = v

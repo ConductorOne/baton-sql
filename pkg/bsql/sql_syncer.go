@@ -70,22 +70,24 @@ func NewActionSyncer(ctx context.Context, db *sql.DB, dbEngine database.DbEngine
 	}, nil
 }
 
-func (s *SQLSyncer) validateInternal(ctx context.Context, anyV any) error {
-	if anyV == nil {
+func (s *SQLSyncer) validateInternal(ctx context.Context, validator staticValidator) error {
+	if validator == nil {
 		return nil
 	}
 
-	if v, ok := anyV.(staticValidator); ok {
-		err := v.StaticValidate(ctx, s)
-		if err != nil {
-			return err
-		}
+	err := validator.staticValidate(ctx, s)
+	if err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func (s *SQLSyncer) validateFormatErr(field string, err error) error {
+	if s.resourceType != nil {
+		return fmt.Errorf("validation error for resource type %q, field %q: %w", s.resourceType.Id, field, err)
+	}
+
 	rsTypeId := s.resourceType.Id
 
 	return fmt.Errorf("validation error for resource type %q, field %q: %w", rsTypeId, field, err)
@@ -112,14 +114,18 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 	}
 
 	if s.config.StaticEntitlements != nil {
-		if err := s.validateInternal(ctx, s.config.StaticEntitlements); err != nil {
-			return s.validateFormatErr("static_entitlements", err)
+		for _, entitlement := range s.config.StaticEntitlements {
+			if err := s.validateInternal(ctx, entitlement); err != nil {
+				return s.validateFormatErr("static_entitlements", err)
+			}
 		}
 	}
 
 	if s.config.Grants != nil {
-		if err := s.validateInternal(ctx, s.config.Grants); err != nil {
-			return s.validateFormatErr("grants", err)
+		for _, grant := range s.config.Grants {
+			if err := s.validateInternal(ctx, grant); err != nil {
+				return s.validateFormatErr("grants", err)
+			}
 		}
 	}
 
