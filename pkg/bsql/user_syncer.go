@@ -136,6 +136,21 @@ func (s *userSyncer) CreateAccount(
 		return nil, nil, nil, err
 	}
 
+	previousAccountResource, err := s.validateAccount(ctx, provisioningConfig, queryInputs)
+	if err != nil {
+		if !errors.Is(err, ErrUnableFindResourceProvisioning) {
+			return nil, nil, nil, fmt.Errorf("failed to check existing account: %w", err)
+		}
+	}
+
+	if previousAccountResource != nil {
+		logger.Info("account resource is already created", zap.String("resource_id", previousAccountResource.GetId().GetResource()))
+
+		return &v2.CreateAccountResponse_SuccessResult{
+			Resource: previousAccountResource,
+		}, nil, nil, nil
+	}
+
 	// Execute account creation queries
 	useTransaction := !provisioningConfig.Create.NoTransaction
 	if err := s.RunProvisioningQueries(ctx, provisioningConfig.Create.Queries, queryInputs, useTransaction); err != nil {
@@ -149,7 +164,8 @@ func (s *userSyncer) CreateAccount(
 	}
 
 	response := &v2.CreateAccountResponse_SuccessResult{
-		Resource: accountResource,
+		IsCreateAccountResult: true,
+		Resource:              accountResource,
 	}
 
 	return response, plaintextDataList, nil, nil
