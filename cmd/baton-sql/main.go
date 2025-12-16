@@ -47,7 +47,19 @@ func main() {
 func getConnector(ctx context.Context, v *viper.Viper) (types.ConnectorServer, error) {
 	l := ctxzap.Extract(ctx)
 
-	cb, err := connector.New(ctx, v.GetString("config-path"))
+	var opts []connector.NewOption
+
+	// Apply app-name override if provided
+	if appName := v.GetString("app-name"); appName != "" {
+		opts = append(opts, connector.WithAppName(appName))
+	}
+
+	// Apply app-description override if provided
+	if appDescription := v.GetString("app-description"); appDescription != "" {
+		opts = append(opts, connector.WithAppDescription(appDescription))
+	}
+
+	cb, err := connector.New(ctx, v.GetString("config-path"), opts...)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, err
