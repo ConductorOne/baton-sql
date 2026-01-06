@@ -84,13 +84,11 @@ func (s *SQLSyncer) validateInternal(ctx context.Context, validator staticValida
 }
 
 func (s *SQLSyncer) validateFormatErr(field string, err error) error {
-	if s.resourceType != nil {
-		return fmt.Errorf("validation error for resource type %q, field %q: %w", s.resourceType.Id, field, err)
+	if s.resourceType == nil {
+		return fmt.Errorf("validation error for action config, field %q: %w", field, err)
 	}
 
-	rsTypeId := s.resourceType.Id
-
-	return fmt.Errorf("validation error for resource type %q, field %q: %w", rsTypeId, field, err)
+	return fmt.Errorf("validation error for resource type %q, field %q: %w", s.resourceType.Id, field, err)
 }
 
 func (s *SQLSyncer) Validate(ctx context.Context) error {
