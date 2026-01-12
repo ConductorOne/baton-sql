@@ -318,7 +318,7 @@ resource_types:
         queries:
           # Update the user with generated password (PostgreSQL style)
           - |
-            UPDATE users SET password_hash = crypt(?<password>, gen_salt('bf')) WHERE username = ?<resource_id>
+            UPDATE users SET password_hash = crypt(?<password>, gen_salt('bf')) WHERE username = ?<username>
 
   # Configuration for "role" resources
   role:

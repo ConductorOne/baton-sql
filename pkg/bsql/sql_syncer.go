@@ -3,6 +3,7 @@ package bsql
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
@@ -67,4 +68,76 @@ func NewActionSyncer(ctx context.Context, db *sql.DB, dbEngine database.DbEngine
 		env:          celEnv,
 		fullConfig:   fullConfig,
 	}, nil
+}
+
+func (s *SQLSyncer) validateInternal(ctx context.Context, validator staticValidator) error {
+	if validator == nil {
+		return nil
+	}
+
+	err := validator.staticValidate(ctx, s)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *SQLSyncer) validateFormatErr(field string, err error) error {
+	if s.resourceType == nil {
+		return fmt.Errorf("validation error for action config, field %q: %w", field, err)
+	}
+
+	return fmt.Errorf("validation error for resource type %q, field %q: %w", s.resourceType.Id, field, err)
+}
+
+func (s *SQLSyncer) Validate(ctx context.Context) error {
+	if s.fullConfig.Actions != nil {
+		for key, action := range s.fullConfig.Actions {
+			err := s.validateInternal(ctx, &action)
+			if err != nil {
+				return s.validateFormatErr(fmt.Sprintf("Action[%s]", key), err)
+			}
+		}
+	}
+
+	if err := s.validateInternal(ctx, s.config.List); err != nil {
+		return s.validateFormatErr("list", err)
+	}
+
+	if s.config.Entitlements != nil {
+		if err := s.validateInternal(ctx, s.config.Entitlements); err != nil {
+			return s.validateFormatErr("entitlements", err)
+		}
+	}
+
+	if s.config.StaticEntitlements != nil {
+		for _, entitlement := range s.config.StaticEntitlements {
+			if err := s.validateInternal(ctx, entitlement); err != nil {
+				return s.validateFormatErr("static_entitlements", err)
+			}
+		}
+	}
+
+	if s.config.Grants != nil {
+		for _, grant := range s.config.Grants {
+			if err := s.validateInternal(ctx, grant); err != nil {
+				return s.validateFormatErr("grants", err)
+			}
+		}
+	}
+
+	if s.config.AccountProvisioning != nil {
+		if err := s.validateInternal(ctx, s.config.AccountProvisioning); err != nil {
+			return s.validateFormatErr("account_provisioning", err)
+		}
+	}
+
+	if s.config.CredentialRotation != nil {
+		if err := s.validateInternal(ctx, s.config.CredentialRotation); err != nil {
+			return s.validateFormatErr("credential_rotation", err)
+		}
+	}
+
+	return nil
 }

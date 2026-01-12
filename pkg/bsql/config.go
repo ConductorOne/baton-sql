@@ -13,6 +13,10 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
 
+type staticValidator interface {
+	staticValidate(ctx context.Context, s *SQLSyncer) error
+}
+
 // Config represents the overall connector configuration.
 type Config struct {
 	// AppName is the application name that identifies the connector.

@@ -358,6 +358,23 @@ func Test_parseQueryOpts(t *testing.T) {
 			false,
 			false,
 		},
+		{
+			"Test sql injection attempt with unquoted table name var substitution",
+			database.MySQL,
+			args{
+				t.Context(),
+				"SELECT * FROM ?<table_name|unquoted> WHERE test = ?<foo>",
+				nil,
+				map[string]any{
+					"table_name": `example_table; DROP TABLE users; --`,
+					"foo":        "test example",
+				},
+			},
+			"SELECT * FROM example_tableDROPTABLEusers WHERE test = ?",
+			[]interface{}{"test example"},
+			false,
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

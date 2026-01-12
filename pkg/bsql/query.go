@@ -32,6 +32,12 @@ type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+var identSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+
+func SanitizeIdentifier(s string) string {
+	return identSanitizer.ReplaceAllString(s, "")
+}
+
 type paginationContext struct {
 	Strategy   string
 	Limit      int64
@@ -97,6 +103,20 @@ func parseToken(token string) (*queryTokenOpts, error) {
 	return opts, nil
 }
 
+func (s *SQLSyncer) queryVars(query string) ([]string, error) {
+	result := make([]string, 0)
+
+	for _, token := range queryOptRegex.FindAllString(query, -1) {
+		opts, err := parseToken(token)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, opts.Key)
+	}
+
+	return result, nil
+}
+
 func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars map[string]any) (string, []interface{}, bool, error) {
 	if vars == nil {
 		vars = make(map[string]any)
@@ -137,7 +157,7 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 
 		// If the value is unquoted, directly insert the value as a string
 		if opts.Unquoted {
-			return fmt.Sprintf("%v", val)
+			return SanitizeIdentifier(fmt.Sprintf("%v", val))
 		}
 
 		qArgs = append(qArgs, val)
@@ -282,7 +302,7 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 		}
 
 		if opts.Unquoted {
-			return fmt.Sprintf("%v", v)
+			return SanitizeIdentifier(fmt.Sprintf("%v", v))
 		}
 
 		qArgs = append(qArgs, v)
