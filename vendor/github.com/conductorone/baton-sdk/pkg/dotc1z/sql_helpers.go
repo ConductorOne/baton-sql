@@ -194,18 +194,10 @@ func listConnectorObjects[T proto.Message](ctx context.Context, c *C1File, table
 	case reqSyncID != "":
 		q = q.Where(goqu.C("sync_id").Eq(reqSyncID))
 	default:
-		var latestSyncRun *syncRun
-		var err error
-		latestSyncRun, err = c.getFinishedSync(ctx, 0, connectorstore.SyncTypeFull)
+		// Use cached sync run to avoid N+1 queries during pagination
+		latestSyncRun, err := c.getCachedViewSyncRun(ctx)
 		if err != nil {
 			return nil, "", err
-		}
-
-		if latestSyncRun == nil {
-			latestSyncRun, err = c.getLatestUnfinishedSync(ctx, connectorstore.SyncTypeAny)
-			if err != nil {
-				return nil, "", err
-			}
 		}
 
 		if latestSyncRun != nil {
@@ -287,7 +279,8 @@ func listConnectorObjects[T proto.Message](ctx context.Context, c *C1File, table
 	return ret, nextPageToken, nil
 }
 
-var protoMarshaler = proto.MarshalOptions{Deterministic: false}
+// This is required for sync diffs to work.  Its not much slower.
+var protoMarshaler = proto.MarshalOptions{Deterministic: true}
 
 // prepareSingleConnectorObjectRow processes a single message and returns the prepared record.
 func prepareSingleConnectorObjectRow[T proto.Message](
@@ -352,8 +345,8 @@ func prepareConnectorObjectRowsParallel[T proto.Message](
 
 	protoMarshallers := make([]proto.MarshalOptions, numWorkers)
 	for i := range numWorkers {
-		// Don't enable deterministic marshaling, as it sorts keys in lexicographical order which hurts performance.
-		protoMarshallers[i] = proto.MarshalOptions{}
+		// Deterministic marshaling is required for sync diffs to work.  Its not much slower.
+		protoMarshallers[i] = proto.MarshalOptions{Deterministic: true}
 	}
 
 	rows := make([]*goqu.Record, len(msgs))

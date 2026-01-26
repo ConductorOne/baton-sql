@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/doug-martin/goqu/v9"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -45,12 +47,22 @@ type C1File struct {
 	pragmas            []pragma
 	readOnly           bool
 	encoderConcurrency int
+	closed             bool
+	closedMu           sync.Mutex
+
+	// Cached sync run for listConnectorObjects (avoids N+1 queries)
+	cachedViewSyncRun *syncRun
+	cachedViewSyncMu  sync.Mutex
+	cachedViewSyncErr error
 
 	// Slow query tracking
 	slowQueryLogTimes     map[string]time.Time
 	slowQueryLogTimesMu   sync.Mutex
 	slowQueryThreshold    time.Duration
 	slowQueryLogFrequency time.Duration
+
+	// Sync cleanup settings
+	syncLimit int
 }
 
 var _ connectorstore.Writer = (*C1File)(nil)
@@ -81,6 +93,14 @@ func WithC1FReadOnly(readOnly bool) C1FOption {
 func WithC1FEncoderConcurrency(concurrency int) C1FOption {
 	return func(o *C1File) {
 		o.encoderConcurrency = concurrency
+	}
+}
+
+// WithC1FSyncCountLimit sets the number of syncs to keep during cleanup.
+// If not set, defaults to 2 (or BATON_KEEP_SYNC_COUNT env var if set).
+func WithC1FSyncCountLimit(limit int) C1FOption {
+	return func(o *C1File) {
+		o.syncLimit = limit
 	}
 }
 
@@ -130,7 +150,9 @@ type c1zOptions struct {
 	decoderOptions     []DecoderOption
 	readOnly           bool
 	encoderConcurrency int
+	syncLimit          int
 }
+
 type C1ZOption func(*c1zOptions)
 
 // WithTmpDir sets the temporary directory to extract the c1z file to.
@@ -170,6 +192,14 @@ func WithEncoderConcurrency(concurrency int) C1ZOption {
 	}
 }
 
+// WithSyncLimit sets the number of syncs to keep during cleanup.
+// If not set, defaults to 2 (or BATON_KEEP_SYNC_COUNT env var if set).
+func WithSyncLimit(limit int) C1ZOption {
+	return func(o *c1zOptions) {
+		o.syncLimit = limit
+	}
+}
+
 // Returns a new C1File instance with its state stored at the provided filename.
 func NewC1ZFile(ctx context.Context, outputFilePath string, opts ...C1ZOption) (*C1File, error) {
 	ctx, span := tracer.Start(ctx, "NewC1ZFile")
@@ -182,7 +212,7 @@ func NewC1ZFile(ctx context.Context, outputFilePath string, opts ...C1ZOption) (
 		opt(options)
 	}
 
-	dbFilePath, err := loadC1z(outputFilePath, options.tmpDir, options.decoderOptions...)
+	dbFilePath, _, err := decompressC1z(outputFilePath, options.tmpDir, options.decoderOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -198,6 +228,9 @@ func NewC1ZFile(ctx context.Context, outputFilePath string, opts ...C1ZOption) (
 		return nil, fmt.Errorf("encoder concurrency must be greater than 0")
 	}
 	c1fopts = append(c1fopts, WithC1FEncoderConcurrency(options.encoderConcurrency))
+	if options.syncLimit > 0 {
+		c1fopts = append(c1fopts, WithC1FSyncCountLimit(options.syncLimit))
+	}
 
 	c1File, err := NewC1File(ctx, dbFilePath, c1fopts...)
 	if err != nil {
@@ -220,11 +253,45 @@ func cleanupDbDir(dbFilePath string, err error) error {
 var ErrReadOnly = errors.New("c1z: read only mode")
 
 // Close ensures that the sqlite database is flushed to disk, and if any changes were made we update the original database
-// with our changes.
-func (c *C1File) Close() error {
+// with our changes. The provided context is used for the WAL checkpoint operation.
+func (c *C1File) Close(ctx context.Context) error {
 	var err error
 
+	c.closedMu.Lock()
+	defer c.closedMu.Unlock()
+	if c.closed {
+		l := ctxzap.Extract(ctx)
+		l.Warn("close called on already-closed c1file", zap.String("db_path", c.dbFilePath))
+		return nil
+	}
+
 	if c.rawDb != nil {
+		// CRITICAL: Force a full WAL checkpoint before closing the database.
+		// This ensures all WAL data is written back to the main database file
+		// and the writes are synced to disk. Without this, on filesystems with
+		// aggressive caching (like ZFS with large ARC), the subsequent saveC1z()
+		// read could see stale data because the checkpoint writes may still be
+		// in kernel buffers.
+		//
+		// TRUNCATE mode: checkpoint as many frames as possible, then truncate
+		// the WAL file to zero bytes. This guarantees all data is in the main
+		// database file before we read it for compression.
+		if c.dbUpdated && !c.readOnly {
+			_, err = c.rawDb.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
+			if err != nil {
+				l := ctxzap.Extract(ctx)
+				// Checkpoint failed - log and continue. The subsequent Close()
+				// will attempt a passive checkpoint. If that also fails, we'll
+				// get an error from Close() or saveC1z() will read stale data.
+				// We log here for debugging but don't fail because:
+				// 1. Close() will still attempt its own checkpoint
+				// 2. The error might be transient (busy)
+				l.Warn("WAL checkpoint failed before close",
+					zap.Error(err),
+					zap.String("db_path", c.dbFilePath))
+			}
+		}
+
 		err = c.rawDb.Close()
 		if err != nil {
 			return cleanupDbDir(c.dbFilePath, err)
@@ -244,7 +311,13 @@ func (c *C1File) Close() error {
 		}
 	}
 
-	return cleanupDbDir(c.dbFilePath, err)
+	err = cleanupDbDir(c.dbFilePath, err)
+	if err != nil {
+		return err
+	}
+	c.closed = true
+
+	return nil
 }
 
 // init ensures that the database has all of the required schema.
@@ -260,6 +333,19 @@ func (c *C1File) init(ctx context.Context) error {
 	err = c.InitTables(ctx)
 	if err != nil {
 		return err
+	}
+
+	if c.readOnly {
+		// Disable journaling in read only mode, since we're not writing to the database.
+		_, err = c.db.ExecContext(ctx, "PRAGMA journal_mode = OFF")
+		if err != nil {
+			return err
+		}
+		// Disable synchronous writes in read only mode, since we're not writing to the database.
+		_, err = c.db.ExecContext(ctx, "PRAGMA synchronous = OFF")
+		if err != nil {
+			return err
+		}
 	}
 
 	for _, pragma := range c.pragmas {

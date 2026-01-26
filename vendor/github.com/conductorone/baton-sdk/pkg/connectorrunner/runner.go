@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/conductorone/baton-sdk/pkg/bid"
+	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/synccompactor"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -280,14 +281,20 @@ type revokeConfig struct {
 }
 
 type createAccountConfig struct {
-	login   string
-	email   string
-	profile *structpb.Struct
+	login          string
+	email          string
+	profile        *structpb.Struct
+	resourceTypeID string // Optional: if set, creates an account for the specified resource type.
 }
 
 type invokeActionConfig struct {
-	action string
-	args   *structpb.Struct
+	action         string
+	resourceTypeID string // Optional: if set, invokes a resource-scoped action
+	args           *structpb.Struct
+}
+
+type listActionSchemasConfig struct {
+	resourceTypeID string // Optional: filter by resource type
 }
 
 type deleteResourceConfig struct {
@@ -318,38 +325,41 @@ type syncCompactorConfig struct {
 }
 
 type runnerConfig struct {
-	rlCfg                               *ratelimitV1.RateLimiterConfig
-	rlDescriptors                       []*ratelimitV1.RateLimitDescriptors_Entry
-	onDemand                            bool
-	c1zPath                             string
-	clientAuth                          bool
-	clientID                            string
-	clientSecret                        string
-	provisioningEnabled                 bool
-	ticketingEnabled                    bool
-	actionsEnabled                      bool
-	grantConfig                         *grantConfig
-	revokeConfig                        *revokeConfig
-	eventFeedConfig                     *eventStreamConfig
-	tempDir                             string
-	createAccountConfig                 *createAccountConfig
-	invokeActionConfig                  *invokeActionConfig
-	deleteResourceConfig                *deleteResourceConfig
-	rotateCredentialsConfig             *rotateCredentialsConfig
-	createTicketConfig                  *createTicketConfig
-	bulkCreateTicketConfig              *bulkCreateTicketConfig
-	listTicketSchemasConfig             *listTicketSchemasConfig
-	getTicketConfig                     *getTicketConfig
-	syncDifferConfig                    *syncDifferConfig
-	syncCompactorConfig                 *syncCompactorConfig
-	skipFullSync                        bool
-	targetedSyncResourceIDs             []string
-	externalResourceC1Z                 string
-	externalResourceEntitlementIdFilter string
-	skipEntitlementsAndGrants           bool
-	skipGrants                          bool
-	sessionStoreEnabled                 bool
-	syncResourceTypeIDs                 []string
+	rlCfg                                 *ratelimitV1.RateLimiterConfig
+	rlDescriptors                         []*ratelimitV1.RateLimitDescriptors_Entry
+	onDemand                              bool
+	c1zPath                               string
+	clientAuth                            bool
+	clientID                              string
+	clientSecret                          string
+	provisioningEnabled                   bool
+	ticketingEnabled                      bool
+	actionsEnabled                        bool
+	grantConfig                           *grantConfig
+	revokeConfig                          *revokeConfig
+	eventFeedConfig                       *eventStreamConfig
+	tempDir                               string
+	createAccountConfig                   *createAccountConfig
+	invokeActionConfig                    *invokeActionConfig
+	listActionSchemasConfig               *listActionSchemasConfig
+	deleteResourceConfig                  *deleteResourceConfig
+	rotateCredentialsConfig               *rotateCredentialsConfig
+	createTicketConfig                    *createTicketConfig
+	bulkCreateTicketConfig                *bulkCreateTicketConfig
+	listTicketSchemasConfig               *listTicketSchemasConfig
+	getTicketConfig                       *getTicketConfig
+	syncDifferConfig                      *syncDifferConfig
+	syncCompactorConfig                   *syncCompactorConfig
+	skipFullSync                          bool
+	targetedSyncResourceIDs               []string
+	externalResourceC1Z                   string
+	externalResourceEntitlementIdFilter   string
+	skipEntitlementsAndGrants             bool
+	skipGrants                            bool
+	sessionStoreEnabled                   bool
+	syncResourceTypeIDs                   []string
+	defaultCapabilitiesConnectorBuilder   connectorbuilder.ConnectorBuilder
+	defaultCapabilitiesConnectorBuilderV2 connectorbuilder.ConnectorBuilderV2
 }
 
 func WithSessionStoreEnabled() Option {
@@ -464,26 +474,43 @@ func WithOnDemandRevoke(c1zPath string, grantID string) Option {
 	}
 }
 
-func WithOnDemandCreateAccount(c1zPath string, login string, email string, profile *structpb.Struct) Option {
+func WithOnDemandCreateAccount(c1zPath string, login string, email string, profile *structpb.Struct, resourceTypeId string) Option {
 	return func(ctx context.Context, cfg *runnerConfig) error {
 		cfg.onDemand = true
 		cfg.c1zPath = c1zPath
 		cfg.createAccountConfig = &createAccountConfig{
-			login:   login,
-			email:   email,
-			profile: profile,
+			login:          login,
+			email:          email,
+			profile:        profile,
+			resourceTypeID: resourceTypeId,
 		}
 		return nil
 	}
 }
 
-func WithOnDemandInvokeAction(c1zPath string, action string, args *structpb.Struct) Option {
+// WithOnDemandInvokeAction creates an option for invoking an action.
+// If resourceTypeID is provided, it invokes a resource-scoped action.
+func WithOnDemandInvokeAction(c1zPath string, action string, resourceTypeID string, args *structpb.Struct) Option {
 	return func(ctx context.Context, cfg *runnerConfig) error {
 		cfg.onDemand = true
 		cfg.c1zPath = c1zPath
 		cfg.invokeActionConfig = &invokeActionConfig{
-			action: action,
-			args:   args,
+			action:         action,
+			resourceTypeID: resourceTypeID,
+			args:           args,
+		}
+		return nil
+	}
+}
+
+// WithOnDemandListActionSchemas creates an option for listing action schemas.
+// If resourceTypeID is provided, it filters schemas for that specific resource type.
+func WithOnDemandListActionSchemas(c1zPath string, resourceTypeID string) Option {
+	return func(ctx context.Context, cfg *runnerConfig) error {
+		cfg.onDemand = true
+		cfg.c1zPath = c1zPath
+		cfg.listActionSchemasConfig = &listActionSchemasConfig{
+			resourceTypeID: resourceTypeID,
 		}
 		return nil
 	}
@@ -677,6 +704,45 @@ func WithSkipGrants(skip bool) Option {
 	}
 }
 
+// WithDefaultCapabilitiesConnectorBuilder sets the default connector builder for the runner
+// This is used by the "capabilities" sub-command to instantiate the connector.
+func WithDefaultCapabilitiesConnectorBuilder(t connectorbuilder.ConnectorBuilder) Option {
+	return func(ctx context.Context, cfg *runnerConfig) error {
+		cfg.defaultCapabilitiesConnectorBuilder = t
+		return nil
+	}
+}
+
+// WithDefaultCapabilitiesConnectorBuilderV2 sets the default connector builder for the runner
+// This is used by the "capabilities" sub-command to instantiate the connector.
+func WithDefaultCapabilitiesConnectorBuilderV2(t connectorbuilder.ConnectorBuilderV2) Option {
+	return func(ctx context.Context, cfg *runnerConfig) error {
+		cfg.defaultCapabilitiesConnectorBuilderV2 = t
+		return nil
+	}
+}
+
+func ExtractDefaultConnector(ctx context.Context, options ...Option) (any, error) {
+	cfg := &runnerConfig{}
+
+	for _, o := range options {
+		err := o(ctx, cfg)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.defaultCapabilitiesConnectorBuilder != nil {
+		return cfg.defaultCapabilitiesConnectorBuilder, nil
+	}
+
+	if cfg.defaultCapabilitiesConnectorBuilderV2 != nil {
+		return cfg.defaultCapabilitiesConnectorBuilderV2, nil
+	}
+
+	return nil, nil
+}
+
 func IsSessionStoreEnabled(ctx context.Context, options ...Option) (bool, error) {
 	cfg := &runnerConfig{}
 
@@ -750,7 +816,13 @@ func NewConnectorRunner(ctx context.Context, c types.ConnectorServer, opts ...Op
 	runner.cw = cw
 
 	if cfg.onDemand {
-		if cfg.c1zPath == "" && cfg.eventFeedConfig == nil && cfg.createTicketConfig == nil && cfg.listTicketSchemasConfig == nil && cfg.getTicketConfig == nil && cfg.bulkCreateTicketConfig == nil {
+		if cfg.c1zPath == "" &&
+			cfg.eventFeedConfig == nil &&
+			cfg.createTicketConfig == nil &&
+			cfg.listTicketSchemasConfig == nil &&
+			cfg.getTicketConfig == nil &&
+			cfg.bulkCreateTicketConfig == nil &&
+			cfg.listActionSchemasConfig == nil {
 			return nil, errors.New("c1zPath must be set when in on-demand mode")
 		}
 
@@ -769,10 +841,13 @@ func NewConnectorRunner(ctx context.Context, c types.ConnectorServer, opts ...Op
 			tm = local.NewRevoker(ctx, cfg.c1zPath, cfg.revokeConfig.grantID)
 
 		case cfg.createAccountConfig != nil:
-			tm = local.NewCreateAccountManager(ctx, cfg.c1zPath, cfg.createAccountConfig.login, cfg.createAccountConfig.email, cfg.createAccountConfig.profile)
+			tm = local.NewCreateAccountManager(ctx, cfg.c1zPath, cfg.createAccountConfig.login, cfg.createAccountConfig.email, cfg.createAccountConfig.profile, cfg.createAccountConfig.resourceTypeID)
 
 		case cfg.invokeActionConfig != nil:
-			tm = local.NewActionInvoker(ctx, cfg.c1zPath, cfg.invokeActionConfig.action, cfg.invokeActionConfig.args)
+			tm = local.NewActionInvoker(ctx, cfg.c1zPath, cfg.invokeActionConfig.action, cfg.invokeActionConfig.resourceTypeID, cfg.invokeActionConfig.args)
+
+		case cfg.listActionSchemasConfig != nil:
+			tm = local.NewListActionSchemas(ctx, cfg.listActionSchemasConfig.resourceTypeID)
 
 		case cfg.deleteResourceConfig != nil:
 			tm = local.NewResourceDeleter(ctx, cfg.c1zPath, cfg.deleteResourceConfig.resourceId, cfg.deleteResourceConfig.resourceType)
