@@ -1,6 +1,6 @@
 ![Baton Logo](./baton-logo.png)
 
-# `baton-sql` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-sql.svg)](https://pkg.go.dev/github.com/conductorone/baton-sql) ![main ci](https://github.com/conductorone/baton-sql/actions/workflows/main.yaml/badge.svg)
+# `baton-sql` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-sql.svg)](https://pkg.go.dev/github.com/conductorone/baton-sql) ![ci](https://github.com/conductorone/baton-sql/actions/workflows/ci.yaml/badge.svg) ![verify](https://github.com/conductorone/baton-sql/actions/workflows/verify.yaml/badge.svg)
 
 `baton-sql` is a connector for built using the [Baton SDK](https://github.com/conductorone/baton-sdk).
 
