@@ -12,7 +12,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/microsoft/go-mssqldb v1.8.0
-	github.com/quasilyte/go-ruleguard/dsl v0.3.22
+	github.com/quasilyte/go-ruleguard/dsl v0.3.23
 	github.com/sijms/go-ora/v2 v2.8.24
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.11.1
