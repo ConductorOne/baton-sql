@@ -83,11 +83,11 @@ func (c *Connector) GlobalActions(ctx context.Context, registry actions.ActionRe
 				case bool:
 					boolField.DefaultValue = v
 				case string:
-					defaultValue, err := strconv.ParseBool(v)
+					parsedValue, err := strconv.ParseBool(v)
 					if err != nil {
-						return fmt.Errorf("invalid boolean default for %s: %T", actionKey, defaultValue)
+						return fmt.Errorf("invalid boolean default for %s: %s", actionKey, v)
 					}
-					boolField.DefaultValue = defaultValue
+					boolField.DefaultValue = parsedValue
 				default:
 					return fmt.Errorf("invalid boolean default for %s: %T", actionKey, defaultValue)
 				}
