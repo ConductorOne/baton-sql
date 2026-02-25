@@ -1,3 +1,4 @@
+//nolint:gosec // Tests contain example passwords.
 package database
 
 import (

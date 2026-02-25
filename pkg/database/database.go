@@ -43,7 +43,7 @@ type ConnectOptions struct {
 	Database string
 
 	User     string
-	Password string
+	Password string //nolint:gosec // We need a password to connect to the database.
 
 	Params map[string]string
 }

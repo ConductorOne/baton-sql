@@ -37,14 +37,14 @@ func convertActionTypes(actionTypes []string) []v2.ActionType {
 	return result
 }
 
-// RegisterActionManager implements the RegisterActionManager interface to expose custom actions.
-func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder.CustomActionManager, error) {
+var _ connectorbuilder.GlobalActionProvider = &Connector{}
+
+// GlobalActions implements the GlobalActionProvider interface to expose custom actions.
+func (c *Connector) GlobalActions(ctx context.Context, registry actions.ActionRegistry) error {
 	l := ctxzap.Extract(ctx)
 
-	actionManager := actions.NewActionManager(ctx)
-
 	if !c.config.HasActions() {
-		return actionManager, nil
+		return nil
 	}
 
 	for actionKey, actionCfg := range c.config.Actions {
@@ -73,7 +73,7 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				case string:
 					stringField.DefaultValue = v
 				default:
-					return nil, fmt.Errorf("invalid string default for %s: %T", actionKey, defaultValue)
+					return fmt.Errorf("invalid string default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_StringField{StringField: stringField}
 			case "boolean":
@@ -83,13 +83,13 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				case bool:
 					boolField.DefaultValue = v
 				case string:
-					defaultValue, err := strconv.ParseBool(v)
+					parsedValue, err := strconv.ParseBool(v)
 					if err != nil {
-						return nil, fmt.Errorf("invalid boolean default for %s: %T", actionKey, defaultValue)
+						return fmt.Errorf("invalid boolean default for %s: %s", actionKey, v)
 					}
-					boolField.DefaultValue = defaultValue
+					boolField.DefaultValue = parsedValue
 				default:
-					return nil, fmt.Errorf("invalid boolean default for %s: %T", actionKey, defaultValue)
+					return fmt.Errorf("invalid boolean default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_BoolField{BoolField: boolField}
 			case "number":
@@ -101,7 +101,7 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				case float32, float64:
 					intField.DefaultValue = int64(reflect.ValueOf(v).Float())
 				default:
-					return nil, fmt.Errorf("invalid numeric default for %s: %T", actionKey, defaultValue)
+					return fmt.Errorf("invalid numeric default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_IntField{IntField: intField}
 			case "string_list":
@@ -111,7 +111,7 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				case []string:
 					stringSliceField.DefaultValue = v
 				default:
-					return nil, fmt.Errorf("invalid string slice default for %s: %T", actionKey, defaultValue)
+					return fmt.Errorf("invalid string slice default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_StringSliceField{StringSliceField: stringSliceField}
 			case "string_map":
@@ -121,7 +121,7 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 				case map[string]*anypb.Any:
 					stringMapField.DefaultValue = v
 				default:
-					return nil, fmt.Errorf("invalid string map default for %s: %T", actionKey, defaultValue)
+					return fmt.Errorf("invalid string map default for %s: %T", actionKey, defaultValue)
 				}
 				arg.Field = &config_sdk.Field_StringMapField{StringMapField: stringMapField}
 			}
@@ -132,20 +132,20 @@ func (c *Connector) RegisterActionManager(ctx context.Context) (connectorbuilder
 
 		// Validate the action config
 		if err := cfg.Validate(); err != nil {
-			return nil, fmt.Errorf("invalid action config %s: %w", actionKey, err)
+			return fmt.Errorf("invalid action config %s: %w", actionKey, err)
 		}
 
-		err := actionManager.RegisterAction(ctx, actionKey, actionSchema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
+		err := registry.Register(ctx, actionSchema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 			return c.handleQueryAction(ctx, actionKey, cfg, args)
 		})
 		if err != nil {
 			l.Error("failed to register action", zap.String("action", actionKey), zap.Error(err))
-			return nil, err
+			return fmt.Errorf("failed to register action %s: %w", actionKey, err)
 		}
 		l.Info("registered action", zap.String("action", actionKey))
 	}
 
-	return actionManager, nil
+	return nil
 }
 
 func (c *Connector) handleQueryAction(ctx context.Context, actionKey string, actionCfg bsql.ActionConfig, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
