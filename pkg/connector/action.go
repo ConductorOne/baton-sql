@@ -140,7 +140,7 @@ func (c *Connector) GlobalActions(ctx context.Context, registry actions.ActionRe
 		})
 		if err != nil {
 			l.Error("failed to register action", zap.String("action", actionKey), zap.Error(err))
-			return err
+			return fmt.Errorf("failed to register action %s: %w", actionKey, err)
 		}
 		l.Info("registered action", zap.String("action", actionKey))
 	}
