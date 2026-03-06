@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
+	"slices"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -500,15 +503,52 @@ func Parse(data []byte) (*Config, error) {
 	return config, nil
 }
 
+type LookupFunc func(key string) (string, bool)
+
+func expandEnvironmentVariables(_ context.Context, data []byte, lookup LookupFunc) ([]byte, error) {
+	var missingVars []string
+	envVarRegex := regexp.MustCompile(`\${([^}]+)}`)
+
+	dataStr := envVarRegex.ReplaceAllStringFunc(string(data), func(match string) string {
+		envVar := match[2 : len(match)-1]
+		if envVal, exists := lookup(envVar); exists {
+			if strings.ContainsAny(envVal, "\n\r") {
+				// Quote multi-line values so they remain a single YAML scalar.
+				escaped := strings.ReplaceAll(envVal, `\`, `\\`)
+				escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+				escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+				escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+				return `"` + escaped + `"`
+			}
+			return envVal
+		}
+		if !slices.Contains(missingVars, envVar) {
+			missingVars = append(missingVars, envVar)
+		}
+		return match
+	})
+
+	if len(missingVars) > 0 {
+		return nil, fmt.Errorf("missing environment variables: %s", strings.Join(missingVars, ", "))
+	}
+
+	return []byte(dataStr), nil
+}
+
 // LoadConfigFromFile reads a YAML configuration file from the given path and parses its content into a Config struct.
-func LoadConfigFromFile(path string) (*Config, error) {
+func LoadConfigFromFile(ctx context.Context, path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
+	// First pass: expand environment variables in string nodes
+	replacedData, err := expandEnvironmentVariables(ctx, data, os.LookupEnv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand environment variables: %w", err)
+	}
 	config := &Config{}
-	err = yaml.Unmarshal(data, config)
+	err = yaml.Unmarshal(replacedData, config)
 	if err != nil {
 		return nil, err
 	}
