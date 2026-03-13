@@ -4,7 +4,7 @@ go 1.25.2
 
 require (
 	github.com/SAP/go-hdb v1.14.5
-	github.com/conductorone/baton-sdk v0.8.10
+	github.com/conductorone/baton-sdk v0.8.11
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.9.2
