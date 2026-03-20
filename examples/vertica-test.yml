@@ -1,0 +1,102 @@
+---
+app_name: Vertica Test
+app_description: Test configuration for Vertica database
+connect:
+  dsn: "vertica://${DB_HOST}:${DB_PORT}/${DB_DATABASE}?tlsmode=none"
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+
+resource_types:
+  user:
+    name: "User"
+    description: "A user within the Vertica system"
+    list:
+      query: |
+        SELECT
+          u.id,
+          u.username,
+          u.email,
+          u.employee_id,
+          u.status,
+          u.account_type,
+          u.created_at,
+          u.last_login,
+          u.manager_id,
+          m.username as manager_username
+        FROM
+          users u
+        LEFT JOIN
+          users m ON u.manager_id = m.id
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      map:
+        id: ".username"
+        display_name: ".username"
+        description: ".username"
+        traits:
+          user:
+            status: ".status"
+            login: ".username"
+            emails:
+              - ".email"
+            account_type: ".account_type == 'employee' ? 'human' : .account_type"
+            employee_ids:
+              - ".employee_id"
+            last_login: ".last_login != null ? string(.last_login) : ''"
+            profile:
+              user_id: ".id"
+              created_at: ".created_at"
+              last_login: ".last_login != null ? string(.last_login) : ''"
+              manager_id: ".manager_id"
+              manager_username: ".manager_username"
+
+  role:
+    name: "Role"
+    description: "A role within the Vertica system"
+    list:
+      query: |
+        SELECT
+          id,
+          role_name
+        FROM
+          roles
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      map:
+        id: ".role_name"
+        display_name: ".role_name"
+        description: "'Vertica role: ' + .role_name"
+        traits:
+          role:
+            profile:
+              role_id: ".id"
+
+    static_entitlements:
+      - id: "member"
+        display_name: "'Member'"
+        description: "'Role member'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+
+    grants:
+      - query: |
+          SELECT
+            u.username,
+            r.role_name
+          FROM
+            users u
+          JOIN
+            user_roles ur ON u.id = ur.user_id
+          JOIN
+            roles r ON r.id = ur.role_id
+        pagination:
+          strategy: "offset"
+          primary_key: "username"
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "member"
