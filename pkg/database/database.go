@@ -16,6 +16,7 @@ import (
 	"github.com/conductorone/baton-sql/pkg/database/oracle"
 	"github.com/conductorone/baton-sql/pkg/database/postgres"
 	"github.com/conductorone/baton-sql/pkg/database/sqlserver"
+	"github.com/conductorone/baton-sql/pkg/database/vertica"
 )
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
@@ -30,6 +31,7 @@ const (
 	MSSQL
 	Oracle
 	HDB
+	Vertica
 )
 
 // ConnectOptions represents the structured configuration used to build a DSN.
@@ -365,6 +367,13 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 			return nil, Unknown, err
 		}
 		return db, HDB, nil
+
+	case "vertica":
+		db, err := vertica.Connect(ctx, parsedDsn.String())
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, Vertica, nil
 
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
