@@ -123,6 +123,7 @@ func parseTimeWithEngine(value string, dbEngine database.DbEngine) (*time.Time, 
 		// Vertica common formats (similar to PostgreSQL with timezone support)
 		prioritizedFormats = []string{
 			"2006-01-02 15:04:05.000000-07:00",
+			"2006-01-02 15:04:05.000000-07",
 			"2006-01-02 15:04:05.000000",
 			"2006-01-02 15:04:05",
 			time.RFC3339,

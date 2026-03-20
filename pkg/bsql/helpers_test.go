@@ -158,6 +158,13 @@ func TestParseTimeWithEngine(t *testing.T) {
 			expectSuccess: true,
 		},
 		{
+			name:          "Vertica timestamptz with offset",
+			input:         "2025-04-17 14:30:45.123456-04",
+			dbEngine:      database.Vertica,
+			expected:      time.Date(2025, 4, 17, 14, 30, 45, 123456000, time.FixedZone("", -4*60*60)),
+			expectSuccess: true,
+		},
+		{
 			name:          "NULL_VALUE string with any engine",
 			input:         "NULL_VALUE",
 			dbEngine:      database.MySQL,

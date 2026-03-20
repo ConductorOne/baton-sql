@@ -1,6 +1,6 @@
 -- Create users table
 CREATE TABLE IF NOT EXISTS users (
-  id AUTO_INCREMENT PRIMARY KEY,
+  id IDENTITY PRIMARY KEY,
   username VARCHAR(100) NOT NULL,
   email VARCHAR(255) NOT NULL,
   employee_id VARCHAR(50),
@@ -26,7 +26,7 @@ UPDATE users SET manager_id = 3 WHERE username = 'disabled.user';
 
 -- Create roles table
 CREATE TABLE IF NOT EXISTS roles (
-  id AUTO_INCREMENT PRIMARY KEY,
+  id IDENTITY PRIMARY KEY,
   role_name VARCHAR(100) NOT NULL
 );
 
