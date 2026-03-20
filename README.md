@@ -10,7 +10,7 @@
 
 ## Key Features
 
-- **Multi-Database Support**: Works with MySQL, PostgreSQL, Oracle, SQL Server, SQLite, and WordPress
+- **Multi-Database Support**: Works with MySQL, PostgreSQL, Oracle, SQL Server, Vertica, SQLite, and WordPress
 - **Account Provisioning**: Create user accounts with automatic random password generation
 - **Secure Password Management**: Database-appropriate password hashing (SHA2, bcrypt, MD5)
 - **Flexible Configuration**: Map any SQL query results to resources and entitlements
@@ -23,6 +23,7 @@
 - Microsoft SQL Server
 - Oracle
 - PostgreSQL
+- Vertica
 
 ## Configuration
 
