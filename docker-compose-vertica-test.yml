@@ -1,0 +1,17 @@
+services:
+  # Vertica CE Database for testing
+  vertica:
+    image: vertica/vertica-ce:latest
+    container_name: baton-vertica-test
+    ports:
+      - "5433:5433"
+    environment:
+      VERTICA_DB_NAME: batondb
+    volumes:
+      - ./test/vertica-init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "/opt/vertica/bin/vsql", "-U", "dbadmin", "-d", "batondb", "-c", "SELECT 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
