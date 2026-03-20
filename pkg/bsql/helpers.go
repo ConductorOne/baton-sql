@@ -119,6 +119,14 @@ func parseTimeWithEngine(value string, dbEngine database.DbEngine) (*time.Time, 
 			"02-Jan-2006 15:04:05",
 			"Jan 02, 2006 15:04:05",
 		}
+	case database.Vertica:
+		// Vertica common formats (similar to PostgreSQL with timezone support)
+		prioritizedFormats = []string{
+			"2006-01-02 15:04:05.000000-07:00",
+			"2006-01-02 15:04:05.000000",
+			"2006-01-02 15:04:05",
+			time.RFC3339,
+		}
 	default:
 		// Try the generic time parser for unknown engines
 		return parseTime(value)
