@@ -66,7 +66,7 @@ type DatabaseConfig struct {
 	User string `yaml:"user" json:"user"`
 
 	// Password is the database password used for authentication
-	Password string `yaml:"password" json:"password"` //nolint:gosec // We need a password to connect to the database.
+	Password string `yaml:"password" json:"password"`
 
 	// Params contains additional connection parameters (e.g., {"sslmode": "disable", "timeout": "30s"})
 	Params map[string]string `yaml:"params" json:"params"`
