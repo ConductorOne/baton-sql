@@ -119,6 +119,12 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 	useTx := !provisioningConfig.Revoke.NoTransaction
 	err = s.RunProvisioningQueries(ctx, provisioningConfig.Revoke.Queries, provisioningVars, useTx)
 	if err != nil {
+		if errors.Is(err, ErrQueryAffectedZeroRows) {
+			anno := annotations.Annotations{}
+			anno.Update(&v2.GrantAlreadyRevoked{})
+			return anno, nil
+		}
+
 		return nil, err
 	}
 

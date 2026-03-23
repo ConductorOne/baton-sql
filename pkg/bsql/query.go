@@ -28,6 +28,9 @@ const (
 	unquotedKey     = "unquoted"
 )
 
+var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
+var ErrQueryAffectedMoreThanOneRow = errors.New("query affected more than one row, ending and rolling back")
+
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
@@ -353,7 +356,11 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries []string
 		}
 
 		if rowsAffected > 1 {
-			return errors.New("query affected more than one row, ending and rolling back")
+			return ErrQueryAffectedMoreThanOneRow
+		}
+
+		if rowsAffected == 0 {
+			return ErrQueryAffectedZeroRows
 		}
 
 		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
