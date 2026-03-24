@@ -367,6 +367,14 @@ resource_types:
             username: "principal.ID"
             role_name: "resource.ID"
           grant:
+            validation_queries:
+              - |
+                SELECT
+                u.id,
+                r.id
+                FROM users u, roles r
+                WHERE u.username = ?<username>
+                AND r.role_name = ?<role_name>
             queries:
               - |
                 INSERT INTO user_roles (
@@ -381,6 +389,14 @@ resource_types:
                 AND r.role_name = ?<role_name>
                 ON CONFLICT (user_id, role_id) DO NOTHING
           revoke:
+            validation_queries:
+              - |
+                SELECT
+                u.id,
+                r.id
+                FROM users u, roles r
+                WHERE u.username = ?<username>
+                AND r.role_name = ?<role_name>
             queries:
               - |
                 DELETE FROM user_roles

@@ -153,7 +153,7 @@ func (s *userSyncer) CreateAccount(
 
 	// Execute account creation queries
 	useTransaction := !provisioningConfig.Create.NoTransaction
-	if err := s.RunProvisioningQueries(ctx, provisioningConfig.Create.Queries, queryInputs, useTransaction); err != nil {
+	if err := s.RunProvisioningQueries(ctx, provisioningConfig.Create.Queries, nil, queryInputs, useTransaction); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -203,7 +203,7 @@ func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, cred
 
 	// Execute account creation queries
 	useTransaction := !rotationConfig.Update.NoTransaction
-	if err := s.RunProvisioningQueries(ctx, rotationConfig.Update.Queries, queryInputs, useTransaction); err != nil {
+	if err := s.RunProvisioningQueries(ctx, rotationConfig.Update.Queries, nil, queryInputs, useTransaction); err != nil {
 		return nil, nil, err
 	}
 

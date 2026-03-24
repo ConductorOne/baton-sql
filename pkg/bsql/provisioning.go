@@ -72,8 +72,14 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 	}
 
 	useTx := !provisioningConfig.Grant.NoTransaction
-	err = s.RunProvisioningQueries(ctx, provisioningConfig.Grant.Queries, provisioningVars, useTx)
+	err = s.RunProvisioningQueries(ctx, provisioningConfig.Grant.Queries, provisioningConfig.Grant.ValidationQueries, provisioningVars, useTx)
 	if err != nil {
+		if errors.Is(err, ErrQueryAffectedZeroRows) {
+			l.Debug("entitlement is already granted", zap.String("entitlement_id", entitlement.GetId()))
+			anno := annotations.Annotations{}
+			anno.Update(&v2.GrantAlreadyExists{})
+			return anno, nil
+		}
 		return nil, err
 	}
 
@@ -117,7 +123,7 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 	}
 
 	useTx := !provisioningConfig.Revoke.NoTransaction
-	err = s.RunProvisioningQueries(ctx, provisioningConfig.Revoke.Queries, provisioningVars, useTx)
+	err = s.RunProvisioningQueries(ctx, provisioningConfig.Revoke.Queries, provisioningConfig.Revoke.ValidationQueries, provisioningVars, useTx)
 	if err != nil {
 		if errors.Is(err, ErrQueryAffectedZeroRows) {
 			anno := annotations.Annotations{}

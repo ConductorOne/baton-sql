@@ -302,6 +302,9 @@ type EntitlementProvisioningQueries struct {
 	// NoTransaction indicates whether the provisioning queries should be executed without a transaction.
 	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
 
+	// ValidationQueries is a list of SQL statements to execute for validating the provisioning operation before execution.
+	ValidationQueries []string `yaml:"validation_queries,omitempty" json:"validation_queries,omitempty"`
+
 	// Queries is a list of SQL statements to execute for the provisioning operation.
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
 }
