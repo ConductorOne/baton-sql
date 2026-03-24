@@ -211,7 +211,7 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionKey string, act
 	} else {
 		queries = []string{actionCfg.Query}
 	}
-	err = sqlSyncer.RunProvisioningQueries(ctx, queries, argMap, !actionCfg.NoTransaction)
+	err = sqlSyncer.RunProvisioningQueries(ctx, queries, nil, argMap, !actionCfg.NoTransaction)
 	if err != nil {
 		return nil, nil, err
 	}

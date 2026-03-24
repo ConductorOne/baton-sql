@@ -28,8 +28,12 @@ const (
 	unquotedKey     = "unquoted"
 )
 
+var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
+var ErrQueryAffectedMoreThanOneRow = errors.New("query affected more than one row, ending and rolling back")
+
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 var identSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
@@ -314,7 +318,7 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 	return updatedQuery, qArgs, nil
 }
 
-func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries []string, vars map[string]any, useTx bool) error {
+func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validationQueries []string, vars map[string]any, useTx bool) error {
 	l := ctxzap.Extract(ctx)
 
 	var committed bool
@@ -336,6 +340,33 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries []string
 		}()
 	}
 
+	for _, q := range validationQueries {
+		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
+		if err != nil {
+			return fmt.Errorf("failed to prepare validation query: %w", err)
+		}
+
+		result, err := executor.QueryContext(ctx, q, qArgs...)
+		if err != nil {
+			return fmt.Errorf("failed to execute validation query: %w", err)
+		}
+
+		valid := result.Next()
+
+		if err := result.Err(); err != nil {
+			return fmt.Errorf("failed to read validation query result: %w", err)
+		}
+
+		err = result.Close()
+		if err != nil {
+			return fmt.Errorf("failed to close validation query result: %w", err)
+		}
+
+		if !valid {
+			return fmt.Errorf("validation query returned no rows")
+		}
+	}
+
 	for _, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
@@ -353,7 +384,11 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries []string
 		}
 
 		if rowsAffected > 1 {
-			return errors.New("query affected more than one row, ending and rolling back")
+			return ErrQueryAffectedMoreThanOneRow
+		}
+
+		if rowsAffected == 0 {
+			return ErrQueryAffectedZeroRows
 		}
 
 		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
