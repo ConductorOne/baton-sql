@@ -173,9 +173,13 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 	return updatedQuery, qArgs, paginationOptSet, nil
 }
 
-func clampPageSize(pageSize int) int64 {
+func clampPageSize(pageSize int, configPageSize int) int64 {
 	if pageSize == 0 {
-		return defaultPageSize
+		if configPageSize > 0 {
+			pageSize = configPageSize
+		} else {
+			return defaultPageSize
+		}
 	}
 
 	if pageSize > maxPageSize {
@@ -263,7 +267,7 @@ func (s *SQLSyncer) setupPagination(pToken *pagination.Token, pOpts *Pagination)
 		PrimaryKey: pOpts.PrimaryKey,
 	}
 
-	ret.Limit = clampPageSize(pToken.Size)
+	ret.Limit = clampPageSize(pToken.Size, pOpts.PageSize)
 
 	switch pOpts.Strategy {
 	case offsetKey:

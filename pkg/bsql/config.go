@@ -236,6 +236,10 @@ type Pagination struct {
 
 	// PrimaryKey is the column used to uniquely identify records for pagination purposes.
 	PrimaryKey string `yaml:"primary_key,omitempty" json:"primary_key,omitempty"`
+
+	// PageSize overrides the default number of rows fetched per page (default: 100, max: 1000).
+	// Reduce this value if query results are large and exceed gRPC message size limits.
+	PageSize int `yaml:"page_size,omitempty" json:"page_size,omitempty"`
 }
 
 // EntitlementsQuery defines the structure for querying dynamic entitlements.
