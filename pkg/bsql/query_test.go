@@ -8,6 +8,32 @@ import (
 	"github.com/conductorone/baton-sql/pkg/database"
 )
 
+func Test_clampPageSize(t *testing.T) {
+	tests := []struct {
+		name           string
+		pageSize       int
+		configPageSize int
+		want           int64
+	}{
+		{"zero/zero returns default", 0, 0, defaultPageSize},
+		{"zero/positive uses config", 0, 25, 25},
+		{"zero/negative returns default", 0, -1, defaultPageSize},
+		{"zero/config exceeds max clamps to max", 0, 1500, maxPageSize},
+		{"zero/config at min boundary", 0, 1, 1},
+		{"sdk size takes precedence over config", 50, 25, 50},
+		{"sdk size exceeds max clamps to max", 1500, 0, maxPageSize},
+		{"sdk size below min clamps to min", -5, 0, minPageSize},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := clampPageSize(tt.pageSize, tt.configPageSize)
+			if got != tt.want {
+				t.Errorf("clampPageSize(%d, %d) = %d, want %d", tt.pageSize, tt.configPageSize, got, tt.want)
+			}
+		})
+	}
+}
+
 func Test_parseToken(t *testing.T) {
 	tests := []struct {
 		name    string
