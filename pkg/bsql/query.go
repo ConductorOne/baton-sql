@@ -220,7 +220,7 @@ func (s *SQLSyncer) nextPageToken(pCtx *paginationContext, lastRowID any) (strin
 
 	switch pCtx.Strategy {
 	case offsetKey:
-		ret = strconv.Itoa(int(pCtx.Offset)*pageSize + pageSize)
+		ret = strconv.Itoa(int(pCtx.Offset) + pageSize)
 	case cursorKey:
 		switch l := lastRowID.(type) {
 		case string:
