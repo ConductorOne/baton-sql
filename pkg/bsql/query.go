@@ -69,6 +69,8 @@ func (s *SQLSyncer) getNextPlaceholder(qArgs []interface{}) string {
 		return fmt.Sprintf("@p%d", len(qArgs))
 	case database.Oracle:
 		return fmt.Sprintf(":%d", len(qArgs))
+	case database.Vertica:
+		return "?"
 	default:
 		return "?"
 	}

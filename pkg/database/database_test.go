@@ -239,6 +239,14 @@ func Test_expandDSN(t *testing.T) {
 			want: "hdb://SYSTEM:hdb%23pass@localhost:39017",
 		},
 		{
+			name: "Vertica style DSN",
+			env: map[string]string{
+				"DB_PASSWORD": "vertica#pass",
+			},
+			dsn:  "vertica://dbadmin:${DB_PASSWORD}@localhost:5433/batondb?tlsmode=none",
+			want: "vertica://dbadmin:vertica%23pass@localhost:5433/batondb?tlsmode=none",
+		},
+		{
 			name:    "Missing environment variable",
 			env:     map[string]string{},
 			dsn:     "mysql://admin:${MISSING_VAR}@localhost:3306/dbname",

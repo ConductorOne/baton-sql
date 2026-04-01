@@ -253,6 +253,23 @@ func Test_parseQueryOpts(t *testing.T) {
 			false,
 		},
 		{
+			"Test valid query with multiple replacements (Vertica)",
+			database.Vertica,
+			args{
+				t.Context(),
+				"SELECT * FROM table LIMIT ?<LIMIT> OFFSET ?<OFFSET>",
+				&paginationContext{
+					Limit:  10,
+					Offset: 123,
+				},
+				nil,
+			},
+			"SELECT * FROM table LIMIT ? OFFSET ?",
+			[]interface{}{int64(11), int64(123)},
+			true,
+			false,
+		},
+		{
 			"Test valid query with unknown token",
 			database.MySQL,
 			args{
