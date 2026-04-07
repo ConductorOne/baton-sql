@@ -86,25 +86,46 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 		return nil, "", nil, err
 	}
 
-	npt, err := s.runQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		for _, mapping := range s.config.Entitlements.Map {
-			r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
-			if err != nil {
-				return false, err
-			}
+	// Use size-aware query execution to prevent exceeding gRPC message size limits
+	result, err := s.runQueryWithSizeLimit(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, queryVars,
+		func(ctx context.Context, rowMap map[string]any) (bool, int64, error) {
+			var itemSize int64
+			for _, mapping := range s.config.Entitlements.Map {
+				r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
+				if err != nil {
+					return false, 0, err
+				}
 
-			if ok {
-				r.Resource = resource
-				ret = append(ret, r)
+				if ok {
+					r.Resource = resource
+					ret = append(ret, r)
+					itemSize += estimateEntitlementSize(r)
+				}
 			}
-		}
-		return true, nil
-	})
+			return true, itemSize, nil
+		})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	return ret, npt, nil, nil
+	return ret, result.NextPageToken, nil, nil
+}
+
+// estimateEntitlementSize provides a rough estimate of the serialized size of an entitlement.
+func estimateEntitlementSize(e *v2.Entitlement) int64 {
+	if e == nil {
+		return 0
+	}
+	var size int64
+	size += int64(len(e.Id))
+	size += int64(len(e.DisplayName))
+	size += int64(len(e.Description))
+	size += int64(len(e.Slug))
+	// Add overhead for annotations, resource reference, and protobuf encoding
+	size += int64(len(e.Annotations) * 50)
+	size += int64(len(e.GrantableTo) * 50)
+	size += sizeEstimateOverhead
+	return size
 }
 
 func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, mappings *EntitlementMapping, rowMap map[string]any) (*v2.Entitlement, bool, error) {
