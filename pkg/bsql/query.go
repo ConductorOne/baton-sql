@@ -27,12 +27,10 @@ const (
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
 
-	// gRPC message size limits - we use a conservative threshold to avoid hitting the 4MB limit
-	// The actual limit is 4MB, but we use 3.5MB to leave room for overhead and metadata
-	maxResponseSizeBytes     = 3 * 1024 * 1024 // 3MB conservative limit
-	sizeEstimateOverhead     = 500             // Overhead per item for protobuf encoding
-	minPageSizeForSizeLimit  = 1               // Minimum page size when reducing due to size limits
-	pageSizeReductionDivisor = 2               // How much to reduce page size when hitting limits
+	// gRPC message size limits - we use a conservative threshold to avoid hitting the 4MB limit.
+	// The actual limit is 4MB, but we use 3MB to leave room for overhead and metadata.
+	maxResponseSizeBytes = 3 * 1024 * 1024 // 3MB conservative limit
+	sizeEstimateOverhead = 500             // Overhead per item for protobuf encoding
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
@@ -578,7 +576,7 @@ func (s *SQLSyncer) runQueryWithSizeLimit(
 	for rows.Next() {
 		rowCount++
 
-		// Check if we've exceeded the page limit (standard pagination)
+		// Check if we've exceeded the page limit (standard pagination).
 		if pCtx != nil && rowCount > int(pCtx.Limit) {
 			hitPageLimit = true
 			break
@@ -589,11 +587,12 @@ func (s *SQLSyncer) runQueryWithSizeLimit(
 		}
 
 		foundPaginationKey := false
+		var currentRowID any
 		rowMap := make(map[string]interface{})
 		for i, colName := range columns {
 			rowMap[colName] = values[i]
 			if pCtx != nil && pCtx.PrimaryKey == colName {
-				lastRowID = values[i]
+				currentRowID = values[i]
 				foundPaginationKey = true
 			}
 		}
@@ -602,16 +601,13 @@ func (s *SQLSyncer) runQueryWithSizeLimit(
 			return nil, errors.New("primary key not found in query results")
 		}
 
-		// Estimate the size of this row before processing
-		rowSize := estimateRowSize(rowMap)
-
-		// Check if adding this item would exceed size limits
-		// We check BEFORE processing to avoid returning partial results
-		if result.TotalSize > 0 && result.TotalSize+rowSize > maxResponseSizeBytes {
+		// Check if adding this item would exceed size limits.
+		// We check BEFORE processing so that we can stop without data loss.
+		// The unprocessed row will be picked up by the next page.
+		if result.TotalSize > 0 && result.TotalSize+estimateRowSize(rowMap) > maxResponseSizeBytes {
 			result.HitSizeLimit = true
 			l.Info("stopping query early due to response size limit",
 				zap.Int64("current_size", result.TotalSize),
-				zap.Int64("row_size", rowSize),
 				zap.Int("items_returned", result.ItemCount))
 			break
 		}
@@ -621,13 +617,27 @@ func (s *SQLSyncer) runQueryWithSizeLimit(
 			return nil, err
 		}
 
-		// Use the actual item size if provided, otherwise use the row size estimate
+		// Use the actual item size if provided, otherwise use the row estimate.
 		if itemSize > 0 {
 			result.TotalSize += itemSize
 		} else {
-			result.TotalSize += rowSize
+			result.TotalSize += estimateRowSize(rowMap)
 		}
 		result.ItemCount++
+
+		// Only update lastRowID after the callback succeeds, so that
+		// the next page token points to the last *processed* row.
+		lastRowID = currentRowID
+
+		// Post-callback size check: if accumulated size now exceeds the
+		// limit, stop before processing the next row.
+		if result.TotalSize > maxResponseSizeBytes {
+			result.HitSizeLimit = true
+			l.Info("stopping query after callback due to response size limit",
+				zap.Int64("current_size", result.TotalSize),
+				zap.Int("items_returned", result.ItemCount))
+			break
+		}
 
 		if !ok {
 			break
@@ -638,9 +648,14 @@ func (s *SQLSyncer) runQueryWithSizeLimit(
 		return nil, err
 	}
 
-	// Determine if we need a next page token
-	// We need one if: we hit the page limit, OR we hit the size limit
+	// Determine if we need a next page token.
+	// We need one if: we hit the page limit, OR we hit the size limit.
 	if pCtx != nil && (hitPageLimit || result.HitSizeLimit) {
+		// For offset strategy when hitting size limits, adjust the limit
+		// to reflect actual items processed so the next offset is correct.
+		if result.HitSizeLimit && pCtx.Strategy == offsetKey {
+			pCtx.Limit = int64(result.ItemCount)
+		}
 		result.NextPageToken, err = s.nextPageToken(pCtx, lastRowID)
 		if err != nil {
 			return nil, err

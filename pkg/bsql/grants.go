@@ -116,7 +116,7 @@ func estimateGrantSize(g *v2.Grant) int64 {
 	if g.Entitlement != nil {
 		size += int64(len(g.Entitlement.Id))
 	}
-	if g.Principal != nil {
+	if g.Principal != nil && g.Principal.Id != nil {
 		size += int64(len(g.Principal.Id.Resource))
 		size += int64(len(g.Principal.Id.ResourceType))
 	}
