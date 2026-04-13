@@ -373,7 +373,7 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		}
 	}
 
-	for _, q := range queries {
+	for i, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
 			return fmt.Errorf("failed to prepare query: %w", err)
@@ -393,7 +393,11 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 			return ErrQueryAffectedMoreThanOneRow
 		}
 
-		if rowsAffected == 0 {
+		// Only check for zero affected rows on the first query.
+		// Secondary queries in a multi-query block may legitimately affect
+		// 0 rows (e.g., a conditional UPDATE that only applies when certain
+		// conditions are met).
+		if i == 0 && rowsAffected == 0 {
 			return ErrQueryAffectedZeroRows
 		}
 
