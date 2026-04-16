@@ -373,6 +373,8 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		}
 	}
 
+	zeroRowCount := 0
+
 	for _, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
@@ -394,10 +396,14 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		}
 
 		if rowsAffected == 0 {
-			return ErrQueryAffectedZeroRows
+			zeroRowCount++
 		}
 
 		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
+	}
+
+	if zeroRowCount == len(queries) {
+		return ErrQueryAffectedZeroRows
 	}
 
 	if useTx {
