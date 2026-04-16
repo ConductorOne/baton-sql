@@ -402,7 +402,7 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
 	}
 
-	if zeroRowCount == len(queries) {
+	if len(queries) > 0 && zeroRowCount == len(queries) {
 		return ErrQueryAffectedZeroRows
 	}
 
