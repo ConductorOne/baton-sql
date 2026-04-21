@@ -134,6 +134,11 @@ type ResourceMapping struct {
 
 	// Annotations includes additional metadata such as entitlement immutability and external links.
 	Annotations *Annotations `yaml:"annotations" json:"annotations"`
+
+	// SkipEntitlementsAndGrants is a CEL expression evaluated per resource row.
+	// When it evaluates to true, the resource is annotated to skip entitlement and grant processing.
+	// This enables Sparse ACLs by allowing individual resources to opt out of ACL syncing.
+	SkipEntitlementsAndGrants string `yaml:"skip_entitlements_and_grants,omitempty" json:"skip_entitlements_and_grants,omitempty"`
 }
 
 // Annotations holds extra metadata for resource or grant mappings.
