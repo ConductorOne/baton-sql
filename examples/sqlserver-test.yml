@@ -11,6 +11,9 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
+incremental_sync:
+  default_lookback: 3h
+
 actions:
   update_user_attributes:
     name: Update User Attributes
@@ -186,6 +189,77 @@ resource_types:
               attr_department: ".attr_department"
               attr_employee_number: ".attr_employee_number != null ? string(.attr_employee_number) : ''"
 
+    # Fetches a single user by ID (required when incremental_sync is configured).
+    get:
+      query: |
+        SELECT
+          u.UserID as id,
+          u.Username as username,
+          u.Email as email,
+          u.EmployeeID as employee_id,
+          CASE
+            WHEN u.IsActive = 1 THEN 'active'
+            ELSE 'inactive'
+          END as status,
+          u.AccountType as account_type,
+          u.CreatedAt as created_at,
+          CASE
+            WHEN u.LastLogin IS NULL THEN ''
+            ELSE FORMAT(u.LastLogin, 'yyyy-MM-ddTHH:mm:ssZ')
+          END as last_login,
+          u.ManagerID as manager_id,
+          m.Username as manager_username,
+          m.Email as manager_email,
+          ed.attr_first_name,
+          ed.attr_middle_name,
+          ed.attr_last_name,
+          ed.JobTitle as attr_job_title,
+          ed.Department as attr_department,
+          ed.EmployeeNumber as attr_employee_number
+        FROM Users u
+        LEFT JOIN Users m ON u.ManagerID = m.UserID
+        LEFT JOIN EmployeeData ed ON u.UserID = ed.UserID
+        WHERE u.Username = ?<id>
+
+    # Detects new and modified users via UpdatedAt.
+    incremental_sync:
+      query: |
+        SELECT
+          u.UserID as id,
+          u.Username as username,
+          u.Email as email,
+          u.EmployeeID as employee_id,
+          CASE
+            WHEN u.IsActive = 1 THEN 'active'
+            ELSE 'inactive'
+          END as status,
+          u.AccountType as account_type,
+          u.CreatedAt as created_at,
+          CASE
+            WHEN u.LastLogin IS NULL THEN ''
+            ELSE FORMAT(u.LastLogin, 'yyyy-MM-ddTHH:mm:ssZ')
+          END as last_login,
+          u.ManagerID as manager_id,
+          m.Username as manager_username,
+          m.Email as manager_email,
+          ed.attr_first_name,
+          ed.attr_middle_name,
+          ed.attr_last_name,
+          ed.JobTitle as attr_job_title,
+          ed.Department as attr_department,
+          ed.EmployeeNumber as attr_employee_number,
+          u.UpdatedAt as updated_at
+        FROM Users u
+        LEFT JOIN Users m ON u.ManagerID = m.UserID
+        LEFT JOIN EmployeeData ed ON u.UserID = ed.UserID
+        WHERE u.UpdatedAt > ?<since>
+        ORDER BY u.UpdatedAt
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      cursor_column: updated_at
+      pagination:
+        strategy: offset
+        primary_key: id
+
     # Account provisioning configuration for creating new user accounts
     account_provisioning:
       # Schema definition for required and optional fields during user creation
@@ -291,6 +365,26 @@ resource_types:
             profile:
               role_name: ".role_name"
 
+    # Fetches a single role by ID (required when incremental_sync is configured).
+    get:
+      query: |
+        SELECT RoleID as id, RoleName as role_name, Description as description
+        FROM Roles
+        WHERE RoleName = ?<id>
+
+    # Detects new and modified roles via UpdatedAt.
+    incremental_sync:
+      query: |
+        SELECT RoleID as id, RoleName as role_name, Description as description, UpdatedAt as updated_at
+        FROM Roles
+        WHERE UpdatedAt > ?<since>
+        ORDER BY UpdatedAt
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      cursor_column: updated_at
+      pagination:
+        strategy: offset
+        primary_key: id
+
     # Static entitlements that can be granted for roles
     static_entitlements:
       - id: "member"
@@ -345,3 +439,38 @@ resource_types:
         pagination:
           strategy: "offset"
           primary_key: "role_name"
+
+        # Detects new role assignments and soft-deleted revokes.
+        incremental_sync:
+          resource_id: ".role_name"
+          changes_query: |
+            SELECT
+              ur.UserRoleID AS grant_id,
+              u.Username AS username,
+              r.RoleName AS role_name,
+              ur.UpdatedAt AS updated_at
+            FROM UserRoles ur
+            INNER JOIN Users u ON ur.UserID = u.UserID
+            INNER JOIN Roles r ON ur.RoleID = r.RoleID
+            WHERE ur.IsDeleted = 0
+              AND ur.UpdatedAt > ?<since>
+            ORDER BY ur.UpdatedAt
+            OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+          changes_cursor_column: updated_at
+          revokes_query: |
+            SELECT
+              ur.UserRoleID AS grant_id,
+              u.Username AS username,
+              r.RoleName AS role_name,
+              ur.DeletedAt AS deleted_at
+            FROM UserRoles ur
+            INNER JOIN Users u ON ur.UserID = u.UserID
+            INNER JOIN Roles r ON ur.RoleID = r.RoleID
+            WHERE ur.IsDeleted = 1
+              AND ur.DeletedAt > ?<since>
+            ORDER BY ur.DeletedAt
+            OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+          revokes_cursor_column: deleted_at
+          pagination:
+            strategy: offset
+            primary_key: grant_id

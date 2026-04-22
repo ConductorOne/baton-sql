@@ -10,6 +10,9 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
+incremental_sync:
+  default_lookback: 3h
+
 actions:
   enable_user:
     name: Enable User
@@ -188,6 +191,68 @@ resource_types:
               attr_company: ".attr_company"
               attr_employee_number: ".attr_employee_number"
               attr_employment_type: ".attr_employment_type"
+    # Fetches a single user by ID (required when incremental_sync is configured).
+    get:
+      query: |
+        SELECT
+          id as "id",
+          username as "username",
+          email as "email",
+          employee_id as "employee_id",
+          status as "status",
+          account_type as "account_type",
+          created_at as "created_at",
+          last_login as "last_login",
+          manager_id as "manager_id",
+          attr_first_name as "attr_first_name",
+          attr_middle_name as "attr_middle_name",
+          attr_last_name as "attr_last_name",
+          attr_display_name as "attr_display_name",
+          attr_job_title as "attr_job_title",
+          attr_department as "attr_department",
+          attr_division as "attr_division",
+          attr_company as "attr_company",
+          attr_employee_number as "attr_employee_number",
+          attr_employment_type as "attr_employment_type"
+        FROM users
+        WHERE username = ?<id>
+
+    # Detects new and modified users via updated_at.
+    # Note: Oracle role and privilege types are sourced from system views (DBA_ROLES,
+    # DBA_SYS_PRIVS) which have no modification timestamps; incremental sync is not
+    # applicable to those resource types.
+    incremental_sync:
+      query: |
+        SELECT
+          id as "id",
+          username as "username",
+          email as "email",
+          employee_id as "employee_id",
+          status as "status",
+          account_type as "account_type",
+          created_at as "created_at",
+          last_login as "last_login",
+          manager_id as "manager_id",
+          attr_first_name as "attr_first_name",
+          attr_middle_name as "attr_middle_name",
+          attr_last_name as "attr_last_name",
+          attr_display_name as "attr_display_name",
+          attr_job_title as "attr_job_title",
+          attr_department as "attr_department",
+          attr_division as "attr_division",
+          attr_company as "attr_company",
+          attr_employee_number as "attr_employee_number",
+          attr_employment_type as "attr_employment_type",
+          updated_at as "updated_at"
+        FROM users
+        WHERE updated_at > ?<since>
+        ORDER BY updated_at
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      cursor_column: updated_at
+      pagination:
+        strategy: offset
+        primary_key: id
+
     account_provisioning:
       # Schema definition for account creation form
       schema:

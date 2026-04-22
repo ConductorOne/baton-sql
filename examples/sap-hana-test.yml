@@ -7,6 +7,9 @@
     user: "${DB_USER}"
     password: "${DB_PASSWORD}"
   
+  incremental_sync:
+    default_lookback: 3h
+
   resource_types:
     user:
       name: "User"
@@ -57,6 +60,57 @@
                 user_id: .USER_ID
                 created_at: .CREATE_TIME
                 last_login: .LAST_SUCCESSFUL_CONNECT
+
+    # Fetches a single user by ID (required when incremental_sync is configured).
+    get:
+      query: |
+        SELECT
+          USER_ID,
+          "SYS"."USERS".USER_NAME AS USER_NAME,
+          CASE
+            WHEN USER_DEACTIVATED = 'TRUE' THEN 'inactive'
+            ELSE 'active'
+          END as STATUS,
+          CREATE_TIME,
+          LAST_SUCCESSFUL_CONNECT,
+          COMMENTS,
+          VALUE AS EMAIL_ADDRESS
+        FROM "SYS"."USERS"
+        LEFT JOIN "USER_PARAMETERS"
+          ON "SYS"."USERS".USER_NAME = "USER_PARAMETERS".USER_NAME
+          AND "USER_PARAMETERS".PARAMETER = 'EMAIL ADDRESS'
+        WHERE USER_ID = ?<id>
+
+    # Detects newly created users via CREATE_TIME.
+    # Note: SYS.USERS is a system catalog view. CREATE_TIME records when the user was
+    # created; there is no general-purpose updated_at column, so this source detects
+    # new accounts only. Profile changes (password, deactivation) are not captured.
+    # SYS.USERGROUPS similarly has no modification timestamp; incremental sync is not
+    # configured for the group resource type.
+    incremental_sync:
+      query: |
+        SELECT
+          USER_ID,
+          "SYS"."USERS".USER_NAME AS USER_NAME,
+          CASE
+            WHEN USER_DEACTIVATED = 'TRUE' THEN 'inactive'
+            ELSE 'active'
+          END as STATUS,
+          CREATE_TIME,
+          LAST_SUCCESSFUL_CONNECT,
+          COMMENTS,
+          VALUE AS EMAIL_ADDRESS
+        FROM "SYS"."USERS"
+        LEFT JOIN "USER_PARAMETERS"
+          ON "SYS"."USERS".USER_NAME = "USER_PARAMETERS".USER_NAME
+          AND "USER_PARAMETERS".PARAMETER = 'EMAIL ADDRESS'
+        WHERE CREATE_TIME > ?<since>
+        ORDER BY CREATE_TIME ASC
+        LIMIT ?<Limit> OFFSET ?<Offset>
+      cursor_column: CREATE_TIME
+      pagination:
+        strategy: offset
+        primary_key: USER_ID
 
     group:
       name: "Group"

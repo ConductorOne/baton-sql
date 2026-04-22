@@ -10,6 +10,9 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
+incremental_sync:
+  default_lookback: 3h
+
 actions:
   enable_user:
     name: Enable User
@@ -232,6 +235,71 @@ resource_types:
               attr_employee_number: ".attr_employee_number"
               attr_employment_type: ".attr_employment_type"
 
+    # Fetches a single user by ID (required when incremental_sync is configured).
+    get:
+      query: |
+        SELECT
+          u.id,
+          u.username,
+          u.email,
+          u.employee_id,
+          u.status,
+          u.account_type,
+          u.created_at,
+          u.last_login,
+          u.manager_id,
+          m.username as manager_username,
+          m.email as manager_email,
+          u.attr_first_name,
+          u.attr_middle_name,
+          u.attr_last_name,
+          u.attr_display_name,
+          u.attr_job_title,
+          u.attr_department,
+          u.attr_division,
+          u.attr_company,
+          u.attr_employee_number,
+          u.attr_employment_type
+        FROM users u
+        LEFT JOIN users m ON u.manager_id = m.id
+        WHERE u.username = ?<id>
+
+    # Detects new and modified users via updated_at.
+    incremental_sync:
+      query: |
+        SELECT
+          u.id,
+          u.username,
+          u.email,
+          u.employee_id,
+          u.status,
+          u.account_type,
+          u.created_at,
+          u.last_login,
+          u.manager_id,
+          m.username as manager_username,
+          m.email as manager_email,
+          u.attr_first_name,
+          u.attr_middle_name,
+          u.attr_last_name,
+          u.attr_display_name,
+          u.attr_job_title,
+          u.attr_department,
+          u.attr_division,
+          u.attr_company,
+          u.attr_employee_number,
+          u.attr_employment_type,
+          u.updated_at
+        FROM users u
+        LEFT JOIN users m ON u.manager_id = m.id
+        WHERE u.updated_at > ?<since>
+        ORDER BY u.updated_at ASC
+        LIMIT ?<Limit> OFFSET ?<Offset>
+      cursor_column: updated_at
+      pagination:
+        strategy: offset
+        primary_key: id
+
     # Account provisioning configuration with password support
     account_provisioning:
       schema:
@@ -354,6 +422,26 @@ resource_types:
             profile:
               role_id: ".id"
 
+    # Fetches a single role by ID (required when incremental_sync is configured).
+    get:
+      query: |
+        SELECT id, role_name
+        FROM roles
+        WHERE role_name = ?<id>
+
+    # Detects new and modified roles via updated_at.
+    incremental_sync:
+      query: |
+        SELECT id, role_name, updated_at
+        FROM roles
+        WHERE updated_at > ?<since>
+        ORDER BY updated_at ASC
+        LIMIT ?<Limit> OFFSET ?<Offset>
+      cursor_column: updated_at
+      pagination:
+        strategy: offset
+        primary_key: id
+
     # Define a static entitlement for role membership
     static_entitlements:
       - id: "member"
@@ -428,6 +516,40 @@ resource_types:
             principal_id: ".username"
             principal_type: "user"
             entitlement_id: "member"
+
+        # Detects new role assignments and soft-deleted revokes.
+        incremental_sync:
+          resource_id: ".role_name"
+          changes_query: |
+            SELECT
+              ur.id AS grant_id,
+              u.username,
+              r.role_name,
+              ur.updated_at
+            FROM user_roles ur
+            JOIN users u ON u.id = ur.user_id
+            JOIN roles r ON r.id = ur.role_id
+            WHERE ur.deleted_at IS NULL
+              AND ur.updated_at > ?<since>
+            ORDER BY ur.updated_at ASC
+            LIMIT ?<Limit> OFFSET ?<Offset>
+          changes_cursor_column: updated_at
+          revokes_query: |
+            SELECT
+              ur.id AS grant_id,
+              u.username,
+              r.role_name,
+              ur.deleted_at
+            FROM user_roles ur
+            JOIN users u ON u.id = ur.user_id
+            JOIN roles r ON r.id = ur.role_id
+            WHERE ur.deleted_at > ?<since>
+            ORDER BY ur.deleted_at ASC
+            LIMIT ?<Limit> OFFSET ?<Offset>
+          revokes_cursor_column: deleted_at
+          pagination:
+            strategy: offset
+            primary_key: grant_id
 
   feature:
     name: "Feature"
