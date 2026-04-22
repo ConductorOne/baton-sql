@@ -26,6 +26,10 @@ const (
 	cursorKey       = "cursor"
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
+	// sinceKey and idKey are reserved placeholders injected by the incremental sync path.
+	// Users must not define vars with these names.
+	sinceKey = "since"
+	idKey    = "id"
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")

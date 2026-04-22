@@ -36,7 +36,17 @@ connect:
 # -------------
 # Defines the resources that can be synchronized from the data source.
 # Each resource type represents a distinct entity type (e.g., users, groups, roles).
-resource_types:
+# Incremental Sync Settings (Optional)
+# ------------------------------------
+# Global settings for event-feed-based incremental sync.
+# When any resource type or grants query has incremental_sync configured, the connector
+# automatically exposes an EventFeed to ConductorOne for efficient change detection.
+#
+# incremental_sync:
+#   default_lookback: 3h   # How far back to look on first run; any Go duration string
+
+# Resource Types
+# -------------
   # Example User Resource
   # -------------------
   user:
@@ -143,7 +153,7 @@ resource_types:
     # Defines how to discover existing entitlements
     grants:
       - query: |
-          SELECT 
+          SELECT
             user_id,
             access_level,
             granted_at
@@ -163,4 +173,60 @@ resource_types:
         pagination:
           strategy: "offset"
           primary_key: "user_id"
+
+        # Grants Incremental Sync (Optional)
+        # ----------------------------------
+        # Detects new and revoked grants without a full re-sync.
+        # The parent `map` is reused for row-to-grant mapping.
+        # NOTE: CEL expressions in `map` must not reference resource trait fields
+        # (display_name, description, etc.) in this context — only resource.id.resource
+        # and row columns are available.
+        #
+        # incremental_sync:
+        #   resource_id: ".role_id"   # CEL expr: extracts resource ID from each row
+        #                             # (required — incremental queries span ALL resources)
+        #   changes_query: >
+        #     SELECT user_id, role_id, updated_at FROM user_roles
+        #     WHERE updated_at > ?<since> AND deleted_at IS NULL
+        #     ORDER BY updated_at ASC LIMIT ?<Limit> OFFSET ?<Offset>
+        #   changes_cursor_column: updated_at
+        #
+        #   # Optional: only configure when soft-delete is available
+        #   revokes_query: >
+        #     SELECT user_id, role_id, deleted_at FROM user_roles
+        #     WHERE deleted_at > ?<since>
+        #     ORDER BY deleted_at ASC LIMIT ?<Limit> OFFSET ?<Offset>
+        #   revokes_cursor_column: deleted_at
+        #
+        #   pagination:
+        #     strategy: offset
+        #   vars: {}
+
+    # Targeted Sync — Get Query (Optional)
+    # ------------------------------------
+    # Enables fetching a single resource by ID. Required when incremental_sync is
+    # configured on this resource type. Uses the same list.map for column mapping.
+    #
+    # get:
+    #   query: "SELECT id, username, email, status, department FROM users WHERE id = ?<id>"
+    #   vars: {}
+
+    # Resource Incremental Sync (Optional)
+    # ------------------------------------
+    # Detects new/modified resources via timestamp filtering. Emits ResourceChangeEvent
+    # per row. Requires `get` to also be configured (C1 uses it to re-fetch changed resources).
+    # ?<since> is automatically injected with the cursor timestamp for this source.
+    #
+    # incremental_sync:
+    #   query: >
+    #     SELECT id, username, email, status, department, updated_at
+    #     FROM users
+    #     WHERE updated_at > ?<since>
+    #     ORDER BY updated_at ASC
+    #     LIMIT ?<Limit> OFFSET ?<Offset>
+    #   cursor_column: updated_at   # column whose max value advances this source's cursor
+    #   pagination:
+    #     strategy: offset
+    #   vars: {}
+
 # Example: groups, roles, applications, etc.

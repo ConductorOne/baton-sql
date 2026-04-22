@@ -43,6 +43,18 @@ func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 	return syncers
 }
 
+// EventFeeds implements EventProviderV2. Returns the SQL event feed when incremental sync is configured.
+func (c *Connector) EventFeeds(ctx context.Context) []connectorbuilder.EventFeed {
+	if !c.config.HasIncrementalSync() {
+		return nil
+	}
+	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
+	if err != nil {
+		return nil
+	}
+	return []connectorbuilder.EventFeed{bsql.NewSQLEventFeed(*c.config, syncers)}
+}
+
 // Asset takes an input AssetRef and attempts to fetch it using the connector's authenticated http client
 // It streams a response, always starting with a metadata object, following by chunked payloads for the asset.
 func (c *Connector) Asset(ctx context.Context, asset *v2.AssetRef) (string, io.ReadCloser, error) {
