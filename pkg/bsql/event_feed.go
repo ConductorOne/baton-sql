@@ -81,12 +81,16 @@ func (f *SQLEventFeed) ListEvents(
 		}
 	}
 	if since.IsZero() {
-		since = f.sinceForSource(cursor, source.Key)
-	}
-	// Respect earliestEvent as a lower bound.
-	if earliestEvent != nil {
-		if et := earliestEvent.AsTime(); et.After(since) {
-			since = et
+		var hasCommittedCursor bool
+		since, hasCommittedCursor = f.sinceForSource(cursor, source.Key)
+		// Only let earliestEvent push the cursor forward when this source already has a committed
+		// cursor. For first-run sources the lookback window must be preserved; overriding it with
+		// earliestEvent (which reflects the time of the last processed event from another source)
+		// would skip events that occurred before this source's first cycle.
+		if hasCommittedCursor && earliestEvent != nil {
+			if et := earliestEvent.AsTime(); et.After(since) {
+				since = et
+			}
 		}
 	}
 
@@ -179,14 +183,18 @@ func (f *SQLEventFeed) commitAndAdvance(
 	return &pagination.StreamState{Cursor: cursorStr, HasMore: hasMore}, nil
 }
 
-// sinceForSource returns the starting timestamp for the given source key.
-func (f *SQLEventFeed) sinceForSource(cursor *eventFeedCursor, key string) time.Time {
+// sinceForSource returns the starting timestamp for the given source key, and whether it came
+// from a previously committed cursor (true) or the default lookback (false).
+// Callers must only apply the earliestEvent lower bound when hasCommittedCursor is true —
+// applying it to a first-run source would push since forward past the lookback window,
+// causing events that occurred before the first cycle to be permanently missed.
+func (f *SQLEventFeed) sinceForSource(cursor *eventFeedCursor, key string) (time.Time, bool) {
 	if ts, ok := cursor.SourceCursors[key]; ok {
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-			return t
+			return t, true
 		}
 	}
-	return time.Now().UTC().Add(-defaultLookback(f.config.IncrementalSync))
+	return time.Now().UTC().Add(-defaultLookback(f.config.IncrementalSync)), false
 }
 
 // processResourceChangePage runs one page of the resource incremental query and returns ResourceChangeEvents.
