@@ -1,0 +1,48 @@
+baton-sql installed as {{ include "baton-sql.fullname" . }} in namespace {{ .Release.Namespace }}.
+
+Mode:  {{ .Values.mode }}
+Image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+{{- if or (eq .Values.mode "service") (eq .Values.mode "both") }}
+
+Service (Deployment):
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "baton-sql.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} logs -f deployment/{{ include "baton-sql.fullname" . }}
+{{- end }}
+{{- if or (eq .Values.mode "cron") (eq .Values.mode "both") }}
+
+Sync (CronJob):
+  kubectl -n {{ .Release.Namespace }} get cronjob {{ include "baton-sql.fullname" . }}-sync
+  # Trigger an immediate run:
+  kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ include "baton-sql.fullname" . }}-sync {{ include "baton-sql.fullname" . }}-sync-manual
+{{- end }}
+{{- if .Values.config.existingConfigMap }}
+
+Connector config: using existing ConfigMap "{{ .Values.config.existingConfigMap }}". Must expose key "connector.yaml".
+{{- else }}
+
+Connector config: inline in values.yaml at `config.inline`. Edit and `helm upgrade` to change.
+{{- if contains "-----BEGIN" .Values.config.inline }}
+
+WARNING: config.inline contains PEM material ("-----BEGIN ..."). ConfigMaps are
+not encrypted at rest. Move certs/keys to `files.data` (or `files.existingSecret`)
+and reference them by path in the connector config, e.g.:
+    connect:
+      tls:
+        client_cert_path: {{ .Values.files.mountPath }}/client.crt
+        client_key_path:  {{ .Values.files.mountPath }}/client.key
+{{- end }}
+{{- end }}
+{{- if include "baton-sql.filesEnabled" . }}
+
+Files: mounted at {{ .Values.files.mountPath }}{{ if .Values.files.existingSecret }} from existing Secret "{{ .Values.files.existingSecret }}"{{ end }}.
+{{- end }}
+{{- if .Values.secret.existingSecret }}
+
+Credentials: using existing Secret "{{ .Values.secret.existingSecret }}" (managed outside the chart).
+{{- else if .Values.secret.create }}
+{{- if or (not .Values.secret.clientId) (not .Values.secret.clientSecret) }}
+
+WARNING: secret.clientId / secret.clientSecret are empty. Service mode will not authenticate to ConductorOne.
+Set them via --set or switch to an existing Secret (see secret.existingSecret in values.yaml).
+{{- end }}
+{{- end }}

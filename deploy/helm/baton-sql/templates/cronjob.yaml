@@ -1,0 +1,129 @@
+{{- if or (eq .Values.mode "cron") (eq .Values.mode "both") -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "baton-sql.fullname" . }}-sync
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "baton-sql.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sync-job
+spec:
+  schedule: {{ .Values.cron.schedule | quote }}
+  concurrencyPolicy: {{ .Values.cron.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.cron.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cron.failedJobsHistoryLimit }}
+  startingDeadlineSeconds: {{ .Values.cron.startingDeadlineSeconds }}
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: {{ .Values.cron.ttlSecondsAfterFinished }}
+      activeDeadlineSeconds: {{ .Values.cron.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "baton-sql.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: sync-job
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            {{- if not .Values.config.existingConfigMap }}
+            checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+            {{- end }}
+            {{- if and .Values.secret.create (not .Values.secret.existingSecret) }}
+            checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+            {{- end }}
+            {{- if and (gt (len .Values.files.data) 0) (not .Values.files.existingSecret) }}
+            checksum/files: {{ include (print $.Template.BasePath "/files-secret.yaml") . | sha256sum }}
+            {{- end }}
+            {{- with .Values.podAnnotations }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          serviceAccountName: {{ include "baton-sql.serviceAccountName" . }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: baton-sql
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - "--config-path"
+                - "/config/connector.yaml"
+                - "--file"
+                - "/data/sync.c1z"
+              env:
+                - name: LOG_LEVEL
+                  value: {{ .Values.logging.level | quote }}
+                - name: LOG_FORMAT
+                  value: {{ .Values.logging.format | quote }}
+                {{- include "baton-sql.secretEnv" . | nindent 16 }}
+                {{- range $k, $v := .Values.extraEnv }}
+                - name: {{ $k }}
+                  value: {{ $v | quote }}
+                {{- end }}
+              volumeMounts:
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+                - name: data
+                  mountPath: /data
+                - name: tmp
+                  mountPath: /tmp
+                {{- if include "baton-sql.filesEnabled" . }}
+                - name: files
+                  mountPath: {{ .Values.files.mountPath }}
+                  readOnly: true
+                {{- end }}
+                {{- with .Values.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              resources:
+                {{- toYaml .Values.cron.resources | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+          volumes:
+            - name: config
+              configMap:
+                name: {{ include "baton-sql.configMapName" . }}
+            - name: data
+              {{- if .Values.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "baton-sql.fullname" . }}-data
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            - name: tmp
+              emptyDir: {}
+            {{- if include "baton-sql.filesEnabled" . }}
+            - name: files
+              secret:
+                secretName: {{ include "baton-sql.filesSecretName" . }}
+            {{- end }}
+            {{- with .Values.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          restartPolicy: OnFailure
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

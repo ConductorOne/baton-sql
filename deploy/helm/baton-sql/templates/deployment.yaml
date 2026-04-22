@@ -1,0 +1,131 @@
+{{- if or (eq .Values.mode "service") (eq .Values.mode "both") -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "baton-sql.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "baton-sql.labels" . | nindent 4 }}
+    app.kubernetes.io/component: connector
+spec:
+  replicas: {{ .Values.service.replicas }}
+  selector:
+    matchLabels:
+      {{- include "baton-sql.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: connector
+  template:
+    metadata:
+      labels:
+        {{- include "baton-sql.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: connector
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if not .Values.config.existingConfigMap }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if and .Values.secret.create (not .Values.secret.existingSecret) }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- if and (gt (len .Values.files.data) 0) (not .Values.files.existingSecret) }}
+        checksum/files: {{ include (print $.Template.BasePath "/files-secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "baton-sql.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: baton-sql
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--config-path"
+            - "/config/connector.yaml"
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.logging.level | quote }}
+            - name: LOG_FORMAT
+              value: {{ .Values.logging.format | quote }}
+            {{- include "baton-sql.secretEnv" . | nindent 12 }}
+            {{- range $k, $v := .Values.extraEnv }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+            {{- if include "baton-sql.filesEnabled" . }}
+            - name: files
+              mountPath: {{ .Values.files.mountPath }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.service.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          {{- with .Values.service.livenessProbe }}
+          {{- if .enabled }}
+          livenessProbe:
+            {{- omit . "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- end }}
+          {{- with .Values.service.readinessProbe }}
+          {{- if .enabled }}
+          readinessProbe:
+            {{- omit . "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "baton-sql.configMapName" . }}
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if include "baton-sql.filesEnabled" . }}
+        - name: files
+          secret:
+            secretName: {{ include "baton-sql.filesSecretName" . }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

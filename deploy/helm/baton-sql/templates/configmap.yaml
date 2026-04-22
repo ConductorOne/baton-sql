@@ -1,0 +1,13 @@
+{{- if not .Values.config.existingConfigMap -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "baton-sql.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "baton-sql.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+data:
+  connector.yaml: |
+{{ .Values.config.inline | indent 4 }}
+{{- end }}

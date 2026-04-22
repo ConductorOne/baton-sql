@@ -1,0 +1,223 @@
+# Default values for baton-sql.
+
+# -----------------------------------------------------------------------------
+# Image
+# -----------------------------------------------------------------------------
+image:
+  repository: ghcr.io/conductorone/baton-sql
+  tag: latest
+  pullPolicy: Always
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# Deployment mode
+#   service - long-running Deployment that streams to ConductorOne
+#   cron    - scheduled CronJob that writes a .c1z file
+#   both    - install both
+# -----------------------------------------------------------------------------
+mode: service
+
+# -----------------------------------------------------------------------------
+# Connector configuration
+#   inline            - YAML config rendered into a ConfigMap by the chart
+#   existingConfigMap - name of a pre-existing ConfigMap (must expose key
+#                       "connector.yaml"); if set, chart skips creation and
+#                       mounts that ConfigMap instead.
+# -----------------------------------------------------------------------------
+config:
+  existingConfigMap: ""
+  # Example: PostgreSQL. See examples/ in the baton-sql repo for other engines
+  # (MySQL, SQL Server, Oracle, Vertica, SAP HANA, WordPress). DB credentials
+  # and host come from env vars — populate them via `secret.extra` below or an
+  # existingSecret. For TLS to the database, put cert/CA files under
+  # `files.data` and point `sslrootcert` / `sslcert` / `sslkey` at
+  # /files/<name>.
+  inline: |
+    version: "1"
+    app_name: Example SQL Connector
+    connect:
+      dsn: "postgres://${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
+      user: "${DB_USER}"
+      password: "${DB_PASSWORD}"
+    resource_types:
+      user:
+        name: "User"
+        description: "Database users"
+        traits:
+          - user
+        list:
+          query: |
+            SELECT id, username, email, status FROM users
+          pagination:
+            strategy: "offset"
+            primary_key: "id"
+          map:
+            id: ".id"
+            display_name: ".username"
+            traits:
+              user:
+                login: ".username"
+                emails:
+                  - ".email"
+                status: ".status"
+
+# -----------------------------------------------------------------------------
+# Secrets
+#   create=true  → chart renders a Secret from the values below (quickstart).
+#   existingSecret=<name> → chart references that Secret instead; `create` is
+#   ignored. Manage it with External Secrets Operator, Sealed Secrets, SOPS,
+#   or `kubectl create secret`.
+# -----------------------------------------------------------------------------
+secret:
+  create: true
+
+  # Used only when create: true. Prefer existingSecret for production.
+  clientId: ""
+  clientSecret: ""
+  # Extra env vars baked into the chart-managed Secret.
+  # Example: API_TOKEN: "sk_live_..."
+  extra: {}
+
+  # Reference a Secret you manage yourself.
+  existingSecret: ""
+  # Remap env var names to keys inside the pre-existing Secret.
+  existingSecretKeys:
+    clientId: BATON_CLIENT_ID
+    clientSecret: BATON_CLIENT_SECRET
+  # Extra env vars to project from the pre-existing Secret.
+  # Key = env var name, value = key in the Secret.
+  # Example: API_TOKEN: api_token
+  existingSecretExtra: {}
+
+# -----------------------------------------------------------------------------
+# Service mode (Deployment) — used when mode is "service" or "both"
+# -----------------------------------------------------------------------------
+service:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Probes. The published ghcr.io/conductorone/baton-sql image is distroless
+  # (no shell, no pgrep) and the binary does not expose a cheap config-validation
+  # flag, so both probes default to off. If it starts and doesn't exit, k8s
+  # keeps it running; if it crashes, k8s restarts it. Enable and override these
+  # if you ship a custom image with richer tooling (e.g. pg_isready for the DB).
+  livenessProbe:
+    enabled: false
+    exec:
+      command: ["/baton-sql", "--version"]
+    initialDelaySeconds: 10
+    periodSeconds: 30
+  readinessProbe:
+    enabled: false
+    exec:
+      command: ["/baton-sql", "--version"]
+    initialDelaySeconds: 5
+    periodSeconds: 60
+    timeoutSeconds: 5
+
+# -----------------------------------------------------------------------------
+# Cron mode (CronJob) — used when mode is "cron" or "both"
+# -----------------------------------------------------------------------------
+cron:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 3600
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+# -----------------------------------------------------------------------------
+# Persistence for /data (useful for cron mode to retain sync.c1z between runs)
+# -----------------------------------------------------------------------------
+persistence:
+  enabled: false
+  size: 1Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+
+# -----------------------------------------------------------------------------
+# Pod / ServiceAccount
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -----------------------------------------------------------------------------
+# Logging + extra env
+# -----------------------------------------------------------------------------
+logging:
+  level: info
+  format: json
+
+# Non-secret env vars to inject into the container.
+extraEnv: {}
+
+# -----------------------------------------------------------------------------
+# Files (certs, keys, CA bundles, keytabs, etc.)
+#
+# Rendered into a Secret and mounted at files.mountPath. Reference from your
+# connector config as <mountPath>/<key>. Example mTLS block in config.inline:
+#
+#   connect:
+#     tls:
+#       client_cert_path: /files/client.crt
+#       client_key_path:  /files/client.key
+#       ca_cert_path:     /files/ca.crt
+#
+# Chart behaviour:
+#   data has entries AND existingSecret unset → chart creates the Secret.
+#   existingSecret set                         → chart mounts that Secret,
+#                                                skips creation.
+#   data empty AND existingSecret unset        → no files volume is mounted.
+# -----------------------------------------------------------------------------
+files:
+  mountPath: /files
+  data: {}
+    # client.crt: |
+    #   -----BEGIN CERTIFICATE-----
+    #   ...
+    # client.key: |
+    #   -----BEGIN PRIVATE KEY-----
+    #   ...
+  existingSecret: ""
+
+# -----------------------------------------------------------------------------
+# Escape hatch for arbitrary volumes / mounts (ESO ExternalSecret, CSI driver,
+# projected volumes, user-managed ConfigMaps, etc.). These are appended as-is
+# to the pod spec.
+# -----------------------------------------------------------------------------
+extraVolumes: []
+  # - name: aws-secrets
+  #   csi:
+  #     driver: secrets-store.csi.k8s.io
+  #     readOnly: true
+  #     volumeAttributes:
+  #       secretProviderClass: baton-sql-aws
+extraVolumeMounts: []
+  # - name: aws-secrets
+  #   mountPath: /mnt/secrets
+  #   readOnly: true

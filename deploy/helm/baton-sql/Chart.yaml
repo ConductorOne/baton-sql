@@ -1,0 +1,20 @@
+apiVersion: v2
+name: baton-sql
+description: baton-sql connector — a configuration-driven Baton connector for REST APIs, deployable as a long-running service (Deployment) and/or scheduled sync (CronJob).
+type: application
+version: 0.1.0
+appVersion: "latest"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/conductorone/baton-sql
+sources:
+  - https://github.com/conductorone/baton-sql
+maintainers:
+  - name: ConductorOne
+    url: https://conductorone.com
+keywords:
+  - baton
+  - conductorone
+  - iga
+  - identity
+  - rest
+  - connector
