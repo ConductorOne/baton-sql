@@ -141,6 +141,12 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 		}
 	}
 
+	if s.fullConfig.IncrementalSync != nil {
+		if err := s.validateInternal(ctx, s.fullConfig.IncrementalSync); err != nil {
+			return fmt.Errorf("validation error for incremental_sync: %w", err)
+		}
+	}
+
 	if err := s.validateInternal(ctx, s.config.List); err != nil {
 		return s.validateFormatErr("list", err)
 	}

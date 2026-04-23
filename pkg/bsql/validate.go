@@ -4,7 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
+
+// queryUsesVar reports whether key appears in the vars slice returned by queryVars.
+func queryUsesVar(vars []string, key string) bool {
+	for _, v := range vars {
+		if v == key {
+			return true
+		}
+	}
+	return false
+}
 
 func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) error {
 	if query == "" {
@@ -171,14 +182,7 @@ func (l *GetQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if err != nil {
 		return err
 	}
-	hasID := false
-	for _, v := range usedVars {
-		if v == idKey {
-			hasID = true
-			break
-		}
-	}
-	if !hasID {
+	if !queryUsesVar(usedVars, idKey) {
 		return fmt.Errorf("get query must contain ?<%s> placeholder", idKey)
 	}
 	for k := range l.Vars {
@@ -200,14 +204,7 @@ func (l *ResourceIncrementalSync) staticValidate(ctx context.Context, s *SQLSync
 	if err != nil {
 		return err
 	}
-	hasSince := false
-	for _, v := range usedVars {
-		if v == sinceKey {
-			hasSince = true
-			break
-		}
-	}
-	if !hasSince {
+	if !queryUsesVar(usedVars, sinceKey) {
 		return fmt.Errorf("incremental_sync.query must contain ?<%s> placeholder", sinceKey)
 	}
 	for k := range l.Vars {
@@ -232,14 +229,7 @@ func (l *GrantsIncrementalSync) staticValidate(ctx context.Context, s *SQLSyncer
 	if err != nil {
 		return err
 	}
-	hasSince := false
-	for _, v := range usedVars {
-		if v == sinceKey {
-			hasSince = true
-			break
-		}
-	}
-	if !hasSince {
+	if !queryUsesVar(usedVars, sinceKey) {
 		return fmt.Errorf("incremental_sync.changes_query must contain ?<%s> placeholder", sinceKey)
 	}
 	if l.RevokesQuery != "" {
@@ -253,20 +243,22 @@ func (l *GrantsIncrementalSync) staticValidate(ctx context.Context, s *SQLSyncer
 		if err != nil {
 			return err
 		}
-		hasSince = false
-		for _, v := range usedVars {
-			if v == sinceKey {
-				hasSince = true
-				break
-			}
-		}
-		if !hasSince {
+		if !queryUsesVar(usedVars, sinceKey) {
 			return fmt.Errorf("incremental_sync.revokes_query must contain ?<%s> placeholder", sinceKey)
 		}
 	}
 	for k := range l.Vars {
 		if k == sinceKey || k == idKey {
 			return fmt.Errorf("vars must not use reserved key %q", k)
+		}
+	}
+	return nil
+}
+
+func (l *IncrementalSyncConfig) staticValidate(_ context.Context, _ *SQLSyncer) error {
+	if l.DefaultLookback != "" {
+		if _, err := time.ParseDuration(l.DefaultLookback); err != nil {
+			return fmt.Errorf("invalid incremental_sync.default_lookback %q: %w", l.DefaultLookback, err)
 		}
 	}
 	return nil

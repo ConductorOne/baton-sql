@@ -9,6 +9,8 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/bsql"
@@ -50,6 +52,8 @@ func (c *Connector) EventFeeds(ctx context.Context) []connectorbuilder.EventFeed
 	}
 	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
 	if err != nil {
+		l := ctxzap.Extract(ctx)
+		l.Debug("baton-sql: failed to create syncers for event feed; incremental sync will be unavailable", zap.Error(err))
 		return nil
 	}
 	return []connectorbuilder.EventFeed{bsql.NewSQLEventFeed(*c.config, syncers)}

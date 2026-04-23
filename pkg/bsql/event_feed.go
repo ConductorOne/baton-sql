@@ -81,17 +81,7 @@ func (f *SQLEventFeed) ListEvents(
 		}
 	}
 	if since.IsZero() {
-		var hasCommittedCursor bool
-		since, hasCommittedCursor = f.sinceForSource(cursor, source.Key)
-		// Only let earliestEvent push the cursor forward when this source already has a committed
-		// cursor. For first-run sources the lookback window must be preserved; overriding it with
-		// earliestEvent (which reflects the time of the last processed event from another source)
-		// would skip events that occurred before this source's first cycle.
-		if hasCommittedCursor && earliestEvent != nil {
-			if et := earliestEvent.AsTime(); et.After(since) {
-				since = et
-			}
-		}
+		since = f.sinceForSource(cursor, source.Key)
 	}
 
 	// Record CurrentSince on the first page of a new cycle (before processing, so a crash
@@ -183,18 +173,16 @@ func (f *SQLEventFeed) commitAndAdvance(
 	return &pagination.StreamState{Cursor: cursorStr, HasMore: hasMore}, nil
 }
 
-// sinceForSource returns the starting timestamp for the given source key, and whether it came
-// from a previously committed cursor (true) or the default lookback (false).
-// Callers must only apply the earliestEvent lower bound when hasCommittedCursor is true —
-// applying it to a first-run source would push since forward past the lookback window,
-// causing events that occurred before the first cycle to be permanently missed.
-func (f *SQLEventFeed) sinceForSource(cursor *eventFeedCursor, key string) (time.Time, bool) {
+// sinceForSource returns the starting timestamp for the given source key.
+// Each source independently tracks its own committed cursor; callers must not override this
+// with cross-source values (e.g. earliestEvent) as that would skip unprocessed events.
+func (f *SQLEventFeed) sinceForSource(cursor *eventFeedCursor, key string) time.Time {
 	if ts, ok := cursor.SourceCursors[key]; ok {
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-			return t, true
+			return t
 		}
 	}
-	return time.Now().UTC().Add(-defaultLookback(f.config.IncrementalSync)), false
+	return time.Now().UTC().Add(-defaultLookback(f.config.IncrementalSync))
 }
 
 // processResourceChangePage runs one page of the resource incremental query and returns ResourceChangeEvents.
@@ -324,11 +312,12 @@ func (f *SQLEventFeed) processGrantPage(
 
 			principalID := grant.GetPrincipal().GetId().GetResource()
 			tsStr := rowTimestamp.UTC().Format(time.RFC3339Nano)
+			rowKey := grantRowKey(rowMap, gc.Pagination)
 
 			var event *v2.Event
 			if isRevoke {
 				event = v2.Event_builder{
-					Id:         fmt.Sprintf("revoke:%s:%s:%s:%s", source.ResourceType, resourceID, principalID, tsStr),
+					Id:         fmt.Sprintf("revoke:%s:%s:%s:%s:%s", source.ResourceType, resourceID, principalID, tsStr, rowKey),
 					OccurredAt: timestamppb.New(rowTimestamp),
 					CreateRevokeEvent: v2.CreateRevokeEvent_builder{
 						Entitlement: grant.GetEntitlement(),
@@ -337,7 +326,7 @@ func (f *SQLEventFeed) processGrantPage(
 				}.Build()
 			} else {
 				event = v2.Event_builder{
-					Id:         fmt.Sprintf("grant:%s:%s:%s:%s", source.ResourceType, resourceID, principalID, tsStr),
+					Id:         fmt.Sprintf("grant:%s:%s:%s:%s:%s", source.ResourceType, resourceID, principalID, tsStr, rowKey),
 					OccurredAt: timestamppb.New(rowTimestamp),
 					CreateGrantEvent: v2.CreateGrantEvent_builder{
 						Entitlement: grant.GetEntitlement(),
@@ -400,6 +389,20 @@ func (f *SQLEventFeed) mapGrantFromRow(
 	}
 
 	return sdkGrant.NewGrant(minimalResource, entitlementID, principal), true, nil
+}
+
+// grantRowKey returns the string representation of the pagination primary key value for a row.
+// It is used to make grant/revoke event IDs unique when multiple rows share the same
+// (resource, principal, timestamp) triple — e.g. bulk imports with second-precision timestamps.
+func grantRowKey(rowMap map[string]any, p *Pagination) string {
+	if p == nil || p.PrimaryKey == "" {
+		return ""
+	}
+	v, ok := rowMap[p.PrimaryKey]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
 }
 
 // toTime converts a database column value to time.Time.
