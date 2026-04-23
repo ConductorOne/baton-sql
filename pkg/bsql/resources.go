@@ -26,19 +26,41 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 		return nil, "", nil, err
 	}
 
-	npt, err := s.runQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		r, err := s.mapResource(ctx, rowMap)
-		if err != nil {
-			return false, err
-		}
-		ret = append(ret, r)
-		return true, nil
-	})
+	// Use size-aware query execution to prevent exceeding gRPC message size limits
+	result, err := s.runQueryWithSizeLimit(ctx, pToken, s.config.List.Query, s.config.List.Pagination, queryVars,
+		func(ctx context.Context, rowMap map[string]any) (bool, int64, error) {
+			r, err := s.mapResource(ctx, rowMap)
+			if err != nil {
+				return false, 0, err
+			}
+			ret = append(ret, r)
+			// Estimate size of the serialized resource
+			size := estimateResourceSize(r)
+			return true, size, nil
+		})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	return ret, npt, nil, nil
+	return ret, result.NextPageToken, nil, nil
+}
+
+// estimateResourceSize provides a rough estimate of the serialized size of a resource.
+func estimateResourceSize(r *v2.Resource) int64 {
+	if r == nil {
+		return 0
+	}
+	var size int64
+	size += int64(len(r.DisplayName))
+	size += int64(len(r.Description))
+	if r.Id != nil {
+		size += int64(len(r.Id.Resource))
+		size += int64(len(r.Id.ResourceType))
+	}
+	// Add overhead for annotations, traits, and protobuf encoding
+	size += int64(len(r.Annotations) * 100)
+	size += sizeEstimateOverhead
+	return size
 }
 
 func (s *SQLSyncer) fetchTraits() map[string]bool {

@@ -26,10 +26,50 @@ const (
 	cursorKey       = "cursor"
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
+
+	// gRPC message size limits - we use a conservative threshold to avoid hitting the 4MB limit.
+	// The actual limit is 4MB, but we use 3MB to leave room for overhead and metadata.
+	maxResponseSizeBytes = 3 * 1024 * 1024 // 3MB conservative limit
+	sizeEstimateOverhead = 500             // Overhead per item for protobuf encoding
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
 var ErrQueryAffectedMoreThanOneRow = errors.New("query affected more than one row, ending and rolling back")
+
+// queryResult contains the result of a query execution along with size tracking information.
+type queryResult struct {
+	// NextPageToken is the token for the next page of results
+	NextPageToken string
+	// TotalSize is the approximate total size of all results in bytes
+	TotalSize int64
+	// ItemCount is the number of items returned
+	ItemCount int
+	// HitSizeLimit indicates whether the query stopped early due to size limits
+	HitSizeLimit bool
+}
+
+// estimateRowSize provides a rough estimate of the serialized size of a row map.
+// This is used to prevent exceeding gRPC message size limits.
+func estimateRowSize(rowMap map[string]interface{}) int64 {
+	var size int64
+	for k, v := range rowMap {
+		size += int64(len(k))
+		switch val := v.(type) {
+		case string:
+			size += int64(len(val))
+		case []byte:
+			size += int64(len(val))
+		case nil:
+			// nil values have minimal overhead
+		default:
+			// For other types, estimate 8-32 bytes
+			size += 16
+		}
+	}
+	// Add overhead for protobuf encoding, traits, and other fields
+	size += sizeEstimateOverhead
+	return size
+}
 
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -494,6 +534,141 @@ func (s *SQLSyncer) normalizeValue(val any) any {
 	}
 
 	return val
+}
+
+// runQueryWithSizeLimit executes a query with size-based early termination.
+// It returns a queryResult containing pagination info and size tracking.
+// The sizeEstimator function should return the estimated serialized size of the processed item.
+func (s *SQLSyncer) runQueryWithSizeLimit(
+	ctx context.Context,
+	pToken *pagination.Token,
+	query string,
+	pOpts *Pagination,
+	vars map[string]any,
+	rowCallback func(context.Context, map[string]interface{}) (bool, int64, error),
+) (*queryResult, error) {
+	l := ctxzap.Extract(ctx)
+
+	q, qArgs, pCtx, err := s.prepareQuery(pToken, query, pOpts, vars)
+	if err != nil {
+		return nil, err
+	}
+
+	l.Debug("running query with size limit", zap.String("query", q), zap.Any("args", qArgs))
+
+	rows, err := s.db.QueryContext(ctx, q, qArgs...)
+	if err != nil {
+		l.Error("failed to run query", zap.String("query", q), zap.Any("args", qArgs), zap.Error(err))
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	values := make([]interface{}, len(columns))
+	scanArgs := make([]interface{}, len(values))
+	for i := range values {
+		scanArgs[i] = &values[i]
+	}
+
+	result := &queryResult{}
+	var lastRowID any
+	rowCount := 0
+	hitPageLimit := false
+
+	for rows.Next() {
+		rowCount++
+
+		// Check if we've exceeded the page limit (standard pagination).
+		if pCtx != nil && rowCount > int(pCtx.Limit) {
+			hitPageLimit = true
+			break
+		}
+
+		if err := rows.Scan(scanArgs...); err != nil {
+			return nil, err
+		}
+
+		foundPaginationKey := false
+		var currentRowID any
+		rowMap := make(map[string]interface{})
+		for i, colName := range columns {
+			rowMap[colName] = values[i]
+			if pCtx != nil && pCtx.PrimaryKey == colName {
+				currentRowID = values[i]
+				foundPaginationKey = true
+			}
+		}
+
+		if pCtx != nil && !foundPaginationKey {
+			return nil, errors.New("primary key not found in query results")
+		}
+
+		// Check if adding this item would exceed size limits.
+		// We check BEFORE processing so that we can stop without data loss.
+		// The unprocessed row will be picked up by the next page.
+		if result.TotalSize > 0 && result.TotalSize+estimateRowSize(rowMap) > maxResponseSizeBytes {
+			result.HitSizeLimit = true
+			l.Info("stopping query early due to response size limit",
+				zap.Int64("current_size", result.TotalSize),
+				zap.Int("items_returned", result.ItemCount))
+			break
+		}
+
+		ok, itemSize, err := rowCallback(ctx, rowMap)
+		if err != nil {
+			return nil, err
+		}
+
+		// Use the actual item size if provided, otherwise use the row estimate.
+		if itemSize > 0 {
+			result.TotalSize += itemSize
+		} else {
+			result.TotalSize += estimateRowSize(rowMap)
+		}
+		result.ItemCount++
+
+		// Only update lastRowID after the callback succeeds, so that
+		// the next page token points to the last *processed* row.
+		lastRowID = currentRowID
+
+		// Post-callback size check: if accumulated size now exceeds the
+		// limit, stop before processing the next row.
+		if result.TotalSize > maxResponseSizeBytes {
+			result.HitSizeLimit = true
+			l.Info("stopping query after callback due to response size limit",
+				zap.Int64("current_size", result.TotalSize),
+				zap.Int("items_returned", result.ItemCount))
+			break
+		}
+
+		if !ok {
+			break
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Determine if we need a next page token.
+	// We need one if: we hit the page limit, OR we hit the size limit.
+	if pCtx != nil && (hitPageLimit || result.HitSizeLimit) {
+		// For offset strategy when hitting size limits, adjust the limit
+		// to reflect actual items processed so the next offset is correct.
+		if result.HitSizeLimit && pCtx.Strategy == offsetKey {
+			pCtx.Limit = int64(result.ItemCount)
+		}
+		result.NextPageToken, err = s.nextPageToken(pCtx, lastRowID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return result, nil
 }
 
 func (s *SQLSyncer) runQuery(

@@ -82,24 +82,48 @@ func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToke
 		return nil, "", err
 	}
 
-	npt, err := s.runQuery(ctx, pToken, grantConfig.Query, grantConfig.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		for _, mapping := range grantConfig.Map {
-			g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
-			if err != nil {
-				return false, err
-			}
+	// Use size-aware query execution to prevent exceeding gRPC message size limits
+	result, err := s.runQueryWithSizeLimit(ctx, pToken, grantConfig.Query, grantConfig.Pagination, queryVars,
+		func(ctx context.Context, rowMap map[string]any) (bool, int64, error) {
+			var itemSize int64
+			for _, mapping := range grantConfig.Map {
+				g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
+				if err != nil {
+					return false, 0, err
+				}
 
-			if ok {
-				ret = append(ret, g)
+				if ok {
+					ret = append(ret, g)
+					itemSize += estimateGrantSize(g)
+				}
 			}
-		}
-		return true, nil
-	})
+			return true, itemSize, nil
+		})
 	if err != nil {
 		return nil, "", err
 	}
 
-	return ret, npt, nil
+	return ret, result.NextPageToken, nil
+}
+
+// estimateGrantSize provides a rough estimate of the serialized size of a grant.
+func estimateGrantSize(g *v2.Grant) int64 {
+	if g == nil {
+		return 0
+	}
+	var size int64
+	size += int64(len(g.Id))
+	if g.Entitlement != nil {
+		size += int64(len(g.Entitlement.Id))
+	}
+	if g.Principal != nil && g.Principal.Id != nil {
+		size += int64(len(g.Principal.Id.Resource))
+		size += int64(len(g.Principal.Id.ResourceType))
+	}
+	// Add overhead for annotations and protobuf encoding
+	size += int64(len(g.Annotations) * 50)
+	size += sizeEstimateOverhead
+	return size
 }
 
 func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping *GrantMapping, rowMap map[string]any) (*v2.Grant, bool, error) {
