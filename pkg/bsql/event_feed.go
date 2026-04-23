@@ -228,16 +228,19 @@ func (f *SQLEventFeed) processResourceChangePage(
 
 		rowTimestamp := since
 		if ts, ok := rowMap[rc.CursorColumn]; ok {
-			if t, parseErr := toTime(ts); parseErr == nil {
-				rowTimestamp = t
-				if t.After(maxSeen) {
-					maxSeen = t
-				}
+			t, parseErr := toTime(ts)
+			if parseErr != nil {
+				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in resource incremental sync: %w", rc.CursorColumn, ts, parseErr)
+			}
+			rowTimestamp = t
+			if t.After(maxSeen) {
+				maxSeen = t
 			}
 		}
 
+		rowKey := grantRowKey(rowMap, rc.Pagination)
 		event := v2.Event_builder{
-			Id:         fmt.Sprintf("resource:%s:%s:%s", source.ResourceType, resourceID, rowTimestamp.UTC().Format(time.RFC3339Nano)),
+			Id:         fmt.Sprintf("resource:%s:%s:%s:%s", source.ResourceType, resourceID, rowTimestamp.UTC().Format(time.RFC3339Nano), rowKey),
 			OccurredAt: timestamppb.New(rowTimestamp),
 			ResourceChangeEvent: v2.ResourceChangeEvent_builder{
 				ResourceId: &v2.ResourceId{
@@ -292,11 +295,13 @@ func (f *SQLEventFeed) processGrantPage(
 	npt, err := s.runQuery(ctx, pToken, query, gc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		rowTimestamp := since
 		if ts, ok := rowMap[cursorCol]; ok {
-			if t, parseErr := toTime(ts); parseErr == nil {
-				rowTimestamp = t
-				if t.After(maxSeen) {
-					maxSeen = t
-				}
+			t, parseErr := toTime(ts)
+			if parseErr != nil {
+				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in grant incremental sync: %w", cursorCol, ts, parseErr)
+			}
+			rowTimestamp = t
+			if t.After(maxSeen) {
+				maxSeen = t
 			}
 		}
 
