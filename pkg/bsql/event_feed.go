@@ -3,6 +3,7 @@ package bsql
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -51,6 +52,9 @@ func (f *SQLEventFeed) EventFeedMetadata(_ context.Context) *v2.EventFeedMetadat
 }
 
 // ListEvents returns one page of events from the current source in the cursor.
+// earliestEvent is intentionally ignored: each source tracks its own committed cursor via
+// sinceForSource, and overriding it with a cross-source lower bound would re-emit already-
+// processed events from sources that have advanced past that point.
 func (f *SQLEventFeed) ListEvents(
 	ctx context.Context,
 	earliestEvent *timestamppb.Timestamp,
@@ -210,9 +214,14 @@ func (f *SQLEventFeed) processResourceChangePage(
 	var events []*v2.Event
 	var maxSeen time.Time
 
+	resourceIDExpr := s.config.List.Map.Id
+	if rc.ResourceId != "" {
+		resourceIDExpr = rc.ResourceId
+	}
+
 	npt, err := s.runQuery(ctx, pToken, rc.Query, rc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		inputs := s.env.SyncInputs(rowMap)
-		resourceID, evalErr := s.env.EvaluateString(ctx, s.config.List.Map.Id, inputs)
+		resourceID, evalErr := s.env.EvaluateString(ctx, resourceIDExpr, inputs)
 		if evalErr != nil {
 			return false, fmt.Errorf("baton-sql: failed to evaluate resource ID in resource incremental sync: %w", evalErr)
 		}
@@ -402,7 +411,15 @@ func grantRowKey(rowMap map[string]any, p *Pagination) string {
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf("%v", v)
+
+	switch n := v.(type) {
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case float64:
+		return strconv.FormatInt(int64(n), 10)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 // toTime converts a database column value to time.Time.

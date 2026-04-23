@@ -488,6 +488,11 @@ type ResourceIncrementalSync struct {
 	Query string `yaml:"query" json:"query"`
 	// CursorColumn is the column whose max value is used to advance the cursor for this source.
 	CursorColumn string `yaml:"cursor_column" json:"cursor_column"`
+	// ResourceId is a CEL expression that extracts the resource ID from each row returned by Query.
+	// When set, this expression is evaluated against the incremental query's columns.
+	// When not set, falls back to the list mapping's id expression (list.map.id), which requires
+	// the incremental query to return all columns that expression references.
+	ResourceId string `yaml:"resource_id,omitempty" json:"resource_id,omitempty"`
 	// Pagination defines the pagination strategy. Defaults to offset if not set.
 	Pagination *Pagination `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	// Vars provides optional variables for the query.

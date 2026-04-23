@@ -212,6 +212,11 @@ func (l *ResourceIncrementalSync) staticValidate(ctx context.Context, s *SQLSync
 			return fmt.Errorf("vars must not use reserved key %q", k)
 		}
 	}
+	if l.ResourceId != "" {
+		if err := s.env.Compile(l.ResourceId); err != nil {
+			return fmt.Errorf("incremental_sync.resource_id: invalid CEL expression: %w", err)
+		}
+	}
 	return nil
 }
 
