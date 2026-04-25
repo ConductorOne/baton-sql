@@ -392,7 +392,7 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		}
 
 		if rowsAffected > 1 {
-			return fmt.Errorf("provisioning query affected rows %d > 1, query idx: %d error: %w", rowsAffected, idx, ErrQueryAffectedMoreThanOneRow)
+			return fmt.Errorf("provisioning query at index %d affected %d rows: %w", idx, rowsAffected, ErrQueryAffectedMoreThanOneRow)
 		}
 
 		if rowsAffected == 0 {
