@@ -375,7 +375,7 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 
 	zeroRowCount := 0
 
-	for _, q := range queries {
+	for idx, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
 			return fmt.Errorf("failed to prepare query: %w", err)
@@ -392,7 +392,7 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		}
 
 		if rowsAffected > 1 {
-			return ErrQueryAffectedMoreThanOneRow
+			return fmt.Errorf("provisioning query at index %d affected %d rows: %w", idx, rowsAffected, ErrQueryAffectedMoreThanOneRow)
 		}
 
 		if rowsAffected == 0 {
