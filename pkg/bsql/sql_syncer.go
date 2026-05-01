@@ -11,6 +11,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -19,6 +21,8 @@ const (
 	groupTraitType = "group"
 	roleTraitType  = "role"
 )
+
+var _ connectorbuilder.ResourceTargetedSyncer = (*SQLSyncer)(nil)
 
 type SQLSyncer struct {
 	resourceType *v2.ResourceType
@@ -66,7 +70,7 @@ func (s *SQLSyncer) Get(ctx context.Context, resourceId *v2.ResourceId, parentRe
 		return nil, nil, fmt.Errorf("baton-sql: failed to execute get query for %s/%s: %w", resourceId.GetResourceType(), resourceId.GetResource(), err)
 	}
 	if result == nil {
-		return nil, nil, fmt.Errorf("baton-sql: resource %s/%s not found", resourceId.GetResourceType(), resourceId.GetResource())
+		return nil, nil, status.Errorf(codes.NotFound, "baton-sql: resource %s/%s not found", resourceId.GetResourceType(), resourceId.GetResource())
 	}
 	return result, nil, nil
 }
