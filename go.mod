@@ -4,7 +4,7 @@ go 1.25.2
 
 require (
 	github.com/SAP/go-hdb v1.14.5
-	github.com/conductorone/baton-sdk v0.8.30
+	github.com/conductorone/baton-sdk v0.9.0
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.9.2
@@ -56,7 +56,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/conductorone/dpop v0.2.4 // indirect
 	github.com/conductorone/dpop/integrations/dpop_grpc v0.2.4 // indirect
-	github.com/conductorone/dpop/integrations/dpop_oauth2 v0.2.4 // indirect
+	github.com/conductorone/dpop/integrations/dpop_oauth2 v0.2.5 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/doug-martin/goqu/v9 v9.19.0 // indirect
