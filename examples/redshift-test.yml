@@ -1,0 +1,493 @@
+---
+# Amazon Redshift baton-sql configuration.
+#
+# Redshift speaks the PostgreSQL wire protocol on port 5439, so the existing `postgres`
+# engine (driver: pgx/v5) works against it unchanged. The connector iterates every
+# database in the cluster because Redshift's svv_*_privileges views are per-database;
+# users / groups / roles are cluster-global.
+#
+# Service-account setup. Run per database the connector syncs:
+#   CREATE USER c1_baton WITH PASSWORD '<strong>' CONNECTION LIMIT 10;
+#   GRANT SELECT ON pg_user, pg_group TO c1_baton;
+#   GRANT SELECT ON svv_relation_privileges, svv_schema_privileges,
+#                   svv_database_privileges, svv_column_privileges,
+#                   svv_default_privileges, svv_all_tables, svv_all_schemas,
+#                   svv_roles, svv_role_grants, svv_user_grants,
+#                   svv_redshift_databases
+#          TO c1_baton;
+#
+# Run once at the cluster level:
+#   CREATE ROLE c1_baton_role;
+#   GRANT ACCESS SYSTEM TABLE TO ROLE c1_baton_role;
+#   GRANT ROLE c1_baton_role TO c1_baton;
+#   ALTER USER c1_baton CREATEUSER;          -- required for cluster-wide svv_all_* visibility
+#   GRANT ROLE sys:secadmin TO c1_baton;     -- provisioning only
+#
+# ACCESS SYSTEM TABLE is the #1 silent-failure mode. Without it the svv_*_privileges
+# views return only rows owned by c1_baton itself and the sync looks empty rather than
+# failing loudly. Per https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html system
+# permissions must be granted TO ROLE, not directly to a user.
+#
+# CREATEUSER is additionally required for cluster-wide schema/table visibility; without
+# it (or explicit USAGE on every schema), svv_all_tables / svv_all_schemas return only
+# objects c1_baton owns.
+#
+# Out of scope: IAM credential rotation (redshift:GetClusterCredentials), Redshift
+# Serverless, native IdP federation (CREATE IDENTITY PROVIDER), CREATE USER / CREATE
+# ROLE, AD-group -> DbGroups mapping (lives in the IdP).
+#
+# Driver caveat: baton-sql uses jackc/pgx/v5 for the postgres scheme. If prepared-
+# statement quirks surface, pin to simple-query protocol via the DSN parameter
+# default_query_exec_mode=simple_protocol.
+app_name: Amazon Redshift
+app_description: Sync Redshift cluster identities, roles, groups, schemas, and tables.
+
+connect:
+  # Postgres-wire DSN over port 5439. ${ADMIN_DB} is the bootstrap database used for the
+  # discovery query and for cluster-scoped queries (pg_user, pg_group, svv_roles, etc.).
+  dsn: "postgres://${HOST}:5439/${ADMIN_DB}?sslmode=${REDSHIFT_SSLMODE}"
+  user: "${USER}"
+  password: "${PASSWORD}"
+  databases:
+    # Per https://docs.aws.amazon.com/redshift/latest/dg/r_SVV_REDSHIFT_DATABASES.html
+    # database_type='local' filters out
+    # datashare-attached databases that the connector cannot meaningfully sync.
+    discovery_query: |
+      SELECT database_name
+      FROM svv_redshift_databases
+      WHERE database_type = 'local'
+      ORDER BY database_name
+
+resource_types:
+  # --- Cluster-scoped principals ---------------------------------------------------
+  user:
+    name: "User"
+    description: "A Redshift database user (pg_user)"
+    list:
+      scope: cluster
+      query: |
+        SELECT usename FROM pg_user ORDER BY usename
+      map:
+        id: ".usename"
+        display_name: ".usename"
+        description: "'Redshift user'"
+        traits:
+          user:
+            login: ".usename"
+            account_type: "'human'"
+
+  group:
+    name: "Group"
+    description: "A Redshift database group (pg_group)"
+    list:
+      scope: cluster
+      # pg_* internal groups are filtered out; they are not user-visible memberships.
+      query: |
+        SELECT groname FROM pg_group WHERE groname NOT LIKE 'pg\_%' ORDER BY groname
+      map:
+        id: ".groname"
+        display_name: ".groname"
+        description: "'Redshift group'"
+        traits:
+          group: {}
+    static_entitlements:
+      - id: member
+        display_name: "resource.DisplayName + ' member'"
+        description: "'Membership in Redshift group ' + resource.DisplayName"
+        purpose: assignment
+        grantable_to: [user]
+        slug: member
+        provisioning:
+          vars:
+            group: "resource.ID"
+            user_name: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "ALTER GROUP ?<group|identifier> ADD USER ?<user_name|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "ALTER GROUP ?<group|identifier> DROP USER ?<user_name|identifier>"
+    grants:
+      - scope: cluster
+        # pg_group.grolist is a Postgres array of pg_user.usesysid values. ANY() expands
+        # it inline so each (group, member) pair appears as one row.
+        query: |
+          SELECT g.groname, u.usename
+          FROM pg_group g
+          JOIN pg_user u ON u.usesysid = ANY (g.grolist)
+          WHERE g.groname NOT LIKE 'pg\_%'
+          ORDER BY g.groname, u.usename
+        map:
+          - skip_if: ".groname != resource.ID"
+            principal_id: ".usename"
+            principal_type: user
+            entitlement_id: member
+
+  role:
+    name: "Role"
+    description: "A Redshift RBAC role (svv_roles)"
+    list:
+      scope: cluster
+      query: |
+        SELECT role_name FROM svv_roles ORDER BY role_name
+      map:
+        id: ".role_name"
+        display_name: ".role_name"
+        description: "'Redshift role'"
+        traits:
+          role: {}
+    static_entitlements:
+      - id: member
+        display_name: "resource.DisplayName + ' member'"
+        description: "'Membership in Redshift role ' + resource.DisplayName"
+        purpose: assignment
+        grantable_to: [user, role]
+        slug: member
+        provisioning:
+          vars:
+            role: "resource.ID"
+            grantee: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "GRANT ROLE ?<role|identifier> TO ?<grantee|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "REVOKE ROLE ?<role|identifier> FROM ?<grantee|identifier>"
+    grants:
+      # User-to-role grants live in svv_user_grants; role-to-role grants in svv_role_grants.
+      # Two grants blocks, each emitting one assignment per row, filtered by resource.ID.
+      - scope: cluster
+        query: |
+          SELECT role_name, user_name FROM svv_user_grants ORDER BY role_name, user_name
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".user_name"
+            principal_type: user
+            entitlement_id: member
+      - scope: cluster
+        query: |
+          SELECT role_name, granted_role_name FROM svv_role_grants
+          ORDER BY role_name, granted_role_name
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".granted_role_name"
+            principal_type: role
+            entitlement_id: member
+
+  # --- Per-database catalog ---------------------------------------------------------
+  database:
+    name: "Database"
+    description: "A Redshift database (svv_redshift_databases)"
+    list:
+      scope: cluster
+      query: |
+        SELECT database_name
+        FROM svv_redshift_databases
+        WHERE database_type = 'local'
+        ORDER BY database_name
+      map:
+        id: ".database_name"
+        display_name: ".database_name"
+        description: "'Redshift database ' + string(.database_name)"
+    static_entitlements:
+      # Read-only: https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html lists CREATE/TEMP/USAGE/ALTER as the
+      # database-level grantable privileges, not CONNECT. svv_database_privileges
+      # still surfaces CONNECT rows, so visibility works, but a GRANT CONNECT path
+      # is not documented and is left out until validated.
+      - id: connect
+        display_name: "resource.DisplayName + ' CONNECT'"
+        description: "'CONNECT on database ' + resource.DisplayName"
+        purpose: permission
+        grantable_to: [user, role, group]
+        slug: connect
+        immutable: true
+    grants:
+      # svv_database_privileges is per-database, so this query runs once per DB and
+      # we filter to the row matching resource.ID. identity_type is 'user' | 'role' |
+      # 'group' | 'public'; one map entry per type, others skipped.
+      - query: |
+          SELECT database_name, privilege_type, identity_name, identity_type
+          FROM svv_database_privileges
+          WHERE privilege_type = 'CONNECT'
+          ORDER BY identity_name
+        map:
+          - skip_if: ".database_name != resource.ID || .identity_type != 'user'"
+            principal_id: ".identity_name"
+            principal_type: user
+            entitlement_id: connect
+          - skip_if: ".database_name != resource.ID || .identity_type != 'role'"
+            principal_id: ".identity_name"
+            principal_type: role
+            entitlement_id: connect
+          - skip_if: ".database_name != resource.ID || .identity_type != 'group'"
+            principal_id: ".identity_name"
+            principal_type: group
+            entitlement_id: connect
+
+  schema:
+    name: "Schema"
+    description: "A schema inside a Redshift database (svv_all_schemas)"
+    list:
+      # svv_all_schemas returns the cluster-wide schema catalog regardless of which
+      # database the caller is connected to, so this list runs once instead of per-DB
+      # to avoid double-counting in multi-database deployments.
+      scope: cluster
+      query: |
+        SELECT database_name, schema_name
+        FROM svv_all_schemas
+        WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_internal')
+          AND schema_name NOT LIKE 'pg\_%'
+        ORDER BY database_name, schema_name
+      map:
+        id: "string(.database_name) + '.' + string(.schema_name)"
+        display_name: "string(.database_name) + '.' + string(.schema_name)"
+        description: "'Redshift schema'"
+        traits:
+          group:
+            profile:
+              database: ".database_name"
+              schema: ".schema_name"
+    static_entitlements:
+      - id: usage
+        display_name: "resource.DisplayName + ' USAGE'"
+        description: "'USAGE on schema ' + resource.DisplayName"
+        purpose: permission
+        grantable_to: [user, role, group]
+        slug: usage
+        provisioning:
+          vars:
+            # Provisioning routes to the named database via the magic `database` var.
+            database: "resource.profile.database"
+            schema: "resource.profile.schema"
+            grantee: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "GRANT USAGE ON SCHEMA ?<schema|identifier> TO ?<grantee|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "REVOKE USAGE ON SCHEMA ?<schema|identifier> FROM ?<grantee|identifier>"
+      - id: create
+        display_name: "resource.DisplayName + ' CREATE'"
+        description: "'CREATE on schema ' + resource.DisplayName"
+        purpose: permission
+        grantable_to: [user, role, group]
+        slug: create
+        provisioning:
+          vars:
+            database: "resource.profile.database"
+            schema: "resource.profile.schema"
+            grantee: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "GRANT CREATE ON SCHEMA ?<schema|identifier> TO ?<grantee|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "REVOKE CREATE ON SCHEMA ?<schema|identifier> FROM ?<grantee|identifier>"
+    grants:
+      # Per-database iteration. svv_schema_privileges does not include database name, so
+      # the synthetic `database` column distinguishes rows from different DBs.
+      - query: |
+          SELECT namespace_name, privilege_type, identity_name, identity_type
+          FROM svv_schema_privileges
+          WHERE privilege_type IN ('USAGE', 'CREATE')
+          ORDER BY namespace_name, identity_name
+        map:
+          # entitlement_id is "<database>.<schema>:<privilege_type>"; the resource ID
+          # already encodes database+schema so skip_if just compares.
+          - skip_if: "string(.database) + '.' + string(.namespace_name) != resource.ID || .privilege_type != 'USAGE' || .identity_type != 'user'"
+            principal_id: ".identity_name"
+            principal_type: user
+            entitlement_id: usage
+          - skip_if: "string(.database) + '.' + string(.namespace_name) != resource.ID || .privilege_type != 'USAGE' || .identity_type != 'role'"
+            principal_id: ".identity_name"
+            principal_type: role
+            entitlement_id: usage
+          - skip_if: "string(.database) + '.' + string(.namespace_name) != resource.ID || .privilege_type != 'USAGE' || .identity_type != 'group'"
+            principal_id: ".identity_name"
+            principal_type: group
+            entitlement_id: usage
+          - skip_if: "string(.database) + '.' + string(.namespace_name) != resource.ID || .privilege_type != 'CREATE' || .identity_type != 'user'"
+            principal_id: ".identity_name"
+            principal_type: user
+            entitlement_id: create
+          - skip_if: "string(.database) + '.' + string(.namespace_name) != resource.ID || .privilege_type != 'CREATE' || .identity_type != 'role'"
+            principal_id: ".identity_name"
+            principal_type: role
+            entitlement_id: create
+          - skip_if: "string(.database) + '.' + string(.namespace_name) != resource.ID || .privilege_type != 'CREATE' || .identity_type != 'group'"
+            principal_id: ".identity_name"
+            principal_type: group
+            entitlement_id: create
+
+  table:
+    name: "Table"
+    description: "A table or view inside a Redshift schema (svv_all_tables)"
+    list:
+      # svv_all_tables returns the cluster-wide table catalog regardless of which
+      # database the caller is connected to, so this list runs once instead of per-DB
+      # to avoid double-counting in multi-database deployments.
+      scope: cluster
+      query: |
+        SELECT database_name, schema_name, table_name, table_type
+        FROM svv_all_tables
+        WHERE table_type IN ('TABLE', 'VIEW')
+          AND schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_internal')
+          AND schema_name NOT LIKE 'pg\_%'
+        ORDER BY database_name, schema_name, table_name
+      map:
+        id: "string(.database_name) + '.' + string(.schema_name) + '.' + string(.table_name)"
+        display_name: "string(.database_name) + '.' + string(.schema_name) + '.' + string(.table_name)"
+        description: ".table_type"
+        traits:
+          group:
+            profile:
+              database: ".database_name"
+              schema: ".schema_name"
+              table: ".table_name"
+              table_type: ".table_type"
+    static_entitlements:
+      - id: select
+        display_name: "resource.DisplayName + ' SELECT'"
+        description: "'SELECT on ' + resource.DisplayName"
+        purpose: permission
+        grantable_to: [user, role, group]
+        slug: select
+        provisioning:
+          vars:
+            database: "resource.profile.database"
+            schema: "resource.profile.schema"
+            tbl: "resource.profile.table"
+            grantee: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "GRANT SELECT ON ?<schema|identifier>.?<tbl|identifier> TO ?<grantee|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "REVOKE SELECT ON ?<schema|identifier>.?<tbl|identifier> FROM ?<grantee|identifier>"
+      - id: insert
+        display_name: "resource.DisplayName + ' INSERT'"
+        description: "'INSERT on ' + resource.DisplayName"
+        purpose: permission
+        grantable_to: [user, role, group]
+        slug: insert
+        provisioning:
+          vars:
+            database: "resource.profile.database"
+            schema: "resource.profile.schema"
+            tbl: "resource.profile.table"
+            grantee: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "GRANT INSERT ON ?<schema|identifier>.?<tbl|identifier> TO ?<grantee|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "REVOKE INSERT ON ?<schema|identifier>.?<tbl|identifier> FROM ?<grantee|identifier>"
+      - id: update
+        display_name: "resource.DisplayName + ' UPDATE'"
+        description: "'UPDATE on ' + resource.DisplayName"
+        purpose: permission
+        grantable_to: [user, role, group]
+        slug: update
+        provisioning:
+          vars:
+            database: "resource.profile.database"
+            schema: "resource.profile.schema"
+            tbl: "resource.profile.table"
+            grantee: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "GRANT UPDATE ON ?<schema|identifier>.?<tbl|identifier> TO ?<grantee|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "REVOKE UPDATE ON ?<schema|identifier>.?<tbl|identifier> FROM ?<grantee|identifier>"
+      - id: delete
+        display_name: "resource.DisplayName + ' DELETE'"
+        description: "'DELETE on ' + resource.DisplayName"
+        purpose: permission
+        grantable_to: [user, role, group]
+        slug: delete
+        provisioning:
+          vars:
+            database: "resource.profile.database"
+            schema: "resource.profile.schema"
+            tbl: "resource.profile.table"
+            grantee: "principal.ID"
+          grant:
+            no_transaction: true
+            queries:
+              - "GRANT DELETE ON ?<schema|identifier>.?<tbl|identifier> TO ?<grantee|identifier>"
+          revoke:
+            no_transaction: true
+            queries:
+              - "REVOKE DELETE ON ?<schema|identifier>.?<tbl|identifier> FROM ?<grantee|identifier>"
+    grants:
+      # svv_relation_privileges is per-database. Compose the resource.ID match from the
+      # synthetic `database` column plus the view's namespace_name + relation_name.
+      - query: |
+          SELECT namespace_name, relation_name, privilege_type, identity_name, identity_type
+          FROM svv_relation_privileges
+          WHERE privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+          ORDER BY namespace_name, relation_name, identity_name
+        map:
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'SELECT' || .identity_type != 'user'"
+            principal_id: ".identity_name"
+            principal_type: user
+            entitlement_id: select
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'SELECT' || .identity_type != 'role'"
+            principal_id: ".identity_name"
+            principal_type: role
+            entitlement_id: select
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'SELECT' || .identity_type != 'group'"
+            principal_id: ".identity_name"
+            principal_type: group
+            entitlement_id: select
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'INSERT' || .identity_type != 'user'"
+            principal_id: ".identity_name"
+            principal_type: user
+            entitlement_id: insert
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'INSERT' || .identity_type != 'role'"
+            principal_id: ".identity_name"
+            principal_type: role
+            entitlement_id: insert
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'INSERT' || .identity_type != 'group'"
+            principal_id: ".identity_name"
+            principal_type: group
+            entitlement_id: insert
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'UPDATE' || .identity_type != 'user'"
+            principal_id: ".identity_name"
+            principal_type: user
+            entitlement_id: update
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'UPDATE' || .identity_type != 'role'"
+            principal_id: ".identity_name"
+            principal_type: role
+            entitlement_id: update
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'UPDATE' || .identity_type != 'group'"
+            principal_id: ".identity_name"
+            principal_type: group
+            entitlement_id: update
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'DELETE' || .identity_type != 'user'"
+            principal_id: ".identity_name"
+            principal_type: user
+            entitlement_id: delete
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'DELETE' || .identity_type != 'role'"
+            principal_id: ".identity_name"
+            principal_type: role
+            entitlement_id: delete
+          - skip_if: "string(.database) + '.' + string(.namespace_name) + '.' + string(.relation_name) != resource.ID || .privilege_type != 'DELETE' || .identity_type != 'group'"
+            principal_id: ".identity_name"
+            principal_type: group
+            entitlement_id: delete
