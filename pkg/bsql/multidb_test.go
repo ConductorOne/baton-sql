@@ -169,7 +169,6 @@ func TestResolveProvisioningDB_RoutesByVars(t *testing.T) {
 	s := newSyncerForIterTest([]string{"analytics", "dev"})
 	s.db = s.dbs["dev"]
 
-	// Vars name a known database → that handle is returned.
 	got, err := s.resolveProvisioningDB(map[string]any{rowColDatabase: "dev"})
 	require.NoError(t, err)
 	require.Same(t, s.dbs["dev"], got)
@@ -179,12 +178,10 @@ func TestResolveProvisioningDB_RoutesByVars(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, s.dbs["analytics"], got)
 
-	// Empty-string database var → also routes to primary, same as absent.
 	got, err = s.resolveProvisioningDB(map[string]any{rowColDatabase: ""})
 	require.NoError(t, err)
 	require.Same(t, s.dbs["analytics"], got)
 
-	// Unknown name → error (loud failure beats silent misroute).
 	_, err = s.resolveProvisioningDB(map[string]any{rowColDatabase: "nope"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown database")

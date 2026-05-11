@@ -283,7 +283,6 @@ type EntitlementsQuery struct {
 	// Map contains mappings that interpret query results as entitlement objects.
 	Map []*EntitlementMapping `yaml:"map" json:"map"`
 
-	// See ListQuery.Scope.
 	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 }
 
@@ -357,7 +356,6 @@ type GrantsQuery struct {
 	// Map contains mappings to interpret each row of the query result as a grant.
 	Map []*GrantMapping `yaml:"map" json:"map"`
 
-	// See ListQuery.Scope.
 	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 }
 

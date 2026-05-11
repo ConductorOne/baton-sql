@@ -188,9 +188,6 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 			return SanitizeIdentifier(fmt.Sprintf("%v", val))
 		}
 
-		// If the value is an identifier, inline it with engine-aware quoting. This is the
-		// only safe way to substitute table / schema / role names into GRANT / REVOKE / DDL
-		// where the SQL grammar does not allow parameter binding.
 		if opts.Identifier {
 			return s.quoteIdentifier(val)
 		}

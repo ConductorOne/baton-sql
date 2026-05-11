@@ -56,7 +56,6 @@ func (s *SQLSyncer) setCurrentDB(name string) {
 	}
 }
 
-// sortedDBNames: deterministic iteration order and stable primary-handle pick.
 func sortedDBNames(dbs map[string]*sql.DB) []string {
 	names := make([]string, 0, len(dbs))
 	for name := range dbs {
