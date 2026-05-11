@@ -322,6 +322,21 @@ func expandDSN(dsn string) (string, error) {
 	return parsedUrl.String(), nil
 }
 
+// ResolveDatabaseName returns the database opts would connect to, merging the DSN
+// path with the structured field. Empty when neither supplies one.
+func ResolveDatabaseName(opts ConnectOptions) string {
+	if opts.Database != "" {
+		if expanded, err := expandValue(opts.Database); err == nil && expanded != "" {
+			return expanded
+		}
+	}
+	parsedUrl, err := buildConnectionURL(opts)
+	if err != nil || parsedUrl == nil {
+		return ""
+	}
+	return strings.TrimPrefix(parsedUrl.Path, "/")
+}
+
 // ConnectMany opens one *sql.DB per name in dbNames. On any per-database failure,
 // every handle opened so far is closed before returning the error.
 func ConnectMany(ctx context.Context, opts ConnectOptions, dbNames []string) (map[string]*sql.DB, DbEngine, error) {

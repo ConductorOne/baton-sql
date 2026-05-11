@@ -123,12 +123,11 @@ func parseToken(token string) (*queryTokenOpts, error) {
 	return opts, nil
 }
 
-func (s *SQLSyncer) quoteIdentifier(v any) string {
-	str := fmt.Sprintf("%v", v)
+func (s *SQLSyncer) quoteIdentifier(name string) string {
 	if s.dbEngine == database.MySQL {
-		return "`" + strings.ReplaceAll(str, "`", "``") + "`"
+		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
 	}
-	return `"` + strings.ReplaceAll(str, `"`, `""`) + `"`
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func (s *SQLSyncer) queryVars(query string) ([]string, error) {
@@ -189,7 +188,7 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 		}
 
 		if opts.Identifier {
-			return s.quoteIdentifier(val)
+			return s.quoteIdentifier(fmt.Sprintf("%v", val))
 		}
 
 		qArgs = append(qArgs, val)
@@ -342,7 +341,7 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 		}
 
 		if opts.Identifier {
-			return s.quoteIdentifier(v)
+			return s.quoteIdentifier(fmt.Sprintf("%v", v))
 		}
 
 		qArgs = append(qArgs, v)
@@ -370,10 +369,7 @@ func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) 
 	if db, ok := s.dbs[s.primaryDBName]; ok {
 		return db, nil
 	}
-	if s.db != nil {
-		return s.db, nil
-	}
-	return nil, errors.New("provisioning: no database handle available")
+	return nil, fmt.Errorf("provisioning: primary database %q not found in handles (configured: %v)", s.primaryDBName, s.dbNames)
 }
 
 func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validationQueries []string, vars map[string]any, useTx bool) error {

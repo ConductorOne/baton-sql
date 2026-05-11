@@ -158,7 +158,8 @@ func openDatabases(
 		if err != nil {
 			return nil, database.Unknown, err
 		}
-		return map[string]*sql.DB{opts.Database: db}, dbEngine, nil
+		key := database.ResolveDatabaseName(opts)
+		return map[string]*sql.DB{key: db}, dbEngine, nil
 	}
 
 	if err := dbsCfg.Validate(); err != nil {
