@@ -7,9 +7,17 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 )
 
-// iterateDBs is a no-op (single-DB or scope: cluster) or a pagination.Bag-driven
-// fan-out (multi-DB). The single-DB path returns the inner token byte-for-byte so
-// pre-multi-database token formats stay wire-compatible.
+// iterateDBs runs work against one database at a time and stitches the per-database
+// pagination tokens into a single outer token.
+//
+// Single-DB connectors (and any query marked scope: cluster) hit the fast path: work
+// runs once against the primary handle and its token is returned unchanged, so tokens
+// minted before the multi-database feature existed stay wire-compatible.
+//
+// Multi-DB connectors use a pagination.Bag holding one PageState per database; each
+// call drains the current database's pages before advancing to the next. s.db and
+// s.currentDBName are swapped in place before invoking work, which is safe because
+// the SDK calls List/Entitlements/Grants serially per syncer.
 func (s *SQLSyncer) iterateDBs(
 	ctx context.Context,
 	scope string,
