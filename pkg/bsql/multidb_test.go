@@ -131,6 +131,18 @@ func TestIterateDBs_PropagatesWorkErrors(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 }
 
+func TestSetCurrentDB_UnknownNameErrors(t *testing.T) {
+	s := newSyncerForIterTest([]string{"a", "b"})
+	require.NoError(t, s.setCurrentDB("a"))
+	require.Same(t, s.dbs["a"], s.db)
+
+	err := s.setCurrentDB("nope")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown database")
+	// State must not have mutated to the unknown handle.
+	require.Same(t, s.dbs["a"], s.db)
+}
+
 func TestSortedDBNames_IsSorted(t *testing.T) {
 	dbs := map[string]*sql.DB{
 		"zeta":  {},

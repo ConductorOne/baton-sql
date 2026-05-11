@@ -42,18 +42,16 @@ func (s *SQLSyncer) ResourceType(ctx context.Context) *v2.ResourceType {
 	return s.resourceType
 }
 
-// setCurrentDB falls back to the primary handle when name is unknown so callers
-// always have a usable handle, never nil.
-func (s *SQLSyncer) setCurrentDB(name string) {
-	if db, ok := s.dbs[name]; ok {
-		s.db = db
-		s.currentDBName = name
-		return
+// setCurrentDB errors on unknown names rather than silently falling back; the previous
+// fallback could mask a programming bug by routing queries to an unintended database.
+func (s *SQLSyncer) setCurrentDB(name string) error {
+	db, ok := s.dbs[name]
+	if !ok {
+		return fmt.Errorf("setCurrentDB: unknown database %q (configured: %v)", name, s.dbNames)
 	}
-	if db, ok := s.dbs[s.primaryDBName]; ok {
-		s.db = db
-		s.currentDBName = s.primaryDBName
-	}
+	s.db = db
+	s.currentDBName = name
+	return nil
 }
 
 func sortedDBNames(dbs map[string]*sql.DB) []string {

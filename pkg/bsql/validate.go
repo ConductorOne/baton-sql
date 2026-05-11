@@ -32,11 +32,28 @@ func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) err
 	return nil
 }
 
+// validateScope rejects typos like `scope: clustr` that would silently downgrade to
+// per-database iteration. Empty (default) or "cluster" only.
+func validateScope(scope string) error {
+	switch scope {
+	case "", scopeCluster:
+		return nil
+	default:
+		return fmt.Errorf("invalid scope %q: must be empty or %q", scope, scopeCluster)
+	}
+}
+
 func (l *ListQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if err := validateScope(l.Scope); err != nil {
+		return err
+	}
 	return validateVarsInQuery(s, l.Query, l.Vars)
 }
 
 func (l *EntitlementsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if err := validateScope(l.Scope); err != nil {
+		return err
+	}
 	for _, mapping := range l.Map {
 		if mapping.Provisioning == nil {
 			continue
@@ -91,6 +108,9 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 }
 
 func (l *GrantsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if err := validateScope(l.Scope); err != nil {
+		return err
+	}
 	return validateVarsInQuery(s, l.Query, l.Vars)
 }
 

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -18,11 +17,10 @@ import (
 )
 
 type Connector struct {
-	config        *bsql.Config
-	dbs           map[string]*sql.DB
-	primaryDBName string
-	dbEngine      database.DbEngine
-	celEnv        *bcel.Env
+	config   *bsql.Config
+	dbs      map[string]*sql.DB
+	dbEngine database.DbEngine
+	celEnv   *bcel.Env
 }
 
 func (c *Connector) Close() error {
@@ -127,7 +125,7 @@ func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
 		Params:   c.Connect.Params,
 	}
 
-	dbs, primaryDBName, dbEngine, err := openDatabases(ctx, opts, c.Connect.Databases)
+	dbs, dbEngine, err := openDatabases(ctx, opts, c.Connect.Databases)
 	if err != nil {
 		return nil, err
 	}
@@ -141,66 +139,52 @@ func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
 	}
 
 	return &Connector{
-		config:        c,
-		dbs:           dbs,
-		primaryDBName: primaryDBName,
-		dbEngine:      dbEngine,
-		celEnv:        celEnv,
+		config:   c,
+		dbs:      dbs,
+		dbEngine: dbEngine,
+		celEnv:   celEnv,
 	}, nil
 }
 
-// openDatabases returns one *sql.DB per database to sync. primaryDBName is the
-// lexicographically first name and is the target for cluster-scoped queries.
+// openDatabases returns one *sql.DB per database to sync. Consumers derive their own
+// sorted view via sortedDBNames; this function does not pre-sort.
 func openDatabases(
 	ctx context.Context,
 	opts database.ConnectOptions,
 	dbsCfg *bsql.DatabasesConfig,
-) (map[string]*sql.DB, string, database.DbEngine, error) {
+) (map[string]*sql.DB, database.DbEngine, error) {
 	if dbsCfg == nil {
 		db, dbEngine, err := database.Connect(ctx, opts)
 		if err != nil {
-			return nil, "", database.Unknown, err
+			return nil, database.Unknown, err
 		}
-		dbs := map[string]*sql.DB{opts.Database: db}
-		return dbs, opts.Database, dbEngine, nil
+		return map[string]*sql.DB{opts.Database: db}, dbEngine, nil
 	}
 
 	if err := dbsCfg.Validate(); err != nil {
-		return nil, "", database.Unknown, err
+		return nil, database.Unknown, err
 	}
 
 	dbNames := dbsCfg.Static
 	if dbsCfg.DiscoveryQuery != "" {
 		adminDB, _, err := database.Connect(ctx, opts)
 		if err != nil {
-			return nil, "", database.Unknown, fmt.Errorf("databases.discovery_query: admin connect failed: %w", err)
+			return nil, database.Unknown, fmt.Errorf("databases.discovery_query: admin connect failed: %w", err)
 		}
 		discovered, discoverErr := runDiscoveryQuery(ctx, adminDB, dbsCfg.DiscoveryQuery)
 		if cerr := adminDB.Close(); cerr != nil && discoverErr == nil {
 			discoverErr = fmt.Errorf("admin handle close: %w", cerr)
 		}
 		if discoverErr != nil {
-			return nil, "", database.Unknown, discoverErr
+			return nil, database.Unknown, discoverErr
 		}
 		if len(discovered) == 0 {
-			return nil, "", database.Unknown, errors.New("databases.discovery_query: returned zero rows")
+			return nil, database.Unknown, errors.New("databases.discovery_query: returned zero rows")
 		}
 		dbNames = discovered
 	}
 
-	dbs, dbEngine, err := database.ConnectMany(ctx, opts, dbNames)
-	if err != nil {
-		return nil, "", database.Unknown, err
-	}
-
-	sortedNames := make([]string, 0, len(dbs))
-	for n := range dbs {
-		sortedNames = append(sortedNames, n)
-	}
-	sort.Strings(sortedNames)
-	primaryDBName := sortedNames[0]
-
-	return dbs, primaryDBName, dbEngine, nil
+	return database.ConnectMany(ctx, opts, dbNames)
 }
 
 func runDiscoveryQuery(ctx context.Context, db *sql.DB, query string) ([]string, error) {

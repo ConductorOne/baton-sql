@@ -21,7 +21,9 @@ func (s *SQLSyncer) iterateDBs(
 	}
 
 	if scope == scopeCluster || len(s.dbNames) <= 1 {
-		s.setCurrentDB(s.primaryDBName)
+		if err := s.setCurrentDB(s.primaryDBName); err != nil {
+			return "", err
+		}
 		return work(ctx, s.primaryDBName, pToken)
 	}
 
@@ -49,7 +51,9 @@ func (s *SQLSyncer) iterateDBs(
 	}
 
 	dbName := current.ResourceID
-	s.setCurrentDB(dbName)
+	if err := s.setCurrentDB(dbName); err != nil {
+		return "", err
+	}
 	innerToken := &pagination.Token{
 		Size:  pToken.Size,
 		Token: current.Token,

@@ -32,6 +32,22 @@ func TestValidate(t *testing.T) {
 			},
 			expectErr: true,
 		},
+		{
+			name: "valid cluster scope",
+			validator: &ListQuery{
+				Query: "SELECT 1",
+				Scope: "cluster",
+			},
+			expectErr: false,
+		},
+		{
+			name: "invalid scope typo",
+			validator: &ListQuery{
+				Query: "SELECT 1",
+				Scope: "clustr",
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, tc := range tcases {
