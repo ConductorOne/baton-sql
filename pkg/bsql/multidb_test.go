@@ -164,16 +164,23 @@ func TestDatabasesConfig_Validate(t *testing.T) {
 }
 
 func TestResolveProvisioningDB_RoutesByVars(t *testing.T) {
+	// dbNames are sorted, so analytics is primary even though we point s.db at dev to
+	// simulate sync iteration landing on a non-primary handle.
 	s := newSyncerForIterTest([]string{"analytics", "dev"})
-	s.db = s.dbs["analytics"] // simulate iteration set the current handle
+	s.db = s.dbs["dev"]
 
 	// Vars name a known database → that handle is returned.
 	got, err := s.resolveProvisioningDB(map[string]any{rowColDatabase: "dev"})
 	require.NoError(t, err)
 	require.Same(t, s.dbs["dev"], got)
 
-	// No "database" var → current handle returned.
+	// No "database" var → primary, NOT s.db. Decouples provisioning from sync state.
 	got, err = s.resolveProvisioningDB(map[string]any{})
+	require.NoError(t, err)
+	require.Same(t, s.dbs["analytics"], got)
+
+	// Empty-string database var → also routes to primary, same as absent.
+	got, err = s.resolveProvisioningDB(map[string]any{rowColDatabase: ""})
 	require.NoError(t, err)
 	require.Same(t, s.dbs["analytics"], got)
 

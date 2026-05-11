@@ -357,8 +357,9 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 	return updatedQuery, qArgs, nil
 }
 
-// resolveProvisioningDB routes via vars["database"]. Unknown name → loud error,
-// never silent fallthrough to a wrong-cluster GRANT.
+// resolveProvisioningDB routes via vars["database"]. Unset → primary handle (NOT the
+// last-iterated handle, which would couple provisioning to sync state). Unknown name
+// → loud error, never silent fallthrough to a wrong-cluster GRANT.
 func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) {
 	if raw, ok := vars[rowColDatabase]; ok {
 		if name, ok := raw.(string); ok && name != "" {
@@ -369,11 +370,11 @@ func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) 
 			return db, nil
 		}
 	}
-	if s.db != nil {
-		return s.db, nil
-	}
 	if db, ok := s.dbs[s.primaryDBName]; ok {
 		return db, nil
+	}
+	if s.db != nil {
+		return s.db, nil
 	}
 	return nil, errors.New("provisioning: no database handle available")
 }
