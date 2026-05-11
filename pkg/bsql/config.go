@@ -70,6 +70,28 @@ type DatabaseConfig struct {
 
 	// Params contains additional connection parameters (e.g., {"sslmode": "disable", "timeout": "30s"})
 	Params map[string]string `yaml:"params" json:"params"`
+
+	Databases *DatabasesConfig `yaml:"databases,omitempty" json:"databases,omitempty"`
+}
+
+type DatabasesConfig struct {
+	Static []string `yaml:"static,omitempty" json:"static,omitempty"`
+
+	// DiscoveryQuery is run against an admin handle (the DSN's Database field) before
+	// the per-database handles are opened; its first column is the list of database names.
+	DiscoveryQuery string `yaml:"discovery_query,omitempty" json:"discovery_query,omitempty"`
+}
+
+func (d *DatabasesConfig) Validate() error {
+	hasStatic := len(d.Static) > 0
+	hasDiscovery := d.DiscoveryQuery != ""
+	if hasStatic && hasDiscovery {
+		return errors.New("databases: only one of static or discovery_query may be set")
+	}
+	if !hasStatic && !hasDiscovery {
+		return errors.New("databases: at least one of static or discovery_query must be set")
+	}
+	return nil
 }
 
 // ResourceType defines configuration for a specific type of resource.
@@ -116,6 +138,10 @@ type ListQuery struct {
 
 	// Map specifies how to map raw query columns to standardized resource fields.
 	Map *ResourceMapping `yaml:"map" json:"map"`
+
+	// Scope = "cluster" opts a query out of per-database iteration; otherwise the query
+	// runs once per database. Ignored when connect.databases is unset.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 }
 
 // ResourceMapping defines how to map SQL query results to resource properties.
@@ -256,6 +282,9 @@ type EntitlementsQuery struct {
 
 	// Map contains mappings that interpret query results as entitlement objects.
 	Map []*EntitlementMapping `yaml:"map" json:"map"`
+
+	// See ListQuery.Scope.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 }
 
 // EntitlementMapping defines how query results are mapped to an entitlement.
@@ -327,6 +356,9 @@ type GrantsQuery struct {
 
 	// Map contains mappings to interpret each row of the query result as a grant.
 	Map []*GrantMapping `yaml:"map" json:"map"`
+
+	// See ListQuery.Scope.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 }
 
 // GrantMapping defines how query results are mapped to an entitlement grant.

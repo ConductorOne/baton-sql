@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
@@ -16,22 +17,64 @@ const (
 	appTraitType   = "app"
 	groupTraitType = "group"
 	roleTraitType  = "role"
+
+	scopeCluster        = "cluster"
+	dbIterPageStateType = "db-iter"
+	rowColDatabase      = "database"
 )
 
+// SQLSyncer mutates db / currentDBName between query passes during multi-database
+// iteration. Safe because the SDK calls List/Entitlements/Grants serially per syncer.
 type SQLSyncer struct {
-	resourceType *v2.ResourceType
-	db           *sql.DB
-	dbEngine     database.DbEngine
-	config       ResourceType
-	env          *bcel.Env
-	fullConfig   Config
+	resourceType  *v2.ResourceType
+	db            *sql.DB
+	currentDBName string
+	dbs           map[string]*sql.DB
+	dbNames       []string
+	primaryDBName string
+	dbEngine      database.DbEngine
+	config        ResourceType
+	env           *bcel.Env
+	fullConfig    Config
 }
 
 func (s *SQLSyncer) ResourceType(ctx context.Context) *v2.ResourceType {
 	return s.resourceType
 }
 
-func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
+// setCurrentDB falls back to the primary handle when name is unknown so callers
+// always have a usable handle, never nil.
+func (s *SQLSyncer) setCurrentDB(name string) {
+	if db, ok := s.dbs[name]; ok {
+		s.db = db
+		s.currentDBName = name
+		return
+	}
+	if db, ok := s.dbs[s.primaryDBName]; ok {
+		s.db = db
+		s.currentDBName = s.primaryDBName
+	}
+}
+
+// sortedDBNames: deterministic iteration order and stable primary-handle pick.
+func sortedDBNames(dbs map[string]*sql.DB) []string {
+	names := make([]string, 0, len(dbs))
+	for name := range dbs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (c Config) GetSQLSyncers(ctx context.Context, dbs map[string]*sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
+	if len(dbs) == 0 {
+		return nil, fmt.Errorf("GetSQLSyncers: no database handles provided")
+	}
+
+	dbNames := sortedDBNames(dbs)
+	primaryDBName := dbNames[0]
+	primaryDB := dbs[primaryDBName]
+
 	var ret []connectorbuilder.ResourceSyncer
 	for rtID, rtConfig := range c.ResourceTypes {
 		rt, err := c.GetResourceType(ctx, rtID)
@@ -43,15 +86,19 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 
 		// If the resource type has account provisioning, use for account provisioning
 		if rtConfig.AccountProvisioning != nil {
-			rv = newUserSyncer(rt, rtConfig, db, dbEngine, celEnv, c)
+			rv = newUserSyncer(rt, rtConfig, dbs, dbNames, primaryDBName, dbEngine, celEnv, c)
 		} else {
 			rv = &SQLSyncer{
-				resourceType: rt,
-				config:       rtConfig,
-				db:           db,
-				dbEngine:     dbEngine,
-				env:          celEnv,
-				fullConfig:   c,
+				resourceType:  rt,
+				config:        rtConfig,
+				db:            primaryDB,
+				currentDBName: primaryDBName,
+				dbs:           dbs,
+				dbNames:       dbNames,
+				primaryDBName: primaryDBName,
+				dbEngine:      dbEngine,
+				env:           celEnv,
+				fullConfig:    c,
 			}
 		}
 		ret = append(ret, rv)
@@ -60,13 +107,22 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 	return ret, nil
 }
 
-func NewActionSyncer(ctx context.Context, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) (*SQLSyncer, error) {
+func NewActionSyncer(ctx context.Context, dbs map[string]*sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) (*SQLSyncer, error) {
+	if len(dbs) == 0 {
+		return nil, fmt.Errorf("NewActionSyncer: no database handles provided")
+	}
+	dbNames := sortedDBNames(dbs)
+	primaryDBName := dbNames[0]
 	return &SQLSyncer{
-		resourceType: nil,
-		db:           db,
-		dbEngine:     dbEngine,
-		env:          celEnv,
-		fullConfig:   fullConfig,
+		resourceType:  nil,
+		db:            dbs[primaryDBName],
+		currentDBName: primaryDBName,
+		dbs:           dbs,
+		dbNames:       dbNames,
+		primaryDBName: primaryDBName,
+		dbEngine:      dbEngine,
+		env:           celEnv,
+		fullConfig:    fullConfig,
 	}, nil
 }
 

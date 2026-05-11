@@ -86,19 +86,21 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 		return nil, "", nil, err
 	}
 
-	npt, err := s.runQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		for _, mapping := range s.config.Entitlements.Map {
-			r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
-			if err != nil {
-				return false, err
-			}
+	npt, err := s.iterateDBs(ctx, s.config.Entitlements.Scope, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, innerToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			for _, mapping := range s.config.Entitlements.Map {
+				r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
+				if err != nil {
+					return false, err
+				}
 
-			if ok {
-				r.Resource = resource
-				ret = append(ret, r)
+				if ok {
+					r.Resource = resource
+					ret = append(ret, r)
+				}
 			}
-		}
-		return true, nil
+			return true, nil
+		})
 	})
 	if err != nil {
 		return nil, "", nil, err
