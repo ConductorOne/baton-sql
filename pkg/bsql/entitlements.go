@@ -65,6 +65,15 @@ func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resourc
 		if e.Immutable {
 			annos.Update(&v2.EntitlementImmutable{})
 		}
+		if e.ExclusionGroup != nil {
+			exAny, err := s.buildExclusionGroupAny(ctx, e.ExclusionGroup, inputs)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			if exAny != nil {
+				annos.Merge(exAny)
+			}
+		}
 		entitlement.Annotations = annos
 		ret = append(ret, entitlement)
 	}
@@ -192,6 +201,15 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, m
 	annos := annotations.Annotations(ret.Annotations)
 	if mappings.Immutable {
 		annos.Update(&v2.EntitlementImmutable{})
+	}
+	if mappings.ExclusionGroup != nil {
+		exAny, err := s.buildExclusionGroupAny(ctx, mappings.ExclusionGroup, inputs)
+		if err != nil {
+			return nil, false, err
+		}
+		if exAny != nil {
+			annos.Merge(exAny)
+		}
 	}
 	ret.Annotations = annos
 
