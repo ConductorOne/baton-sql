@@ -1,79 +1,107 @@
+---
 # baton-sql config for the Entitlement Exclusion Groups E2E fixture.
 #
-# Uses the temporary `exclusion_group:` block shape described in the test plan.
-# When the SDK type lands and baton-sql gains first-party support, the shape
-# may move under `annotations:` — the local baton-sql patch is expected to
-# accept this shape and protowire-encode it into a
-# `type.googleapis.com/c1.connector.v2.EntitlementExclusionGroup` Any.
-#
 # Three access levels on the same `database/<id>` resource that share an
-# exclusion_group_id form one C1 AppEntitlementExclusionGroup; see fixture.sql
-# for the full layout.
+# exclusion_group_id form one C1 AppEntitlementExclusionGroup; see
+# entitlement-exclusion-fixture.sql for the full layout.
+#
+# NOTE: the `exclusion_group:` block on each entitlement mapping is the
+# temporary shape described in the test plan. Upstream baton-sql does not
+# yet decode it — once the local patch lands, it will protowire-encode the
+# three fields into a `type.googleapis.com/c1.connector.v2.EntitlementExclusionGroup`
+# Any. Until then, those keys are parsed as unknown YAML and ignored.
 
-credentials:
-  postgres:
-    username: baton
-    password: baton
-    hostname: localhost
-    port: 5433
-    database: baton_exclusion
+app_name: PostgreSQL Entitlement Exclusion Test
+app_description: E2E fixture for AppEntitlementExclusionGroup support
+
+connect:
+  scheme: postgres
+  host: localhost
+  port: "5433"
+  database: baton_exclusion
+  user: baton
+  password: baton
+  params:
     sslmode: disable
 
 resource_types:
   user:
+    name: "User"
+    description: "A user in the exclusion-group fixture"
     list:
       query: |
         SELECT username, email, status
         FROM users
-    id: ".username"
-    display_name: ".username"
-    profile:
-      email: ".email"
-      login: ".username"
-      status: ".status"
+      pagination:
+        strategy: "offset"
+        primary_key: "username"
+      map:
+        id: ".username"
+        display_name: ".username"
+        traits:
+          user:
+            login: ".username"
+            status: ".status"
+            emails:
+              - ".email"
 
   database:
+    name: "Database"
+    description: "A database resource that grants access levels"
     list:
       query: |
         SELECT id, display_name
         FROM databases
-    id: ".id"
-    display_name: ".display_name"
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      map:
+        id: ".id"
+        display_name: ".display_name"
 
     entitlements:
-      dynamic:
-        - query: |
-            SELECT
-              database_id,
-              level_id,
-              display_name,
-              sort_order,
-              is_default,
-              exclusion_group_id
-            FROM database_access_levels
-            WHERE database_id = ?
-          args:
-            - ".id"
+      vars:
+        database_id: "resource.ID"
+      query: |
+        SELECT
+          database_id,
+          level_id,
+          display_name,
+          sort_order,
+          is_default,
+          exclusion_group_id
+        FROM database_access_levels
+        WHERE database_id = ?<database_id>
+      pagination:
+        strategy: "offset"
+        primary_key: "level_id"
+      map:
+        - id: ".level_id"
           slug: ".level_id"
           display_name: ".display_name"
-          description: "\"Access level \" + .display_name + \" on \" + .database_id"
+          description: "'Access level ' + .display_name + ' on ' + .database_id"
+          purpose: "assignment"
           grantable_to:
-            - user
-          purpose: assignment
-          # Temporary shape — the local baton-sql patch protowire-encodes these
-          # three fields into a c1.connector.v2.EntitlementExclusionGroup Any.
+            - "user"
+          # TODO: not yet wired in upstream baton-sql — local patch will
+          # protowire-encode these three fields into a
+          # c1.connector.v2.EntitlementExclusionGroup Any annotation.
           exclusion_group:
             id: ".exclusion_group_id"
             order: ".sort_order"
             is_default: ".is_default"
 
     grants:
-      - query: |
+      - vars:
+          database_id: "resource.ID"
+        query: |
           SELECT database_id, username, level_id
           FROM database_user_access
-          WHERE database_id = ?
-        args:
-          - ".id"
-        entitlement: ".level_id"
-        principal_type: user
-        principal_id: ".username"
+          WHERE database_id = ?<database_id>
+        pagination:
+          strategy: "offset"
+          primary_key: "username"
+        map:
+          - principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: ".level_id"
