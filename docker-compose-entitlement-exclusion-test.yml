@@ -1,0 +1,35 @@
+# Local postgres for the Entitlement Exclusion Groups E2E fixture.
+#
+# Usage:
+#   docker compose up -d        # start postgres, auto-loads fixture.sql on first run
+#   docker compose down         # stop (data is preserved in the named volume)
+#   docker compose down -v      # stop and wipe (next up re-runs fixture.sql)
+#   psql -h localhost -p 5433 -U baton -d baton_exclusion -f validate.sql
+#
+# Port 5433 is used to avoid clashing with a host-installed postgres on 5432.
+#
+# fixture.sql only runs when the data directory is empty (the postgres image
+# init contract). Once the volume is initialized, edits to fixture.sql do not
+# take effect until you `down -v` to wipe and re-init.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: baton-exclusion-postgres
+    environment:
+      POSTGRES_USER: baton
+      POSTGRES_PASSWORD: baton
+      POSTGRES_DB: baton_exclusion
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./entitlement-exclusion-fixture.sql:/docker-entrypoint-initdb.d/01-fixture.sql:ro
+      - baton-exclusion-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U baton -d baton_exclusion"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  baton-exclusion-pg-data:
