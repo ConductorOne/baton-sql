@@ -49,9 +49,9 @@ SELECT
   "pb$updated_at"                    AS updated_at,
   "pb$deleted_at"                    AS deleted_at
 FROM pb_app_entitlement_exclusion_group_c1_m_655d50c4
-WHERE "pb$tenant_id"   = :'tenant_id'
-  AND "pb$app_id"      = :'app_id'
-  AND "pb$connector_id" = :'connector_id'
+WHERE "pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND "pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND "pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND "pb$deleted_at" IS NULL
 ORDER BY "pb$connector_exclusion_group_id";
 
@@ -83,9 +83,9 @@ JOIN pb_app_entitlement_exclusion_group_entr_0e87042e e
   ON  e."pb$tenant_id"         = g."pb$tenant_id"
   AND e."pb$app_id"            = g."pb$app_id"
   AND e."pb$exclusion_group_id" = g."pb$id"
-WHERE g."pb$tenant_id"   = :'tenant_id'
-  AND g."pb$app_id"      = :'app_id'
-  AND g."pb$connector_id" = :'connector_id'
+WHERE g."pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND g."pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND g."pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND g."pb$deleted_at" IS NULL
   AND e."pb$deleted_at" IS NULL
 GROUP BY g."pb$connector_exclusion_group_id", g."pb$id"
@@ -106,9 +106,9 @@ JOIN pb_app_entitlement_exclusion_group_entr_0e87042e e
   ON  e."pb$tenant_id"         = g."pb$tenant_id"
   AND e."pb$app_id"            = g."pb$app_id"
   AND e."pb$exclusion_group_id" = g."pb$id"
-WHERE g."pb$tenant_id"   = :'tenant_id'
-  AND g."pb$app_id"      = :'app_id'
-  AND g."pb$connector_id" = :'connector_id'
+WHERE g."pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND g."pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND g."pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND g."pb$deleted_at" IS NULL
   AND e."pb$deleted_at" IS NULL
 ORDER BY g."pb$connector_exclusion_group_id", e."pb$order";
@@ -132,9 +132,9 @@ WITH live_entries AS (
     ON  g."pb$tenant_id" = e."pb$tenant_id"
     AND g."pb$app_id"    = e."pb$app_id"
     AND g."pb$id"        = e."pb$exclusion_group_id"
-  WHERE e."pb$tenant_id"   = :'tenant_id'
-    AND e."pb$app_id"      = :'app_id'
-    AND g."pb$connector_id" = :'connector_id'
+  WHERE e."pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+    AND e."pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+    AND g."pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
     AND e."pb$deleted_at" IS NULL
     AND g."pb$deleted_at" IS NULL
 ),
@@ -148,9 +148,9 @@ live_lookups AS (
     ON  g."pb$tenant_id" = l."pb$tenant_id"
     AND g."pb$app_id"    = l."pb$app_id"
     AND g."pb$id"        = l."pb$exclusion_group_id"
-  WHERE l."pb$tenant_id"   = :'tenant_id'
-    AND l."pb$app_id"      = :'app_id'
-    AND g."pb$connector_id" = :'connector_id'
+  WHERE l."pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+    AND l."pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+    AND g."pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
     AND l."pb$deleted_at" IS NULL
     AND g."pb$deleted_at" IS NULL
 )
@@ -186,9 +186,9 @@ JOIN pb_app_entitlement_exclusion_group_entr_0e87042e e
   ON  e."pb$tenant_id"         = g."pb$tenant_id"
   AND e."pb$app_id"            = g."pb$app_id"
   AND e."pb$exclusion_group_id" = g."pb$id"
-WHERE g."pb$tenant_id"   = :'tenant_id'
-  AND g."pb$app_id"      = :'app_id'
-  AND g."pb$connector_id" = :'connector_id'
+WHERE g."pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND g."pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND g."pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND g."pb$deleted_at" IS NULL
   AND e."pb$deleted_at" IS NULL
 GROUP BY g."pb$connector_exclusion_group_id", g."pb$id"
@@ -208,9 +208,9 @@ SELECT
   "pb$connector_exclusion_group_id"           AS connector_group,
   COUNT(DISTINCT "pb$app_resource_id")        AS distinct_app_resources
 FROM pb_app_entitlement_exclusion_group_c1_m_655d50c4
-WHERE "pb$tenant_id"   = :'tenant_id'
-  AND "pb$app_id"      = :'app_id'
-  AND "pb$connector_id" = :'connector_id'
+WHERE "pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND "pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND "pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND "pb$deleted_at" IS NULL
 GROUP BY "pb$connector_exclusion_group_id"
 HAVING COUNT(DISTINCT "pb$app_resource_id") <> 1;
@@ -225,13 +225,13 @@ HAVING COUNT(DISTINCT "pb$app_resource_id") <> 1;
 \echo '==> [7] FF-disabled negative check (run against a tenant with FF off; expect 0 / 0 / 0)'
 SELECT
   (SELECT COUNT(*) FROM pb_app_entitlement_exclusion_group_c1_m_655d50c4
-    WHERE "pb$tenant_id" = :'tenant_id' AND "pb$app_id" = :'app_id'
-      AND "pb$connector_id" = :'connector_id' AND "pb$deleted_at" IS NULL) AS groups,
+    WHERE "pb$tenant_id" = '3CmpaAkVpaoiiwRv4RFu3wdjZLX' AND "pb$app_id" = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+      AND "pb$connector_id" = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty' AND "pb$deleted_at" IS NULL) AS groups,
   (SELECT COUNT(*) FROM pb_app_entitlement_exclusion_group_entr_0e87042e
-    WHERE "pb$tenant_id" = :'tenant_id' AND "pb$app_id" = :'app_id'
+    WHERE "pb$tenant_id" = '3CmpaAkVpaoiiwRv4RFu3wdjZLX' AND "pb$app_id" = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
       AND "pb$deleted_at" IS NULL) AS entries,
   (SELECT COUNT(*) FROM pb_app_entitlement_exclusion_group_entr_9fa75386
-    WHERE "pb$tenant_id" = :'tenant_id' AND "pb$app_id" = :'app_id'
+    WHERE "pb$tenant_id" = '3CmpaAkVpaoiiwRv4RFu3wdjZLX' AND "pb$app_id" = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
       AND "pb$deleted_at" IS NULL) AS lookups;
 
 -- -----------------------------------------------------------------------------
@@ -253,9 +253,9 @@ SELECT
 WITH g AS (
   SELECT "pb$id" AS group_id
   FROM pb_app_entitlement_exclusion_group_c1_m_655d50c4
-  WHERE "pb$tenant_id"                  = :'tenant_id'
-    AND "pb$app_id"                     = :'app_id'
-    AND "pb$connector_id"               = :'connector_id'
+  WHERE "pb$tenant_id"                  = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+    AND "pb$app_id"                     = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+    AND "pb$connector_id"               = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
     AND "pb$connector_exclusion_group_id" = :'removed_connector_group'
     AND "pb$deleted_at" IS NULL
 )
@@ -265,8 +265,8 @@ SELECT
   COUNT(*) FILTER (WHERE e."pb$deleted_at" IS NOT NULL) AS soft_deleted
 FROM pb_app_entitlement_exclusion_group_entr_0e87042e e
 JOIN g ON g.group_id = e."pb$exclusion_group_id"
-WHERE e."pb$tenant_id" = :'tenant_id'
-  AND e."pb$app_id"    = :'app_id'
+WHERE e."pb$tenant_id" = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND e."pb$app_id"    = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
   AND e."pb$app_entitlement_id" LIKE '%' || :'removed_app_entitlement_slug' || '%'
 UNION ALL
 SELECT
@@ -275,8 +275,8 @@ SELECT
   COUNT(*) FILTER (WHERE l."pb$deleted_at" IS NOT NULL)
 FROM pb_app_entitlement_exclusion_group_entr_9fa75386 l
 JOIN g ON g.group_id = l."pb$exclusion_group_id"
-WHERE l."pb$tenant_id" = :'tenant_id'
-  AND l."pb$app_id"    = :'app_id'
+WHERE l."pb$tenant_id" = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND l."pb$app_id"    = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
   AND l."pb$app_entitlement_id" LIKE '%' || :'removed_app_entitlement_slug' || '%';
 
 -- -----------------------------------------------------------------------------
@@ -295,9 +295,9 @@ SELECT
   COUNT(*) FILTER (WHERE "pb$deleted_at" IS NULL)     AS live,
   COUNT(*) FILTER (WHERE "pb$deleted_at" IS NOT NULL) AS soft_deleted
 FROM pb_app_entitlement_exclusion_group_c1_m_655d50c4
-WHERE "pb$tenant_id"                    = :'tenant_id'
-  AND "pb$app_id"                       = :'app_id'
-  AND "pb$connector_id"                 = :'connector_id'
+WHERE "pb$tenant_id"                    = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND "pb$app_id"                       = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND "pb$connector_id"                 = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND "pb$connector_exclusion_group_id" = :'removed_connector_group'
 UNION ALL
 SELECT
@@ -309,9 +309,9 @@ JOIN pb_app_entitlement_exclusion_group_c1_m_655d50c4 g
   ON  g."pb$tenant_id"        = e."pb$tenant_id"
   AND g."pb$app_id"           = e."pb$app_id"
   AND g."pb$id"               = e."pb$exclusion_group_id"
-WHERE g."pb$tenant_id"                    = :'tenant_id'
-  AND g."pb$app_id"                       = :'app_id'
-  AND g."pb$connector_id"                 = :'connector_id'
+WHERE g."pb$tenant_id"                    = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND g."pb$app_id"                       = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND g."pb$connector_id"                 = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND g."pb$connector_exclusion_group_id" = :'removed_connector_group'
 UNION ALL
 SELECT
@@ -323,7 +323,7 @@ JOIN pb_app_entitlement_exclusion_group_c1_m_655d50c4 g
   ON  g."pb$tenant_id"        = l."pb$tenant_id"
   AND g."pb$app_id"           = l."pb$app_id"
   AND g."pb$id"               = l."pb$exclusion_group_id"
-WHERE g."pb$tenant_id"                    = :'tenant_id'
-  AND g."pb$app_id"                       = :'app_id'
-  AND g."pb$connector_id"                 = :'connector_id'
+WHERE g."pb$tenant_id"                    = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND g."pb$app_id"                       = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND g."pb$connector_id"                 = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND g."pb$connector_exclusion_group_id" = :'removed_connector_group';
