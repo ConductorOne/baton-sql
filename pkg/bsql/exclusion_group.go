@@ -5,16 +5,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"google.golang.org/protobuf/encoding/protowire"
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"google.golang.org/protobuf/types/known/anypb"
 )
-
-// EntitlementExclusionGroupTypeURL is the Any type_url for the upstream
-// c1.connector.v2.EntitlementExclusionGroup message. Once the baton-sdk
-// branch lands and is vendored, callers can switch to
-// annotations.Update(&v2.EntitlementExclusionGroup{...}) and this hand-rolled
-// encoder can be deleted.
-const EntitlementExclusionGroupTypeURL = "type.googleapis.com/c1.connector.v2.EntitlementExclusionGroup"
 
 // buildExclusionGroupAny evaluates the three CEL expressions on an
 // ExclusionGroupMapping and produces a protowire-encoded Any carrying the
@@ -35,7 +28,10 @@ func (s *SQLSyncer) buildExclusionGroupAny(ctx context.Context, cfg *ExclusionGr
 		return nil, fmt.Errorf("exclusion_group.id evaluated to empty string")
 	}
 
-	var order uint32
+	group := &v2.EntitlementExclusionGroup{}
+
+	group.SetExclusionGroupId(groupID)
+
 	if cfg.Order != "" {
 		orderStr, err := s.env.EvaluateString(ctx, cfg.Order, inputs)
 		if err != nil {
@@ -46,7 +42,7 @@ func (s *SQLSyncer) buildExclusionGroupAny(ctx context.Context, cfg *ExclusionGr
 			if err != nil {
 				return nil, fmt.Errorf("exclusion_group.order must be a non-negative integer, got %q: %w", orderStr, err)
 			}
-			order = uint32(parsed)
+			group.SetOrder(uint32(parsed))
 		}
 	}
 
@@ -58,23 +54,7 @@ func (s *SQLSyncer) buildExclusionGroupAny(ctx context.Context, cfg *ExclusionGr
 		}
 	}
 
-	var buf []byte
-	// field 1: exclusion_group_id (string)
-	buf = protowire.AppendTag(buf, 1, protowire.BytesType)
-	buf = protowire.AppendString(buf, groupID)
-	// field 2: order (uint32) — omit when zero to match proto3 defaults
-	if order != 0 {
-		buf = protowire.AppendTag(buf, 2, protowire.VarintType)
-		buf = protowire.AppendVarint(buf, uint64(order))
-	}
-	// field 3: is_default (bool) — omit when false
-	if isDefault {
-		buf = protowire.AppendTag(buf, 3, protowire.VarintType)
-		buf = protowire.AppendVarint(buf, protowire.EncodeBool(true))
-	}
+	group.SetIsDefault(isDefault)
 
-	return &anypb.Any{
-		TypeUrl: EntitlementExclusionGroupTypeURL,
-		Value:   buf,
-	}, nil
+	return anypb.New(group)
 }

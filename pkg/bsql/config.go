@@ -341,7 +341,7 @@ type ExclusionGroupMapping struct {
 // EntitlementProvisioning defines settings and queries for entitlement provisioning.
 type EntitlementProvisioning struct {
 	// Grant defines the SQL queries and settings for granting this entitlement.
-	Grant *EntitlementProvisioningQueries `yaml:"grant,omitempty" json:"grant,omitempty"`
+	Grant *GrantEntitlementProvisioningQueries `yaml:"grant,omitempty" json:"grant,omitempty"`
 
 	// Revoke defines the SQL queries and settings for revoking this entitlement.
 	Revoke *EntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
@@ -360,6 +360,20 @@ type EntitlementProvisioningQueries struct {
 
 	// Queries is a list of SQL statements to execute for the provisioning operation.
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
+}
+
+type GrantReplaceProvisioningQueries struct {
+	// Query is the SQL statement used to retrieve grant
+	Query string `yaml:"query" json:"query"`
+	// Map contains mappings to interpret each row of the query result as a grant.
+	Map []*GrantMapping `yaml:"map" json:"map"`
+}
+
+type GrantEntitlementProvisioningQueries struct {
+	EntitlementProvisioningQueries
+
+	// GrantReplaceProvisioningQueries defines the SQL queries and settings for replacing existing grants with the new grant during provisioning.
+	GrantReplace *GrantReplaceProvisioningQueries `yaml:"grant_replace,omitempty" json:"grant_replace,omitempty"`
 }
 
 // GrantsQuery defines the structure for querying existing entitlement grants.

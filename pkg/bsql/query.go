@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/google/cel-go/common/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -372,8 +374,18 @@ func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) 
 	return nil, fmt.Errorf("provisioning: primary database %q not found in handles (configured: %v)", s.primaryDBName, s.dbNames)
 }
 
-func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validationQueries []string, vars map[string]any, useTx bool) error {
-	l := ctxzap.Extract(ctx)
+func (s *SQLSyncer) RunProvisioningQueries(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	useTx bool,
+) error {
+	l := ctxzap.Extract(ctx).With(
+		zap.Bool("use_tx", useTx),
+	)
+
+	ctx = ctxzap.ToContext(ctx, l)
 
 	target, err := s.resolveProvisioningDB(vars)
 	if err != nil {
@@ -398,6 +410,41 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 			}
 		}()
 	}
+
+	err := s.RunProvisioningQueriesWithExecutor(
+		ctx,
+		queries,
+		validationQueries,
+		vars,
+		executor,
+	)
+	if err != nil {
+		return err
+	}
+
+	if useTx {
+		tx, ok := executor.(*sql.Tx)
+		if !ok {
+			return errors.New("transactional executor required")
+		}
+		err := tx.Commit()
+		if err != nil {
+			return err
+		}
+		committed = true
+	}
+
+	return nil
+}
+
+func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	executor executor,
+) error {
+	l := ctxzap.Extract(ctx)
 
 	for _, q := range validationQueries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
@@ -452,23 +499,11 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 			zeroRowCount++
 		}
 
-		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
+		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected))
 	}
 
 	if len(queries) > 0 && zeroRowCount == len(queries) {
 		return ErrQueryAffectedZeroRows
-	}
-
-	if useTx {
-		tx, ok := executor.(*sql.Tx)
-		if !ok {
-			return errors.New("transactional executor required")
-		}
-		err := tx.Commit()
-		if err != nil {
-			return err
-		}
-		committed = true
 	}
 
 	return nil
@@ -551,6 +586,7 @@ func (s *SQLSyncer) normalizeValue(val any) any {
 
 func (s *SQLSyncer) runQuery(
 	ctx context.Context,
+	db *sql.DB,
 	pToken *pagination.Token,
 	query string,
 	pOpts *Pagination,
@@ -566,7 +602,7 @@ func (s *SQLSyncer) runQuery(
 
 	l.Debug("running query", zap.String("query", q), zap.Any("args", qArgs))
 
-	rows, err := s.db.QueryContext(ctx, q, qArgs...)
+	rows, err := db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
 		l.Error("failed to run query", zap.String("query", q), zap.Any("args", qArgs), zap.Error(err))
 		return "", err
@@ -638,4 +674,178 @@ func (s *SQLSyncer) runQuery(
 	}
 
 	return nextPageToken, nil
+}
+
+func (s *SQLSyncer) RunGrantProvisioning(
+	ctx context.Context,
+	resource *v2.Resource,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	useTx bool,
+	replace *GrantReplaceProvisioningQueries,
+) error {
+	l := ctxzap.Extract(ctx)
+
+	var committed bool
+	var executor executor = s.db
+
+	if useTx {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		executor = tx
+
+		defer func() {
+			if !committed {
+				if err := tx.Rollback(); err != nil {
+					l.Error("failed to rollback provisioning queries", zap.Error(err))
+				}
+			}
+		}()
+	}
+
+	if replace != nil && replace.Query != "" {
+		var ret []*v2.Grant
+
+		_, err := s.runQuery(ctx, s.db, nil, replace.Query, nil, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			for _, mapping := range replace.Map {
+				g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
+				if err != nil {
+					return false, err
+				}
+
+				if ok {
+					ret = append(ret, g)
+				}
+			}
+			return true, nil
+		})
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case len(ret) > 1:
+			return fmt.Errorf("grant provisioning query returned %d rows, expected at most 1: %w", len(ret), ErrQueryAffectedMoreThanOneRow)
+		case len(ret) == 1:
+			// Revoke grant
+			grantToRevoke := ret[0]
+
+			_, _, entitlementID, err := helpers.SplitEntitlementID(grantToRevoke.GetEntitlement())
+			if err != nil {
+				return err
+			}
+
+			provisioningConfig, ok := s.getProvisioningConfig(ctx, entitlementID)
+			if !ok {
+				return errors.New("provisioning is not enabled for this connector")
+			}
+
+			if provisioningConfig.Revoke == nil {
+				return errors.New("no revoke config found for entitlement")
+			}
+
+			if len(provisioningConfig.Revoke.Queries) == 0 {
+				return errors.New("no revoke config found for entitlement")
+			}
+
+			provisioningVars, err := s.prepareProvisioningVars(ctx, provisioningConfig.Vars, grantToRevoke.GetPrincipal(), grantToRevoke.GetEntitlement())
+			if err != nil {
+				return err
+			}
+
+			// Needs to fix the TX
+			err = s.RunProvisioningQueriesWithExecutor(
+				ctx,
+				provisioningConfig.Revoke.Queries,
+				provisioningConfig.Revoke.ValidationQueries,
+				provisioningVars,
+				executor,
+			)
+			if err != nil {
+				if !errors.Is(err, ErrQueryAffectedZeroRows) {
+					return err
+				}
+			}
+
+		case len(ret) == 0:
+			// Nothing to do
+		}
+	}
+
+	for _, q := range validationQueries {
+		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
+		if err != nil {
+			return fmt.Errorf("failed to prepare validation query: %w", err)
+		}
+
+		result, err := executor.QueryContext(ctx, q, qArgs...)
+		if err != nil {
+			return fmt.Errorf("failed to execute validation query: %w", err)
+		}
+
+		valid := result.Next()
+
+		if err := result.Err(); err != nil {
+			return fmt.Errorf("failed to read validation query result: %w", err)
+		}
+
+		err = result.Close()
+		if err != nil {
+			return fmt.Errorf("failed to close validation query result: %w", err)
+		}
+
+		if !valid {
+			return fmt.Errorf("validation query returned no rows")
+		}
+	}
+
+	zeroRowCount := 0
+
+	for idx, q := range queries {
+		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
+		if err != nil {
+			return fmt.Errorf("failed to prepare query: %w", err)
+		}
+
+		result, err := executor.ExecContext(ctx, q, qArgs...)
+		if err != nil {
+			return fmt.Errorf("failed to execute query: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			l.Error("failed to get rows affected", zap.Error(err))
+		}
+
+		if rowsAffected > 1 {
+			return fmt.Errorf("provisioning query at index %d affected %d rows: %w", idx, rowsAffected, ErrQueryAffectedMoreThanOneRow)
+		}
+
+		if rowsAffected == 0 {
+			zeroRowCount++
+		}
+
+		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
+	}
+
+	if len(queries) > 0 && zeroRowCount == len(queries) {
+		return ErrQueryAffectedZeroRows
+	}
+
+	if useTx {
+		tx, ok := executor.(*sql.Tx)
+		if !ok {
+			return errors.New("transactional executor required")
+		}
+		err := tx.Commit()
+		if err != nil {
+			return err
+		}
+		committed = true
+	}
+
+	return nil
 }
