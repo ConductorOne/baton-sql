@@ -239,24 +239,26 @@ SELECT
 --
 -- After deleting `writer` (or any one level) from the fixture and re-syncing:
 --   * the parent group still exists
---   * the writer entry is gone (soft-deleted)
---   * the writer lookup is gone (soft-deleted)
---   * the remaining siblings are untouched
+--   * one entry is gone (soft-deleted); the rest are untouched
+--   * one lookup is gone (soft-deleted); the rest are untouched
 --
--- Set the level you removed and the connector group it belonged to.
+-- The pgdb mirror stores the C1 AppEntitlement PID in pb$app_entitlement_id
+-- (an opaque ULID), not the connector slug — so this is a count-delta check
+-- on the parent group rather than a per-slug lookup. Run it before and after
+-- the DELETE+resync and compare:
 --
---   \set removed_app_entitlement_slug 'writer'
---   \set removed_connector_group     'database-main-role-tier'
+--   Before:  entries -> 4 live, 0 soft-deleted ; lookups -> 4 live, 0 soft-deleted
+--   After:   entries -> 3 live, 1 soft-deleted ; lookups -> 3 live, 1 soft-deleted
 -- -----------------------------------------------------------------------------
 \echo
-\echo '==> [8] Cleanup verification — counts for the removed level (expect 0 live, >= 1 soft-deleted)'
+\echo '==> [8] Cleanup verification — count delta on the parent group across DELETE+resync'
 WITH g AS (
   SELECT "pb$id" AS group_id
   FROM pb_app_entitlement_exclusion_group_c1_m_655d50c4
   WHERE "pb$tenant_id"                  = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
     AND "pb$app_id"                     = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
     AND "pb$connector_id"               = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
-    AND "pb$connector_exclusion_group_id" = :'removed_connector_group'
+    AND "pb$connector_exclusion_group_id" = 'database-main-role-tier'
     AND "pb$deleted_at" IS NULL
 )
 SELECT
@@ -267,7 +269,6 @@ FROM pb_app_entitlement_exclusion_group_entr_0e87042e e
 JOIN g ON g.group_id = e."pb$exclusion_group_id"
 WHERE e."pb$tenant_id" = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
   AND e."pb$app_id"    = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
-  AND e."pb$app_entitlement_id" LIKE '%' || :'removed_app_entitlement_slug' || '%'
 UNION ALL
 SELECT
   'lookups',
@@ -276,8 +277,7 @@ SELECT
 FROM pb_app_entitlement_exclusion_group_entr_9fa75386 l
 JOIN g ON g.group_id = l."pb$exclusion_group_id"
 WHERE l."pb$tenant_id" = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
-  AND l."pb$app_id"    = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
-  AND l."pb$app_entitlement_id" LIKE '%' || :'removed_app_entitlement_slug' || '%';
+  AND l."pb$app_id"    = '3Dj1QeX2utQSCs5L5SvnhwqGHql';
 
 -- -----------------------------------------------------------------------------
 -- 9. Full-group cleanup verification.
