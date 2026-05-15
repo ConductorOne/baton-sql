@@ -72,7 +72,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 	}
 
 	useTx := !provisioningConfig.Grant.NoTransaction
-	err = s.RunGrantProvisioning(
+	anno, err := s.RunGrantProvisioning(
 		ctx,
 		principal,
 		provisioningConfig.Grant.Queries,
@@ -96,7 +96,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		zap.String("principal_id", principal.GetId().GetResource()),
 		zap.String("entitlement_id", entitlement.GetId()),
 	)
-	return nil, nil
+	return anno, nil
 }
 
 func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {

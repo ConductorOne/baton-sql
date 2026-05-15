@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/google/cel-go/common/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -684,8 +685,10 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	vars map[string]any,
 	useTx bool,
 	replace *GrantReplaceProvisioningQueries,
-) error {
+) (annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
+
+	anno := annotations.New()
 
 	var committed bool
 	var executor executor = s.db
@@ -693,7 +696,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	if useTx {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
-			return err
+			return anno, err
 		}
 		executor = tx
 
@@ -723,37 +726,37 @@ func (s *SQLSyncer) RunGrantProvisioning(
 			return true, nil
 		})
 		if err != nil {
-			return err
+			return anno, err
 		}
 
 		switch {
 		case len(ret) > 1:
-			return fmt.Errorf("grant provisioning query returned %d rows, expected at most 1: %w", len(ret), ErrQueryAffectedMoreThanOneRow)
+			return nil, fmt.Errorf("grant provisioning query returned %d rows, expected at most 1: %w", len(ret), ErrQueryAffectedMoreThanOneRow)
 		case len(ret) == 1:
 			// Revoke grant
 			grantToRevoke := ret[0]
 
 			_, _, entitlementID, err := helpers.SplitEntitlementID(grantToRevoke.GetEntitlement())
 			if err != nil {
-				return err
+				return anno, err
 			}
 
 			provisioningConfig, ok := s.getProvisioningConfig(ctx, entitlementID)
 			if !ok {
-				return errors.New("provisioning is not enabled for this connector")
+				return anno, errors.New("provisioning is not enabled for this connector")
 			}
 
 			if provisioningConfig.Revoke == nil {
-				return errors.New("no revoke config found for entitlement")
+				return anno, errors.New("no revoke config found for entitlement")
 			}
 
 			if len(provisioningConfig.Revoke.Queries) == 0 {
-				return errors.New("no revoke config found for entitlement")
+				return anno, errors.New("no revoke config found for entitlement")
 			}
 
 			provisioningVars, err := s.prepareProvisioningVars(ctx, provisioningConfig.Vars, grantToRevoke.GetPrincipal(), grantToRevoke.GetEntitlement())
 			if err != nil {
-				return err
+				return anno, err
 			}
 
 			// Needs to fix the TX
@@ -766,9 +769,13 @@ func (s *SQLSyncer) RunGrantProvisioning(
 			)
 			if err != nil {
 				if !errors.Is(err, ErrQueryAffectedZeroRows) {
-					return err
+					return anno, err
 				}
 			}
+
+			anno.Update(&v2.GrantReplaced{
+				ReplacedGrantId: grantToRevoke.GetId(),
+			})
 
 		case len(ret) == 0:
 			// Nothing to do
@@ -778,27 +785,27 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	for _, q := range validationQueries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
-			return fmt.Errorf("failed to prepare validation query: %w", err)
+			return anno, fmt.Errorf("failed to prepare validation query: %w", err)
 		}
 
 		result, err := executor.QueryContext(ctx, q, qArgs...)
 		if err != nil {
-			return fmt.Errorf("failed to execute validation query: %w", err)
+			return anno, fmt.Errorf("failed to execute validation query: %w", err)
 		}
 
 		valid := result.Next()
 
 		if err := result.Err(); err != nil {
-			return fmt.Errorf("failed to read validation query result: %w", err)
+			return anno, fmt.Errorf("failed to read validation query result: %w", err)
 		}
 
 		err = result.Close()
 		if err != nil {
-			return fmt.Errorf("failed to close validation query result: %w", err)
+			return anno, fmt.Errorf("failed to close validation query result: %w", err)
 		}
 
 		if !valid {
-			return fmt.Errorf("validation query returned no rows")
+			return anno, fmt.Errorf("validation query returned no rows")
 		}
 	}
 
@@ -807,12 +814,12 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	for idx, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
-			return fmt.Errorf("failed to prepare query: %w", err)
+			return anno, fmt.Errorf("failed to prepare query: %w", err)
 		}
 
 		result, err := executor.ExecContext(ctx, q, qArgs...)
 		if err != nil {
-			return fmt.Errorf("failed to execute query: %w", err)
+			return anno, fmt.Errorf("failed to execute query: %w", err)
 		}
 
 		rowsAffected, err := result.RowsAffected()
@@ -821,7 +828,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 
 		if rowsAffected > 1 {
-			return fmt.Errorf("provisioning query at index %d affected %d rows: %w", idx, rowsAffected, ErrQueryAffectedMoreThanOneRow)
+			return anno, fmt.Errorf("provisioning query at index %d affected %d rows: %w", idx, rowsAffected, ErrQueryAffectedMoreThanOneRow)
 		}
 
 		if rowsAffected == 0 {
@@ -832,20 +839,20 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	}
 
 	if len(queries) > 0 && zeroRowCount == len(queries) {
-		return ErrQueryAffectedZeroRows
+		return anno, ErrQueryAffectedZeroRows
 	}
 
 	if useTx {
 		tx, ok := executor.(*sql.Tx)
 		if !ok {
-			return errors.New("transactional executor required")
+			return anno, errors.New("transactional executor required")
 		}
 		err := tx.Commit()
 		if err != nil {
-			return err
+			return anno, err
 		}
 		committed = true
 	}
 
-	return nil
+	return anno, nil
 }
