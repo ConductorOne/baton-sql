@@ -327,3 +327,49 @@ WHERE g."pb$tenant_id"                    = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
   AND g."pb$app_id"                       = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
   AND g."pb$connector_id"                 = '3Dj1Qa2Qu4L5mikHYzYCKs0A8ty'
   AND g."pb$connector_exclusion_group_id" = :'removed_connector_group';
+
+-- -----------------------------------------------------------------------------
+-- 10. Orphan-entry detector (cascading-tombstone invariant).
+--
+-- A live AppEntitlementExclusionGroupEntry must never reference a soft-deleted
+-- AppEntitlement. When the connector stops reporting an entitlement, the
+-- backend tombstones its AppEntitlement row; the corresponding exclusion-group
+-- entry (and lookup) must be tombstoned in the same transaction.
+--
+-- This check must return 0 rows. Any row returned is a cleanup bug in the
+-- db-stream consumer / uplift path: the AppEntitlement got deleted but its
+-- exclusion-group edges did not cascade.
+-- -----------------------------------------------------------------------------
+\echo
+\echo '==> [10] Orphan entries — live entries pointing at deleted entitlements (expect 0 rows)'
+SELECT
+  e."pb$id"                  AS entry_id,
+  e."pb$exclusion_group_id"  AS exclusion_group_id,
+  e."pb$app_entitlement_id"  AS app_entitlement_id,
+  ae."pb$deleted_at"         AS entitlement_deleted_at
+FROM pb_app_entitlement_exclusion_group_entr_0e87042e e
+JOIN pb_app_entitlement_c1_models_app_v1_9e8d32e2   ae
+  ON ae."pb$tenant_id" = e."pb$tenant_id"
+ AND ae."pb$id"        = e."pb$app_entitlement_id"
+WHERE e."pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND e."pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND e."pb$deleted_at"  IS NULL
+  AND ae."pb$deleted_at" IS NOT NULL
+ORDER BY e."pb$exclusion_group_id", e."pb$app_entitlement_id";
+
+\echo
+\echo '==> [10b] Orphan lookups — live lookups pointing at deleted entitlements (expect 0 rows)'
+SELECT
+  l."pb$id"                  AS lookup_id,
+  l."pb$exclusion_group_id"  AS exclusion_group_id,
+  l."pb$app_entitlement_id"  AS app_entitlement_id,
+  ae."pb$deleted_at"         AS entitlement_deleted_at
+FROM pb_app_entitlement_exclusion_group_entr_9fa75386 l
+JOIN pb_app_entitlement_c1_models_app_v1_9e8d32e2   ae
+  ON ae."pb$tenant_id" = l."pb$tenant_id"
+ AND ae."pb$id"        = l."pb$app_entitlement_id"
+WHERE l."pb$tenant_id"   = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
+  AND l."pb$app_id"      = '3Dj1QeX2utQSCs5L5SvnhwqGHql'
+  AND l."pb$deleted_at"  IS NULL
+  AND ae."pb$deleted_at" IS NOT NULL
+ORDER BY l."pb$exclusion_group_id", l."pb$app_entitlement_id";
