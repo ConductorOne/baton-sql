@@ -363,9 +363,9 @@ resource_types:
         grantable_to:
           - "user"
         exclusion_group:
-          id: "'license-'+resource.ID"
+          id: "'role-group'"
           order: "1"
-          is_default: "false"
+          is_default: "'reader' == resource.ID"
         provisioning:
           vars:
             username: "principal.ID"
