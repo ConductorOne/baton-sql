@@ -832,7 +832,6 @@ func (s *SQLSyncer) RunGrantProvisioning(
 			})
 
 		case len(ret) == 0:
-			return anno, errors.New("no revoke config found for grant to replace")
 		}
 	}
 
