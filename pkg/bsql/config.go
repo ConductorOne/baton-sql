@@ -370,7 +370,7 @@ type GrantReplaceProvisioningQueries struct {
 }
 
 type GrantEntitlementProvisioningQueries struct {
-	EntitlementProvisioningQueries
+	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
 
 	// GrantReplaceProvisioningQueries defines the SQL queries and settings for replacing existing grants with the new grant during provisioning.
 	GrantReplace *GrantReplaceProvisioningQueries `yaml:"grant_replace,omitempty" json:"grant_replace,omitempty"`
@@ -413,6 +413,9 @@ type GrantMapping struct {
 
 	// Expandable indicates whether the grant should be expanded.
 	Expandable *ExpandableGrant `yaml:"expandable,omitempty" json:"expandable,omitempty"`
+
+	// EntitlementResourceId is used for grant replace on grant action
+	EntitlementResourceId string `yaml:"entitlement_resource_id" json:"entitlement_resource_id"`
 }
 
 type ExpandableGrant struct {

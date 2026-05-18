@@ -1,0 +1,505 @@
+---
+# Application name for this connector configuration
+app_name: PostgreSQL Test
+app_description: Test configuration for PostgreSQL with employee_id and last_login support
+# Connection settings for the PostgreSQL database
+connect:
+  # Data Source Name (DSN) for our test PostgreSQL instance
+  dsn: "postgres://${DB_HOST}:${DB_PORT}/${DB_DATABASE}?sslmode=disable"
+  # Username and password are provided separately so they can be properly URL encoded.
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+
+actions:
+  enable_user:
+    name: Enable User
+    description: Enable a disabled user account
+    action_type:
+      - account_enable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to enable
+    query: |
+      UPDATE users SET status = 'active' WHERE username = ?<user_id>
+  disable_user:
+    name: Disable User
+    description: Disable a user account
+    action_type:
+      - account_disable
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to disable
+    # vars:
+    #   username: "input.user_id"
+    query: |
+      UPDATE users SET status = 'disabled' WHERE username = ?<user_id>
+  update_user_attributes:
+    name: Update User Attributes
+    description: Update the attributes of a user. Only provide the attributes you want to update.
+    action_type:
+      - account
+      - account_update_profile
+    arguments:
+      user_id:
+        name: User ID
+        type: string
+        required: true
+        description: The ID of the user to update
+      attrs:
+        name: Attributes
+        type: string_map
+        required: true
+        description: The updated attribute data (map of attribute names to values)
+      attrs_update_mask:
+        name: Attributes Update Mask
+        type: string_list
+        required: true
+        description: The attributes to update (list of attribute names from attrs to actually update)
+    vars:
+      # Map each attribute in the attrs argument to a variable and a flag to indicate if the attribute should be updated
+      manager_id: "'manager_id' in input.attrs ? input.attrs['manager_id'] : null"
+      update_manager_id: "'manager_id' in input.attrs_update_mask"
+      first_name: "'first_name' in input.attrs ? input.attrs['first_name'] : null"
+      update_first_name: "'first_name' in input.attrs_update_mask"
+      middle_name: "'middle_name' in input.attrs ? input.attrs['middle_name'] : null"
+      update_middle_name: "'middle_name' in input.attrs_update_mask"
+      last_name: "'last_name' in input.attrs ? input.attrs['last_name'] : null"
+      update_last_name: "'last_name' in input.attrs_update_mask"
+      display_name: "'display_name' in input.attrs ? input.attrs['display_name'] : null"
+      update_display_name: "'display_name' in input.attrs_update_mask"
+      job_title: "'job_title' in input.attrs ? input.attrs['job_title'] : null"
+      update_job_title: "'job_title' in input.attrs_update_mask"
+      department: "'department' in input.attrs ? input.attrs['department'] : null"
+      update_department: "'department' in input.attrs_update_mask"
+      division: "'division' in input.attrs ? input.attrs['division'] : null"
+      update_division: "'division' in input.attrs_update_mask"
+      company: "'company' in input.attrs ? input.attrs['company'] : null"
+      update_company: "'company' in input.attrs_update_mask"
+      employee_id: "'employee_id' in input.attrs ? input.attrs['employee_id'] : null"
+      update_employee_id: "'employee_id' in input.attrs_update_mask"
+      employee_number: "'employee_number' in input.attrs ? input.attrs['employee_number'] : null"
+      update_employee_number: "'employee_number' in input.attrs_update_mask"
+      employment_type: "'employment_type' in input.attrs ? input.attrs['employment_type'] : null"
+      update_employment_type: "'employment_type' in input.attrs_update_mask"
+    # We define the whole update logic with conditional attributes using CASE statements
+    query: |
+      UPDATE users
+      SET
+        manager_id = CASE 
+          WHEN ?<update_manager_id> THEN ?<manager_id>
+          ELSE manager_id
+        END,
+        attr_first_name = CASE 
+          WHEN ?<update_first_name> THEN ?<first_name>
+          ELSE attr_first_name
+        END,
+        attr_middle_name = CASE 
+          WHEN ?<update_middle_name> THEN ?<middle_name>
+          ELSE attr_middle_name
+        END,
+        attr_last_name = CASE 
+          WHEN ?<update_last_name> THEN ?<last_name>
+          ELSE attr_last_name
+        END,
+        attr_display_name = CASE 
+          WHEN ?<update_display_name> THEN ?<display_name>
+          ELSE attr_display_name
+        END,
+        attr_job_title = CASE 
+          WHEN ?<update_job_title> THEN ?<job_title>
+          ELSE attr_job_title
+        END,
+        attr_department = CASE 
+          WHEN ?<update_department> THEN ?<department>
+          ELSE attr_department
+        END,
+        attr_division = CASE 
+          WHEN ?<update_division> THEN ?<division>
+          ELSE attr_division
+        END,
+        attr_company = CASE 
+          WHEN ?<update_company> THEN ?<company>
+          ELSE attr_company
+        END,
+        employee_id = CASE 
+          WHEN ?<update_employee_id> THEN ?<employee_id>
+          ELSE employee_id
+        END,
+        attr_employee_number = CASE 
+          WHEN ?<update_employee_number> THEN ?<employee_number>
+          ELSE attr_employee_number
+        END,
+        attr_employment_type = CASE 
+          WHEN ?<update_employment_type> THEN ?<employment_type>
+          ELSE attr_employment_type
+        END
+      WHERE
+        username = ?<user_id>
+
+# Definition of different resource types managed by this connector
+resource_types:
+  # Configuration for "user" resources in PostgreSQL
+  user:
+    # Display name for this resource type
+    name: "User"
+    # Description providing context about what a user represents
+    description: "A user within the PostgreSQL system"
+    # Settings for listing user records from the database
+    list:
+      # SQL query to fetch user-related data including employee_id, last_login, and manager information
+      query: |
+        SELECT
+          u.id, 
+          u.username,
+          u.email,
+          u.employee_id,
+          u.status,
+          u.account_type,
+          u.created_at,
+          u.last_login,
+          u.manager_id,
+          m.username as manager_username,
+          m.email as manager_email,
+          u.attr_first_name,
+          u.attr_middle_name,
+          u.attr_last_name,
+          u.attr_display_name,
+          u.attr_job_title,
+          u.attr_department,
+          u.attr_division,
+          u.attr_company,
+          u.attr_employee_number,
+          u.attr_employment_type
+        FROM
+          users u
+        LEFT JOIN 
+          users m ON u.manager_id = m.id
+      # Pagination configuration (using offset for PostgreSQL)
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      # Mapping of query results to resource fields
+      map:
+        # Unique identifier for the user resource
+        id: ".username"
+        # Field to display as the resource's name
+        display_name: ".username"
+        # Additional description for the user resource
+        description: ".username"
+        # Extra attributes (traits) for the user resource
+        traits:
+          user:
+            # Map status from database (active, disabled) to proper resource status
+            status: ".status"
+            # Login identifier - username
+            login: ".username"
+            # Email addresses
+            emails:
+              - ".email"
+            # Account type mapping (convert 'employee' to 'human')
+            account_type: ".account_type == 'employee' ? 'human' : .account_type"
+            # Employee ID mapping
+            employee_ids:
+              - ".employee_id"
+            # Last login timestamp mapping (only if not null)
+            last_login: ".last_login != null ? string(.last_login) : ''"
+            # Manager information
+            manager_id: ".manager_id"
+            manager_email: ".manager_email"
+
+            # Profile details for the user
+            profile:
+              user_id: ".id"
+              created_at: ".created_at"
+              last_login: ".last_login != null ? string(.last_login) : ''"
+              manager_id: ".manager_id"
+              manager_username: ".manager_username"
+              manager_email: ".manager_email"
+              attr_first_name: ".attr_first_name"
+              attr_middle_name: ".attr_middle_name"
+              attr_last_name: ".attr_last_name"
+              attr_display_name: ".attr_display_name"
+              attr_job_title: ".attr_job_title"
+              attr_department: ".attr_department"
+              attr_division: ".attr_division"
+              attr_company: ".attr_company"
+              attr_employee_number: ".attr_employee_number"
+              attr_employment_type: ".attr_employment_type"
+
+    # Account provisioning configuration with password support
+    account_provisioning:
+      schema:
+        - name: "username"
+          description: "The username for the new PostgreSQL user"
+          type: "string"
+          placeholder: "new_user"
+          required: true
+        - name: "email"
+          description: "Email address for the new user"
+          type: "string"
+          placeholder: "user@example.com"
+          required: true
+        - name: "employee_id"
+          description: "Employee ID for the new user"
+          type: "string"
+          placeholder: "EMP001"
+          required: false
+      credentials:
+        random_password:
+          max_length: 32
+          min_length: 16
+          preferred: true
+        no_password:
+          preferred: false
+        encrypted_password:
+          preferred: false
+      validate:
+        vars:
+          username: "username"
+          email: "email"
+        query: |
+          SELECT
+            u.id,
+            u.username,
+            u.email,
+            u.employee_id,
+            u.status,
+            u.account_type,
+            u.created_at,
+            u.last_login,
+            u.manager_id,
+            m.username as manager_username,
+            m.email as manager_email,
+            u.attr_first_name,
+            u.attr_middle_name,
+            u.attr_last_name,
+            u.attr_display_name,
+            u.attr_job_title,
+            u.attr_department,
+            u.attr_division,
+            u.attr_company,
+            u.attr_employee_number,
+            u.attr_employment_type
+          FROM users u
+          LEFT JOIN users m ON u.manager_id = m.id
+          WHERE u.username = ?<username>
+      create:
+        vars:
+          username: "input.username"
+          email: "input.email"
+          employee_id: "has(input.employee_id) ? input.employee_id : null"
+          password: "password"
+        queries:
+          # Insert the new user with generated password (PostgreSQL style)
+          - |
+            INSERT INTO users (username, email, employee_id, status, account_type, created_at, password_hash) 
+            VALUES (?<username>, ?<email>, ?<employee_id>, 'active', 'human', NOW(), crypt(?<password>, gen_salt('bf')))
+
+    credential_rotation:
+      credentials:
+        random_password:
+          max_length: 32
+          min_length: 16
+          preferred: true
+        no_password:
+          preferred: false
+        encrypted_password:
+          preferred: false
+      update:
+        vars:
+          username: "resource_id"
+          password: "password"
+        queries:
+          # Update the user with generated password (PostgreSQL style)
+          - |
+            UPDATE users SET password_hash = crypt(?<password>, gen_salt('bf')) WHERE username = ?<username>
+
+  # Configuration for "role" resources
+  role:
+    # Display name for the role resource type
+    name: "Role"
+    # Brief description of what a role signifies
+    description: "A role within the PostgreSQL system"
+    # Settings for listing roles from the database
+    list:
+      # SQL query to retrieve roles
+      query: |
+        SELECT
+          id,
+          role_name
+        FROM
+          roles
+      # Pagination configuration
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      # Mapping of each query result to role resource fields
+      map:
+        # Unique role identifier
+        id: ".role_name"
+        # Display name for the role
+        display_name: ".role_name"
+        # Role description
+        description: "'PostgreSQL role: ' + .role_name"
+        # Additional role-specific traits
+        traits:
+          role:
+            # Profile mapping for the role
+            profile:
+              role_id: ".id"
+
+    # Define a static entitlement for role membership
+    static_entitlements:
+      - id: "member"
+        display_name: "'Member'"
+        description: "'Role member'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+        exclusion_group:
+          id: "'license-'+resource.ID"
+          order: "1"
+          is_default: "false"
+        provisioning:
+          vars:
+            username: "principal.ID"
+            role_name: "resource.ID"
+          grant:
+            grant_replace:
+              query: |
+                SELECT 
+                  u.username,
+                  r.role_name
+                FROM
+                users u
+                JOIN
+                user_roles ur ON u.id = ur.user_id
+                JOIN
+                roles r ON r.id = ur.role_id
+                WHERE u.username = ?<username>
+              map:
+                - principal_id: ".username"
+                  principal_type: "user"
+                  entitlement_id: "member"
+                  entitlement_resource_id: ".role_name"
+            validation_queries:
+              - |
+                SELECT
+                u.id,
+                r.id
+                FROM users u, roles r
+                WHERE u.username = ?<username>
+                AND r.role_name = ?<role_name>
+            queries:
+              - |
+                INSERT INTO user_roles (
+                  user_id,
+                  role_id
+                )
+                SELECT
+                  u.id,
+                  r.id
+                FROM users u, roles r
+                WHERE u.username = ?<username>
+                AND r.role_name = ?<role_name>
+                ON CONFLICT (user_id, role_id) DO NOTHING
+          revoke:
+            validation_queries:
+              - |
+                SELECT
+                u.id,
+                r.id
+                FROM users u, roles r
+                WHERE u.username = ?<username>
+                AND r.role_name = ?<role_name>
+            queries:
+              - |
+                DELETE FROM user_roles
+                WHERE user_id IN (
+                  SELECT id FROM users
+                  WHERE username = ?<username>
+                ) AND role_id IN (
+                  SELECT id FROM roles
+                  WHERE role_name = ?<role_name>
+                )
+
+    # Dynamic grants based on SQL queries to associate users with roles
+    grants:
+      - query: |
+          SELECT 
+            u.username,
+            r.role_name
+          FROM 
+            users u
+          JOIN 
+            user_roles ur ON u.id = ur.user_id
+          JOIN 
+            roles r ON r.id = ur.role_id
+        pagination:
+          strategy: "offset"
+          primary_key: "username"
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "member"
+
+  feature:
+    name: "Feature"
+    description: "A Feature in the App"
+    list:
+      query: |
+        SELECT
+          f.id AS feat_id,
+          f.name AS feat_name,
+          f.description AS feat_desc
+        FROM features f
+        where f.is_deleted = false
+      map:
+        id: ".feat_id"
+        display_name: ".feat_name"
+        description: ".feat_desc"
+        traits:
+          feature:
+            profile:
+              - feature_id: ".feat_id"
+      pagination:
+        strategy: "offset"
+        primary_key: "feat_id"
+    static_entitlements:
+      - id: "assigned"
+        display_name: "'Assigned'"
+        description: "'Assigned'"
+        purpose: "permission"
+        grantable_to:
+          - "user"
+          - "role"
+    grants:
+      - query: |
+          SELECT DISTINCT
+            fr.feature_id AS feat_id,
+            fr.role_id AS role_id,
+            f.name AS feat_name, 
+            r.role_name AS role_name
+          FROM feature_roles fr
+          JOIN roles r
+          ON r.id = fr.role_id
+          JOIN features f
+          ON f.id = fr.feature_id
+          WHERE f.is_deleted = false
+        map:
+          - skip_if: "string(.feat_id) != resource.ID"
+            principal_id: ".role_name"
+            principal_type: "role"
+            entitlement_id: "assigned"
+            expandable:
+              # skip_if: ".principal_type == 'role'"
+              entitlement_ids:
+                - "'role:' + .role_name + ':member'"
+              shallow: true

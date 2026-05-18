@@ -453,6 +453,13 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 			return fmt.Errorf("failed to prepare validation query: %w", err)
 		}
 
+		l.Debug(
+			"running validation query",
+			zap.String("query", q),
+			zap.Any("args", qArgs),
+			zap.Any("vars", vars),
+		)
+
 		result, err := executor.QueryContext(ctx, q, qArgs...)
 		if err != nil {
 			return fmt.Errorf("failed to execute validation query: %w", err)
@@ -710,11 +717,47 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	}
 
 	if replace != nil && replace.Query != "" {
+		l.Info("running grant replace provisioning query", zap.String("query", replace.Query))
+
 		var ret []*v2.Grant
 
 		_, err := s.runQuery(ctx, s.db, nil, replace.Query, nil, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 			for _, mapping := range replace.Map {
-				g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
+				if mapping.EntitlementResourceId == "" {
+					continue
+				}
+
+				if mapping.SkipIf != "" {
+					skip, err := s.env.EvaluateBool(ctx, mapping.SkipIf, rowMap)
+					if err != nil {
+						continue
+					}
+
+					if skip {
+						continue
+					}
+				}
+
+				entitlementResourceId, err := s.env.EvaluateString(ctx, mapping.EntitlementResourceId, s.env.SyncInputs(rowMap))
+				if err != nil {
+					l.Debug(
+						"failed to evaluate entitlement resource ID for grant replace provisioning query",
+						zap.String("expression", mapping.EntitlementResourceId),
+						zap.Any("row", s.env.SyncInputs(rowMap)),
+						zap.Error(err),
+					)
+					return false, err
+				}
+
+				entitlementResource := &v2.Resource{
+					Id: &v2.ResourceId{
+						ResourceType: s.resourceType.GetId(),
+						Resource:     entitlementResourceId,
+					},
+				}
+
+				// Resource Should be entitlement.Resource
+				g, ok, err := s.mapGrant(ctx, entitlementResource, mapping, rowMap)
 				if err != nil {
 					return false, err
 				}
@@ -736,6 +779,13 @@ func (s *SQLSyncer) RunGrantProvisioning(
 			// Revoke grant
 			grantToRevoke := ret[0]
 
+			l.Info(
+				"grant provisioning query returned a grant to replace",
+				zap.String("grant_id", grantToRevoke.GetId()),
+				zap.String("principal_id", grantToRevoke.GetPrincipal().GetId().GetResource()),
+				zap.String("entitlement_id", grantToRevoke.GetEntitlement().GetId()),
+			)
+
 			_, _, entitlementID, err := helpers.SplitEntitlementID(grantToRevoke.GetEntitlement())
 			if err != nil {
 				return anno, err
@@ -754,12 +804,16 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				return anno, errors.New("no revoke config found for entitlement")
 			}
 
-			provisioningVars, err := s.prepareProvisioningVars(ctx, provisioningConfig.Vars, grantToRevoke.GetPrincipal(), grantToRevoke.GetEntitlement())
+			provisioningVars, err := s.prepareProvisioningVars(
+				ctx,
+				provisioningConfig.Vars,
+				grantToRevoke.GetPrincipal(),
+				grantToRevoke.GetEntitlement(),
+			)
 			if err != nil {
 				return anno, err
 			}
 
-			// Needs to fix the TX
 			err = s.RunProvisioningQueriesWithExecutor(
 				ctx,
 				provisioningConfig.Revoke.Queries,
@@ -778,7 +832,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 			})
 
 		case len(ret) == 0:
-			// Nothing to do
+			return anno, errors.New("no revoke config found for grant to replace")
 		}
 	}
 
@@ -805,7 +859,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 
 		if !valid {
-			return anno, fmt.Errorf("validation query returned no rows")
+			return anno, fmt.Errorf("grant provisioning: validation query returned no rows")
 		}
 	}
 
