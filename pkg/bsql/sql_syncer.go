@@ -6,9 +6,13 @@ import (
 	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -17,6 +21,8 @@ const (
 	groupTraitType = "group"
 	roleTraitType  = "role"
 )
+
+var _ connectorbuilder.ResourceTargetedSyncer = (*SQLSyncer)(nil)
 
 type SQLSyncer struct {
 	resourceType *v2.ResourceType
@@ -29,6 +35,44 @@ type SQLSyncer struct {
 
 func (s *SQLSyncer) ResourceType(ctx context.Context) *v2.ResourceType {
 	return s.resourceType
+}
+
+// ResourceTypeID returns the resource type ID for this syncer.
+func (s *SQLSyncer) ResourceTypeID() string {
+	if s.resourceType == nil {
+		return ""
+	}
+	return s.resourceType.Id
+}
+
+// Get implements ResourceTargetedSyncer, fetching a single resource by its ID.
+func (s *SQLSyncer) Get(ctx context.Context, resourceId *v2.ResourceId, parentResourceId *v2.ResourceId) (*v2.Resource, annotations.Annotations, error) {
+	if s.config.Get == nil {
+		return nil, nil, fmt.Errorf("baton-sql: get not configured for resource type %s", resourceId.GetResourceType())
+	}
+
+	vars, err := s.PrepareQueryVars(ctx, nil, s.config.Get.Vars)
+	if err != nil {
+		return nil, nil, fmt.Errorf("baton-sql: failed to prepare vars for get query: %w", err)
+	}
+	vars[idKey] = resourceId.GetResource()
+
+	var result *v2.Resource
+	_, err = s.runQuery(ctx, &pagination.Token{}, s.config.Get.Query, nil, vars, func(ctx context.Context, row map[string]interface{}) (bool, error) {
+		r, err := s.mapResource(ctx, row)
+		if err != nil {
+			return false, err
+		}
+		result = r
+		return false, nil // stop after first row
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("baton-sql: failed to execute get query for %s/%s: %w", resourceId.GetResourceType(), resourceId.GetResource(), err)
+	}
+	if result == nil {
+		return nil, nil, status.Errorf(codes.NotFound, "baton-sql: resource %s/%s not found", resourceId.GetResourceType(), resourceId.GetResource())
+	}
+	return result, nil, nil
 }
 
 func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
@@ -101,6 +145,12 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 		}
 	}
 
+	if s.fullConfig.IncrementalSync != nil {
+		if err := s.validateInternal(ctx, s.fullConfig.IncrementalSync); err != nil {
+			return fmt.Errorf("validation error for incremental_sync: %w", err)
+		}
+	}
+
 	if err := s.validateInternal(ctx, s.config.List); err != nil {
 		return s.validateFormatErr("list", err)
 	}
@@ -124,6 +174,21 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 			if err := s.validateInternal(ctx, grant); err != nil {
 				return s.validateFormatErr("grants", err)
 			}
+		}
+	}
+
+	if s.config.Get != nil {
+		if err := s.validateInternal(ctx, s.config.Get); err != nil {
+			return s.validateFormatErr("get", err)
+		}
+	}
+
+	if s.config.IncrementalSync != nil {
+		if s.config.Get == nil {
+			return s.validateFormatErr("incremental_sync", fmt.Errorf("get query is required when incremental_sync is configured"))
+		}
+		if err := s.validateInternal(ctx, s.config.IncrementalSync); err != nil {
+			return s.validateFormatErr("incremental_sync", err)
 		}
 	}
 

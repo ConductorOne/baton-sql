@@ -33,10 +33,28 @@ type Config struct {
 
 	// Actions defines the set of actions configured in the connector.
 	Actions map[string]ActionConfig `yaml:"actions" json:"actions"`
+
+	// IncrementalSync holds global settings for incremental sync behavior.
+	IncrementalSync *IncrementalSyncConfig `yaml:"incremental_sync,omitempty" json:"incremental_sync,omitempty"`
 }
 
 func (c Config) HasActions() bool {
 	return len(c.Actions) > 0
+}
+
+// HasIncrementalSync returns true if any resource type or grants query has incremental sync configured.
+func (c Config) HasIncrementalSync() bool {
+	for _, rt := range c.ResourceTypes {
+		if rt.IncrementalSync != nil {
+			return true
+		}
+		for _, gq := range rt.Grants {
+			if gq.IncrementalSync != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DatabaseConfig contains settings required to connect to the database.
@@ -100,6 +118,12 @@ type ResourceType struct {
 
 	// CredentialRotation defines the configuration for credential rotation
 	CredentialRotation *CredentialRotation `yaml:"credential_rotation,omitempty" json:"credential_rotation,omitempty"`
+
+	// Get defines how to fetch a single resource by ID. Required when IncrementalSync is set.
+	Get *GetQuery `yaml:"get,omitempty" json:"get,omitempty"`
+
+	// IncrementalSync defines settings for detecting changed resources via the event feed.
+	IncrementalSync *ResourceIncrementalSync `yaml:"incremental_sync,omitempty" json:"incremental_sync,omitempty"`
 }
 
 // ListQuery defines the structure for configuring resource list queries.
@@ -327,6 +351,9 @@ type GrantsQuery struct {
 
 	// Map contains mappings to interpret each row of the query result as a grant.
 	Map []*GrantMapping `yaml:"map" json:"map"`
+
+	// IncrementalSync defines settings for detecting changed grants via the event feed.
+	IncrementalSync *GrantsIncrementalSync `yaml:"incremental_sync,omitempty" json:"incremental_sync,omitempty"`
 }
 
 // GrantMapping defines how query results are mapped to an entitlement grant.
@@ -436,6 +463,61 @@ type CredentialRotation struct {
 	Credentials *AccountCredentials `yaml:"credentials" json:"credentials"`
 	// Update defines the SQL queries and configuration for updating credentials.
 	Update *AccountCreationConfig `yaml:"update" json:"update"`
+}
+
+// IncrementalSyncConfig holds global settings for incremental sync behavior.
+type IncrementalSyncConfig struct {
+	// DefaultLookback is the maximum time window to look back when initializing a cursor for the
+	// first time. Accepts any Go time.Duration string (e.g., "3h", "30m", "24h"). Defaults to 3h.
+	DefaultLookback string `yaml:"default_lookback" json:"default_lookback"`
+}
+
+// GetQuery defines how to fetch a single resource by its ID.
+// Required for resource types that configure incremental_sync.
+type GetQuery struct {
+	// Query is the SQL statement to fetch one resource. Must contain ?<id>.
+	Query string `yaml:"query" json:"query"`
+	// Vars provides optional variables for the query.
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+}
+
+// ResourceIncrementalSync defines incremental sync configuration for a resource type.
+// When set, the resource type supports emitting ResourceChangeEvents from the event feed.
+type ResourceIncrementalSync struct {
+	// Query is the SQL statement to detect changed resources. Must contain ?<since>.
+	Query string `yaml:"query" json:"query"`
+	// CursorColumn is the column whose max value is used to advance the cursor for this source.
+	CursorColumn string `yaml:"cursor_column" json:"cursor_column"`
+	// ResourceId is a CEL expression that extracts the resource ID from each row returned by Query.
+	// When set, this expression is evaluated against the incremental query's columns.
+	// When not set, falls back to the list mapping's id expression (list.map.id), which requires
+	// the incremental query to return all columns that expression references.
+	ResourceId string `yaml:"resource_id,omitempty" json:"resource_id,omitempty"`
+	// Pagination defines the pagination strategy. Defaults to offset if not set.
+	Pagination *Pagination `yaml:"pagination,omitempty" json:"pagination,omitempty"`
+	// Vars provides optional variables for the query.
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
+}
+
+// GrantsIncrementalSync defines incremental sync configuration for a grants query.
+// When set, the grants query supports emitting CreateGrantEvent and optionally CreateRevokeEvent.
+type GrantsIncrementalSync struct {
+	// ResourceId is a CEL expression that extracts the resource ID from each row.
+	// Required because incremental queries span all resources, unlike full sync which is per-resource.
+	ResourceId string `yaml:"resource_id" json:"resource_id"`
+	// ChangesQuery is the SQL statement to detect new or modified grants. Must contain ?<since>.
+	ChangesQuery string `yaml:"changes_query" json:"changes_query"`
+	// ChangesCursorColumn is the column whose max value advances the changes cursor for this source.
+	ChangesCursorColumn string `yaml:"changes_cursor_column" json:"changes_cursor_column"`
+	// RevokesQuery is the SQL statement to detect revoked grants (soft-delete pattern). Optional.
+	// Must contain ?<since> if set.
+	RevokesQuery string `yaml:"revokes_query,omitempty" json:"revokes_query,omitempty"`
+	// RevokesCursorColumn is the column whose max value advances the revokes cursor.
+	RevokesCursorColumn string `yaml:"revokes_cursor_column,omitempty" json:"revokes_cursor_column,omitempty"`
+	// Pagination defines the pagination strategy. Defaults to offset if not set.
+	Pagination *Pagination `yaml:"pagination,omitempty" json:"pagination,omitempty"`
+	// Vars provides optional variables for the queries.
+	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
 }
 
 type ActionConfig struct {

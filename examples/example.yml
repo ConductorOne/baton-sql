@@ -1,6 +1,6 @@
 ---
 # Connector Configuration Reference
-# ===============================
+# ===================================
 # This is a reference configuration demonstrating all available options
 # and their purposes in a connector configuration file.
 
@@ -10,7 +10,7 @@ app_name: Example Application
 # Connection Configuration
 # ----------------------
 # Specifies how to connect to the data source. Supports various connection methods.
-# 
+#
 # RECOMMENDED: Use structured fields!
 connect:
   scheme: "mysql"
@@ -32,135 +32,164 @@ connect:
 # connect:
 #   dsn: "mysql://${DB_USER}:${DB_PASS}@${DB_HOST}:3306/${DB_NAME}?parseTime=true"
 
+# Incremental Sync Settings (Optional)
+# ------------------------------------
+# Global settings for event-feed-based incremental sync.
+# When any resource type or grants query has incremental_sync configured, the connector
+# automatically exposes an EventFeed to ConductorOne for efficient change detection.
+incremental_sync:
+  default_lookback: 3h   # How far back to look on first run; any Go duration string
+
 # Resource Types
 # -------------
 # Defines the resources that can be synchronized from the data source.
 # Each resource type represents a distinct entity type (e.g., users, groups, roles).
 resource_types:
+
   # Example User Resource
-  # -------------------
+  # ---------------------
   user:
-    name: "User" # Display name for this resource type
+    name: "User"
     description: "Represents a user account in the system"
 
-    # List Configuration
-    # ----------------
-    # Defines how to retrieve a list of resources
-    list:
-      # SQL query to fetch resources. Supports multiple query types:
-      # - Direct SQL queries
-      # - Stored procedure calls
-      # - Complex joins and subqueries
+    # Targeted Sync — Get Query
+    # -------------------------
+    # Fetches a single resource by ID. Required when incremental_sync is configured
+    # on this resource type. Uses the same list.map for column mapping.
+    get:
       query: |
-        SELECT 
+        SELECT id, username, email, created_at, status, department, updated_at
+        FROM users
+        WHERE id = ?<id>
+
+    # List Configuration
+    # ------------------
+    # Defines how to retrieve a paginated list of resources.
+    list:
+      query: |
+        SELECT
           id,
           username,
           email,
           created_at,
           status,
-          department
+          department,
+          updated_at
         FROM users
-        WHERE status = 'active'
-        AND id > ?<Cursor>
+        WHERE id > ?<Cursor>
         ORDER BY id ASC
         LIMIT ?<Limit>
-
-      # Mapping Configuration
-      # -------------------
-      # Defines how to transform raw data into standardized resource objects
       map:
-        # Required Fields
-        # --------------
-        # These fields are required for all resources
-        id: ".id" # Maps the 'id' column to the resource ID
-        display_name: ".username" # Human-readable name
-        description: "string(.department) + ' department user'" # Can use CEL expressions
-
-        # Optional Traits
-        # --------------
-        # Custom attributes specific to this resource type
+        id: ".id"
+        display_name: ".username"
+        description: "string(.department) + ' department user'"
         traits:
           user:
-            # The trait name defines the schema
             emails:
-              # Array fields
-              - ".email" # Direct field mapping
-              - "lowercase(.email)" # CEL transformation
-            status: ".status" # Simple field mapping
+              - ".email"
+            status: ".status"
             profile:
               department: ".department"
               joined_date: ".created_at"
               # Complex CEL transformation example
               full_name: "titleCase(.first_name) + ' ' + titleCase(.last_name)"
-
-      # Pagination Configuration
-      # ----------------------
-      # Defines how to handle large result sets
       pagination:
-        strategy: "cursor" # Options: "cursor", "offset"
-        primary_key: "id" # Column used for pagination tracking
+        strategy: "cursor"
+        primary_key: "id"
+
+    # Resource Incremental Sync
+    # -------------------------
+    # Detects new/modified resources via timestamp filtering. Emits a ResourceChangeEvent
+    # per row; C1 then calls the get query above to re-fetch the full resource.
+    # ?<since> is automatically injected with the cursor timestamp for this source.
+    incremental_sync:
+      query: |
+        SELECT id, username, email, created_at, status, department, updated_at
+        FROM users
+        WHERE updated_at > ?<since>
+        ORDER BY updated_at ASC
+        LIMIT ?<Limit> OFFSET ?<Offset>
+      cursor_column: updated_at   # Column whose max value advances this source's cursor
+      pagination:
+        strategy: offset
+        primary_key: id
 
     # Static Entitlements
-    # ------------------
-    # Pre-defined permissions that can be granted
+    # -------------------
+    # Pre-defined permissions that can be granted.
     static_entitlements:
-      - id: "access" # Unique identifier for this entitlement
+      - id: "access"
         display_name: "Basic Access"
         description: "Provides basic access to the application"
-        purpose: "access" # Purpose: "access", "assignment", "permission"
+        purpose: "assignment"
         grantable_to:
-          # Resource types that can receive this entitlement
           - "user"
           - "service_account"
-        # Provisioning Configuration
-        # ------------------------
-        # Defines how to implement entitlement changes
         provisioning:
           vars:
-            # Variables available in provisioning queries
             user_id: "principal.ID"
             access_level: "'basic'"
-
-          # Grant Operations
-          # ---------------
           grant:
-            # SQL statements to execute when granting
             queries:
               - |
                 INSERT INTO user_access (user_id, level)
                 VALUES (?<user_id>, ?<access_level>)
-
-          # Revoke Operations
-          # ----------------
           revoke:
-            # SQL statements to execute when revoking
             queries:
               - |
                 DELETE FROM user_access
                 WHERE user_id = ?<user_id>
+
     # Grants Query Configuration
-    # ------------------------
-    # Defines how to discover existing entitlements
+    # --------------------------
+    # Defines how to discover existing entitlement assignments.
     grants:
       - query: |
-          SELECT 
+          SELECT
+            id AS grant_id,
             user_id,
             access_level,
-            granted_at
+            updated_at
           FROM user_access
           LIMIT ?<Limit> OFFSET ?<Offset>
-
-        # Grant Mapping
-        # ------------
-        # Defines how to interpret grant query results
         map:
-          - skip_if: ".access_level != 'basic'" # CEL condition to filter results
+          - skip_if: ".access_level != 'basic'"
             principal_id: ".user_id"
             principal_type: "user"
             entitlement_id: "access"
-        # Grants Pagination
-        # ----------------
         pagination:
           strategy: "offset"
-          primary_key: "user_id"
-# Example: groups, roles, applications, etc.
+          primary_key: "grant_id"
+
+        # Grants Incremental Sync
+        # -----------------------
+        # Detects new and revoked grants without a full re-sync.
+        # The parent map is reused for row-to-grant mapping.
+        # NOTE: CEL expressions in map must not reference resource trait fields
+        # (display_name, description, etc.) in this context — only row columns are available.
+        incremental_sync:
+          resource_id: ".user_id"   # CEL expr: extracts resource ID from each row
+                                    # (required — incremental queries span ALL resources)
+          changes_query: |
+            SELECT id AS grant_id, user_id, access_level, updated_at
+            FROM user_access
+            WHERE deleted_at IS NULL
+              AND updated_at > ?<since>
+            ORDER BY updated_at ASC
+            LIMIT ?<Limit> OFFSET ?<Offset>
+          changes_cursor_column: updated_at
+
+          # Optional: only configure when soft-delete is available in the schema.
+          revokes_query: |
+            SELECT id AS grant_id, user_id, access_level, deleted_at
+            FROM user_access
+            WHERE deleted_at > ?<since>
+            ORDER BY deleted_at ASC
+            LIMIT ?<Limit> OFFSET ?<Offset>
+          revokes_cursor_column: deleted_at
+
+          pagination:
+            strategy: offset
+            primary_key: grant_id   # Must be present in both changes_query and revokes_query SELECTs
+
+# Example: add groups, roles, applications, etc. following the same pattern.
