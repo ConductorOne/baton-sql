@@ -412,7 +412,7 @@ func (s *SQLSyncer) RunProvisioningQueries(
 		}()
 	}
 
-	err := s.RunProvisioningQueriesWithExecutor(
+	err = s.RunProvisioningQueriesWithExecutor(
 		ctx,
 		queries,
 		validationQueries,
