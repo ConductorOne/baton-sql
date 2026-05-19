@@ -735,8 +735,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				if mapping.SkipIf != "" {
 					skip, err := s.env.EvaluateBool(ctx, mapping.SkipIf, rowMap)
 					if err != nil {
-						l.Error("failed to evaluate skip_if", zap.Error(err))
-						continue
+						return false, fmt.Errorf("failed to evaluate skip_if: %w", err)
 					}
 
 					if skip {
