@@ -343,7 +343,6 @@ WHERE g."pb$tenant_id"                    = '3CmpaAkVpaoiiwRv4RFu3wdjZLX'
 \echo
 \echo '==> [10] Orphan entries — live entries pointing at deleted entitlements (expect 0 rows)'
 SELECT
-  e."pb$id"                  AS entry_id,
   e."pb$exclusion_group_id"  AS exclusion_group_id,
   e."pb$app_entitlement_id"  AS app_entitlement_id,
   ae."pb$deleted_at"         AS entitlement_deleted_at
@@ -360,7 +359,6 @@ ORDER BY e."pb$exclusion_group_id", e."pb$app_entitlement_id";
 \echo
 \echo '==> [10b] Orphan lookups — live lookups pointing at deleted entitlements (expect 0 rows)'
 SELECT
-  l."pb$id"                  AS lookup_id,
   l."pb$exclusion_group_id"  AS exclusion_group_id,
   l."pb$app_entitlement_id"  AS app_entitlement_id,
   ae."pb$deleted_at"         AS entitlement_deleted_at
