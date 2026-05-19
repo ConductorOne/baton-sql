@@ -143,7 +143,7 @@ resource_types:
         display_name: "resource.DisplayName + ' member'"
         description: "'Membership in Redshift role ' + resource.DisplayName"
         purpose: assignment
-        grantable_to: [user, role]
+        grantable_to: [user]
         slug: member
         provisioning:
           vars:
@@ -202,7 +202,7 @@ resource_types:
         display_name: "resource.DisplayName + ' CONNECT'"
         description: "'CONNECT on database ' + resource.DisplayName"
         purpose: permission
-        grantable_to: [user, role, group]
+        grantable_to: [user]
         slug: connect
         immutable: true
     grants:
@@ -256,7 +256,7 @@ resource_types:
         display_name: "resource.DisplayName + ' USAGE'"
         description: "'USAGE on schema ' + resource.DisplayName"
         purpose: permission
-        grantable_to: [user, role, group]
+        grantable_to: [user]
         slug: usage
         provisioning:
           vars:
@@ -276,7 +276,7 @@ resource_types:
         display_name: "resource.DisplayName + ' CREATE'"
         description: "'CREATE on schema ' + resource.DisplayName"
         purpose: permission
-        grantable_to: [user, role, group]
+        grantable_to: [user]
         slug: create
         provisioning:
           vars:
@@ -358,7 +358,7 @@ resource_types:
         display_name: "resource.DisplayName + ' SELECT'"
         description: "'SELECT on ' + resource.DisplayName"
         purpose: permission
-        grantable_to: [user, role, group]
+        grantable_to: [user]
         slug: select
         provisioning:
           vars:
@@ -378,7 +378,7 @@ resource_types:
         display_name: "resource.DisplayName + ' INSERT'"
         description: "'INSERT on ' + resource.DisplayName"
         purpose: permission
-        grantable_to: [user, role, group]
+        grantable_to: [user]
         slug: insert
         provisioning:
           vars:
@@ -398,7 +398,7 @@ resource_types:
         display_name: "resource.DisplayName + ' UPDATE'"
         description: "'UPDATE on ' + resource.DisplayName"
         purpose: permission
-        grantable_to: [user, role, group]
+        grantable_to: [user]
         slug: update
         provisioning:
           vars:
@@ -418,7 +418,7 @@ resource_types:
         display_name: "resource.DisplayName + ' DELETE'"
         description: "'DELETE on ' + resource.DisplayName"
         purpose: permission
-        grantable_to: [user, role, group]
+        grantable_to: [user]
         slug: delete
         provisioning:
           vars:
