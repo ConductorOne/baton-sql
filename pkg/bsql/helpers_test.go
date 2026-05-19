@@ -1,6 +1,7 @@
 package bsql
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -352,7 +353,7 @@ func TestGenerateCredentials(t *testing.T) {
 	ctx := t.Context()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			password, err := generatePassword(ctx, tt.credentialOptions)
+			password, err := generatePassword(ctx, tt.credentialOptions, nil)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -378,4 +379,60 @@ func TestGenerateCredentials(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateRandomPasswordDisallowedCharacters(t *testing.T) {
+	ctx := t.Context()
+
+	randomOptions := func(length int64) *v2.LocalCredentialOptions {
+		return &v2.LocalCredentialOptions{
+			Options: &v2.LocalCredentialOptions_RandomPassword_{
+				RandomPassword: &v2.LocalCredentialOptions_RandomPassword{Length: length},
+			},
+		}
+	}
+
+	t.Run("disallowed characters never appear in output", func(t *testing.T) {
+		disallowed := "!@#$%^&*()"
+		cfg := &RandomPasswordConfig{DisallowedCharacters: disallowed}
+
+		// Run many iterations because rejection is probabilistic over the random pool.
+		for i := 0; i < 200; i++ {
+			password, err := generatePassword(ctx, randomOptions(32), cfg)
+			require.NoError(t, err)
+			require.NotNil(t, password)
+			require.Equal(t, 32, len(*password))
+			require.NotContainsf(t, *password, "!", "iteration %d: %q", i, *password)
+			for _, r := range disallowed {
+				require.NotContainsf(t, *password, string(r), "iteration %d: %q contains disallowed %q", i, *password, string(r))
+			}
+		}
+	})
+
+	t.Run("disallowing every character returns an error", func(t *testing.T) {
+		// All ASCII printable except space; covers every category the SDK uses.
+		var allChars strings.Builder
+		for c := byte(33); c < 127; c++ {
+			allChars.WriteByte(c)
+		}
+		cfg := &RandomPasswordConfig{DisallowedCharacters: allChars.String()}
+
+		_, err := generatePassword(ctx, randomOptions(16), cfg)
+		require.Error(t, err)
+	})
+
+	t.Run("nil RandomPasswordConfig falls back to SDK behavior", func(t *testing.T) {
+		password, err := generatePassword(ctx, randomOptions(16), nil)
+		require.NoError(t, err)
+		require.NotNil(t, password)
+		require.Equal(t, 16, len(*password))
+	})
+
+	t.Run("empty DisallowedCharacters falls back to SDK behavior", func(t *testing.T) {
+		cfg := &RandomPasswordConfig{DisallowedCharacters: ""}
+		password, err := generatePassword(ctx, randomOptions(16), cfg)
+		require.NoError(t, err)
+		require.NotNil(t, password)
+		require.Equal(t, 16, len(*password))
+	})
 }

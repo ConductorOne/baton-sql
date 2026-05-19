@@ -252,8 +252,12 @@ func (s *SQLSyncer) prepareQueryInputs(
 	credentials := make(map[string]any)
 	var plaintextDataList []*v2.PlaintextData
 	if credentialOptions != nil {
+		var rpConfig *RandomPasswordConfig
+		if provisioningConfig.Credentials != nil {
+			rpConfig = provisioningConfig.Credentials.RandomPassword
+		}
 		var err error
-		password, err := generatePassword(ctx, credentialOptions)
+		password, err := generatePassword(ctx, credentialOptions, rpConfig)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -285,26 +289,36 @@ func (s *SQLSyncer) prepareQueryInputs(
 	return queryInputs, plaintextDataList, nil
 }
 
-func generatePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (*string, error) {
+func generatePassword(
+	ctx context.Context,
+	credentialOptions *v2.LocalCredentialOptions,
+	rpConfig *RandomPasswordConfig,
+) (*string, error) {
 	if credentialOptions == nil {
 		return nil, errors.New("credential options are required")
 	}
 
-	var password string
-	var err error
-	switch credentialOptions.Options.(type) {
+	switch opts := credentialOptions.Options.(type) {
 	case *v2.LocalCredentialOptions_NoPassword_:
 		return nil, nil
-	case *v2.LocalCredentialOptions_RandomPassword_, *v2.LocalCredentialOptions_PlaintextPassword_:
-		password, err = crypto.GeneratePassword(ctx, credentialOptions)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate password: %w", err)
+	case *v2.LocalCredentialOptions_RandomPassword_:
+		if rpConfig != nil && rpConfig.DisallowedCharacters != "" {
+			password, err := generateRandomPasswordFiltered(opts.RandomPassword, rpConfig.DisallowedCharacters)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate password: %w", err)
+			}
+			return &password, nil
 		}
-
+	case *v2.LocalCredentialOptions_PlaintextPassword_:
+		// Plaintext is just echoed back by the SDK; no filtering needed.
 	default:
 		return nil, fmt.Errorf("unsupported credential options: %v", credentialOptions)
 	}
 
+	password, err := crypto.GeneratePassword(ctx, credentialOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate password: %w", err)
+	}
 	return &password, nil
 }
 
