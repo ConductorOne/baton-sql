@@ -22,14 +22,27 @@ type userSyncer struct {
 var _ connectorbuilder.AccountManager = &userSyncer{}
 var _ connectorbuilder.CredentialManager = &userSyncer{}
 
-func newUserSyncer(rt *v2.ResourceType, rtConfig ResourceType, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) *userSyncer {
+func newUserSyncer(
+	rt *v2.ResourceType,
+	rtConfig ResourceType,
+	dbs map[string]*sql.DB,
+	dbNames []string,
+	primaryDBName string,
+	dbEngine database.DbEngine,
+	celEnv *bcel.Env,
+	fullConfig Config,
+) *userSyncer {
 	sqlSyncer := &SQLSyncer{
-		resourceType: rt,
-		config:       rtConfig,
-		db:           db,
-		dbEngine:     dbEngine,
-		env:          celEnv,
-		fullConfig:   fullConfig,
+		resourceType:  rt,
+		config:        rtConfig,
+		db:            dbs[primaryDBName],
+		currentDBName: primaryDBName,
+		dbs:           dbs,
+		dbNames:       dbNames,
+		primaryDBName: primaryDBName,
+		dbEngine:      dbEngine,
+		env:           celEnv,
+		fullConfig:    fullConfig,
 	}
 
 	return &userSyncer{

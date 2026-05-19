@@ -26,13 +26,15 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 		return nil, "", nil, err
 	}
 
-	npt, err := s.runQuery(ctx, pToken, s.config.List.Query, s.config.List.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		r, err := s.mapResource(ctx, rowMap)
-		if err != nil {
-			return false, err
-		}
-		ret = append(ret, r)
-		return true, nil
+	npt, err := s.iterateDBs(ctx, s.config.List.Scope, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, innerToken, s.config.List.Query, s.config.List.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			r, err := s.mapResource(ctx, rowMap)
+			if err != nil {
+				return false, err
+			}
+			ret = append(ret, r)
+			return true, nil
+		})
 	})
 	if err != nil {
 		return nil, "", nil, err

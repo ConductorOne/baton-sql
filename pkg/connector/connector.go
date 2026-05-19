@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -17,16 +18,18 @@ import (
 
 type Connector struct {
 	config   *bsql.Config
-	db       *sql.DB
+	dbs      map[string]*sql.DB
 	dbEngine database.DbEngine
 	celEnv   *bcel.Env
 }
 
 func (c *Connector) Close() error {
 	var errs error
-	if c.db != nil {
-		err := c.db.Close()
-		if err != nil {
+	for _, db := range c.dbs {
+		if db == nil {
+			continue
+		}
+		if err := db.Close(); err != nil {
 			errs = errors.Join(errs, err)
 		}
 	}
@@ -35,7 +38,7 @@ func (c *Connector) Close() error {
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
+	syncers, err := c.config.GetSQLSyncers(ctx, c.dbs, c.dbEngine, c.celEnv)
 	if err != nil {
 		return nil
 	}
@@ -76,7 +79,7 @@ func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 // Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
 // to be sure that they are valid.
 func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, error) {
-	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
+	syncers, err := c.config.GetSQLSyncers(ctx, c.dbs, c.dbEngine, c.celEnv)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +95,10 @@ func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 		}
 	}
 
-	err = c.db.PingContext(ctx)
-	if err != nil {
-		return nil, err
+	for name, db := range c.dbs {
+		if err := db.PingContext(ctx); err != nil {
+			return nil, fmt.Errorf("database %q ping failed: %w", name, err)
+		}
 	}
 	return nil, nil
 }
@@ -121,20 +125,89 @@ func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
 		Params:   c.Connect.Params,
 	}
 
-	db, dbEngine, err := database.Connect(ctx, opts)
+	dbs, dbEngine, err := openDatabases(ctx, opts, c.Connect.Databases)
 	if err != nil {
 		return nil, err
 	}
 
 	celEnv, err := bcel.NewEnv(ctx)
 	if err != nil {
+		for _, db := range dbs {
+			_ = db.Close()
+		}
 		return nil, err
 	}
 
 	return &Connector{
 		config:   c,
-		db:       db,
+		dbs:      dbs,
 		dbEngine: dbEngine,
 		celEnv:   celEnv,
 	}, nil
+}
+
+// openDatabases returns one *sql.DB per database to sync. Consumers derive their own
+// sorted view via sortedDBNames; this function does not pre-sort.
+func openDatabases(
+	ctx context.Context,
+	opts database.ConnectOptions,
+	dbsCfg *bsql.DatabasesConfig,
+) (map[string]*sql.DB, database.DbEngine, error) {
+	if dbsCfg == nil {
+		db, dbEngine, err := database.Connect(ctx, opts)
+		if err != nil {
+			return nil, database.Unknown, err
+		}
+		key := database.ResolveDatabaseName(opts)
+		return map[string]*sql.DB{key: db}, dbEngine, nil
+	}
+
+	if err := dbsCfg.Validate(); err != nil {
+		return nil, database.Unknown, err
+	}
+
+	dbNames := dbsCfg.Static
+	if dbsCfg.DiscoveryQuery != "" {
+		adminDB, _, err := database.Connect(ctx, opts)
+		if err != nil {
+			return nil, database.Unknown, fmt.Errorf("databases.discovery_query: admin connect failed: %w", err)
+		}
+		discovered, discoverErr := runDiscoveryQuery(ctx, adminDB, dbsCfg.DiscoveryQuery)
+		if cerr := adminDB.Close(); cerr != nil && discoverErr == nil {
+			discoverErr = fmt.Errorf("admin handle close: %w", cerr)
+		}
+		if discoverErr != nil {
+			return nil, database.Unknown, discoverErr
+		}
+		if len(discovered) == 0 {
+			return nil, database.Unknown, errors.New("databases.discovery_query: returned zero rows")
+		}
+		dbNames = discovered
+	}
+
+	return database.ConnectMany(ctx, opts, dbNames)
+}
+
+func runDiscoveryQuery(ctx context.Context, db *sql.DB, query string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("databases.discovery_query: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("databases.discovery_query: scan: %w", err)
+		}
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("databases.discovery_query: rows: %w", err)
+	}
+	return names, nil
 }

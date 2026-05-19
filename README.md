@@ -37,6 +37,35 @@ The connector is configured using a YAML file that defines:
 
 See examples in the [examples](https://github.com/ConductorOne/baton-sql/tree/main/examples) directory.
 
+### Query placeholders
+
+SQL queries reference variables with `?<name>` placeholders. Three modifiers are supported:
+
+- `?<name>` — parameterized value. Bound through the driver (`$1`, `?`, `@p1`, `:1` depending on engine). Safe against SQL injection.
+- `?<name|unquoted>` — strips non-alphanumeric characters from the value and inlines it directly. Intended for numeric pagination knobs (LIMIT/OFFSET) and trusted identifier-shaped values. Not safe for arbitrary user input — the sanitizer silently drops characters rather than escaping.
+- `?<name|identifier>` — inlines the value as a properly-quoted SQL identifier. Engine-aware (backticks for MySQL, ANSI double-quotes elsewhere) with embedded quote characters doubled. Use this for identifier substitution in GRANT / REVOKE / DDL where parameter binding is not supported by the SQL grammar, e.g. `GRANT SELECT ON ?<schema|identifier>.?<tbl|identifier> TO ?<grantee|identifier>`.
+
+### Multi-database iteration
+
+A connector can be configured to iterate every database in a cluster instead of operating on a single handle. Add a `databases` block under `connect`:
+
+```yaml
+connect:
+  dsn: "postgres://${HOST}:${PORT}/${ADMIN_DB}"
+  user: "${USER}"
+  password: "${PASSWORD}"
+  databases:
+    # Either a static list…
+    static: ["analytics", "reporting"]
+    # …or a discovery query whose first column is the list of database names.
+    discovery_query: |
+      SELECT datname FROM pg_database WHERE datistemplate = false
+```
+
+When `databases` is set, each `list:` / `entitlements:` / `grants:` block runs once per database. Add `scope: cluster` to a query that should only run once (against the lexicographically first database) — useful for catalogs that return the same data from any database, like `pg_user`. The active database name is injected into every row as the synthetic column `database`, so `map:` blocks and `skip_if` expressions can reference `.database`. Provisioning queries route to the database named by the `database` provisioning var, falling back to the primary handle when unset.
+
+Single-database configurations are unchanged — the `databases` block is opt-in and existing examples (`postgres-test.yml`, `mysql-test.yml`, etc.) continue to work identically.
+
 ## `baton-sql` Command Line Usage
 ```
 Usage:

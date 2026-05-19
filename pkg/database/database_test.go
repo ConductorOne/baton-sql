@@ -4,8 +4,31 @@ package database
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 )
+
+func Test_ConnectMany_RejectsEmptyList(t *testing.T) {
+	_, _, err := ConnectMany(t.Context(), ConnectOptions{Scheme: "postgres"}, nil)
+	if err == nil {
+		t.Fatal("expected error for empty dbNames")
+	}
+	if !strings.Contains(err.Error(), "dbNames is empty") {
+		t.Errorf("expected dbNames error, got: %v", err)
+	}
+}
+
+func Test_ConnectMany_UnsupportedSchemePropagates(t *testing.T) {
+	// Use an unsupported scheme so Connect rejects each opts before any *sql.DB is opened.
+	// ConnectMany must propagate the error rather than swallow it.
+	_, _, err := ConnectMany(t.Context(), ConnectOptions{Scheme: "unsupported-engine"}, []string{"a", "b"})
+	if err == nil {
+		t.Fatal("expected unsupported-scheme error")
+	}
+	if !strings.Contains(err.Error(), "unsupported database scheme") {
+		t.Errorf("expected scheme error, got: %v", err)
+	}
+}
 
 func Test_updateDSNFromEnv(t *testing.T) {
 	type args struct {

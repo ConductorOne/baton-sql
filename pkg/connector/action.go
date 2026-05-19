@@ -152,7 +152,7 @@ func (c *Connector) handleQueryAction(ctx context.Context, actionKey string, act
 	l := ctxzap.Extract(ctx)
 	l.Debug("actionHandler", zap.String("action", actionKey))
 
-	sqlSyncer, err := bsql.NewActionSyncer(ctx, c.db, c.dbEngine, c.celEnv, *c.config)
+	sqlSyncer, err := bsql.NewActionSyncer(ctx, c.dbs, c.dbEngine, c.celEnv, *c.config)
 	if err != nil {
 		return nil, nil, err
 	}

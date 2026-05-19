@@ -12,6 +12,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 )
 
+// Grants returns an opaque token nesting three pagination layers: grant-query
+// index (outer), DB iteration via iterateDBs (middle), runQuery page cursor (inner).
 func (s *SQLSyncer) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	if len(s.config.Grants) == 0 {
 		return nil, "", nil, nil
@@ -82,18 +84,20 @@ func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToke
 		return nil, "", err
 	}
 
-	npt, err := s.runQuery(ctx, pToken, grantConfig.Query, grantConfig.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		for _, mapping := range grantConfig.Map {
-			g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
-			if err != nil {
-				return false, err
-			}
+	npt, err := s.iterateDBs(ctx, grantConfig.Scope, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, innerToken, grantConfig.Query, grantConfig.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			for _, mapping := range grantConfig.Map {
+				g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
+				if err != nil {
+					return false, err
+				}
 
-			if ok {
-				ret = append(ret, g)
+				if ok {
+					ret = append(ret, g)
+				}
 			}
-		}
-		return true, nil
+			return true, nil
+		})
 	})
 	if err != nil {
 		return nil, "", err

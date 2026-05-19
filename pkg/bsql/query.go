@@ -26,6 +26,7 @@ const (
 	cursorKey       = "cursor"
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
+	identifierKey   = "identifier"
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
@@ -51,8 +52,15 @@ type paginationContext struct {
 }
 
 type queryTokenOpts struct {
-	Key      string
+	Key string
+
+	// Unquoted strips non-alphanumeric chars and inlines as-is. Drops, never escapes —
+	// don't use with untrusted input.
 	Unquoted bool
+
+	// Identifier inlines as an engine-quoted SQL identifier (doubled embedded quotes).
+	// Use where parameter binding isn't allowed by the SQL grammar (GRANT, DDL).
+	Identifier bool
 }
 
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)(?:\|([a-zA-Z0-9_]+))?\>`)
@@ -101,12 +109,25 @@ func parseToken(token string) (*queryTokenOpts, error) {
 		switch opt {
 		case unquotedKey:
 			opts.Unquoted = true
+		case identifierKey:
+			opts.Identifier = true
 		default:
 			return nil, fmt.Errorf("unknown option %s", opt)
 		}
 	}
 
+	if opts.Unquoted && opts.Identifier {
+		return nil, fmt.Errorf("token options unquoted and identifier are mutually exclusive")
+	}
+
 	return opts, nil
+}
+
+func (s *SQLSyncer) quoteIdentifier(name string) string {
+	if s.dbEngine == database.MySQL {
+		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+	}
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func (s *SQLSyncer) queryVars(query string) ([]string, error) {
@@ -164,6 +185,10 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 		// If the value is unquoted, directly insert the value as a string
 		if opts.Unquoted {
 			return SanitizeIdentifier(fmt.Sprintf("%v", val))
+		}
+
+		if opts.Identifier {
+			return s.quoteIdentifier(fmt.Sprintf("%v", val))
 		}
 
 		qArgs = append(qArgs, val)
@@ -315,6 +340,10 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 			return SanitizeIdentifier(fmt.Sprintf("%v", v))
 		}
 
+		if opts.Identifier {
+			return s.quoteIdentifier(fmt.Sprintf("%v", v))
+		}
+
 		qArgs = append(qArgs, v)
 		return s.getNextPlaceholder(qArgs)
 	})
@@ -324,14 +353,38 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 	return updatedQuery, qArgs, nil
 }
 
+// resolveProvisioningDB routes via vars["database"]. Unset → primary handle (NOT the
+// last-iterated handle, which would couple provisioning to sync state). Unknown name
+// → loud error, never silent fallthrough to a wrong-cluster GRANT.
+func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) {
+	if raw, ok := vars[rowColDatabase]; ok {
+		if name, ok := raw.(string); ok && name != "" {
+			db, found := s.dbs[name]
+			if !found {
+				return nil, fmt.Errorf("provisioning: unknown database %q in vars (configured: %v)", name, s.dbNames)
+			}
+			return db, nil
+		}
+	}
+	if db, ok := s.dbs[s.primaryDBName]; ok {
+		return db, nil
+	}
+	return nil, fmt.Errorf("provisioning: primary database %q not found in handles (configured: %v)", s.primaryDBName, s.dbNames)
+}
+
 func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validationQueries []string, vars map[string]any, useTx bool) error {
 	l := ctxzap.Extract(ctx)
 
+	target, err := s.resolveProvisioningDB(vars)
+	if err != nil {
+		return err
+	}
+
 	var committed bool
-	var executor executor = s.db
+	var executor executor = target
 
 	if useTx {
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := target.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -552,6 +605,11 @@ func (s *SQLSyncer) runQuery(
 				lastRowID = values[i]
 				foundPaginationKey = true
 			}
+		}
+
+		// Real result columns named "database" win over the synthetic injection.
+		if _, exists := rowMap[rowColDatabase]; !exists && s.currentDBName != "" {
+			rowMap[rowColDatabase] = s.currentDBName
 		}
 
 		if pCtx != nil && !foundPaginationKey {
