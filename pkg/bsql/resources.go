@@ -27,7 +27,7 @@ func (s *SQLSyncer) List(ctx context.Context, parentResourceID *v2.ResourceId, p
 	}
 
 	npt, err := s.iterateDBs(ctx, s.config.List.Scope, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
-		return s.runQuery(ctx, innerToken, s.config.List.Query, s.config.List.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+		return s.runQuery(ctx, s.db, innerToken, s.config.List.Query, s.config.List.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 			r, err := s.mapResource(ctx, rowMap)
 			if err != nil {
 				return false, err

@@ -72,7 +72,15 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 	}
 
 	useTx := !provisioningConfig.Grant.NoTransaction
-	err = s.RunProvisioningQueries(ctx, provisioningConfig.Grant.Queries, provisioningConfig.Grant.ValidationQueries, provisioningVars, useTx)
+	anno, err := s.RunGrantProvisioning(
+		ctx,
+		principal,
+		provisioningConfig.Grant.Queries,
+		provisioningConfig.Grant.ValidationQueries,
+		provisioningVars,
+		useTx,
+		provisioningConfig.Grant.GrantReplace,
+	)
 	if err != nil {
 		if errors.Is(err, ErrQueryAffectedZeroRows) {
 			l.Debug("entitlement is already granted", zap.String("entitlement_id", entitlement.GetId()))
@@ -88,7 +96,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		zap.String("principal_id", principal.GetId().GetResource()),
 		zap.String("entitlement_id", entitlement.GetId()),
 	)
-	return nil, nil
+	return anno, nil
 }
 
 func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
@@ -180,7 +188,7 @@ func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *Ac
 	}
 
 	var ret *v2.Resource
-	_, err = s.runQuery(ctx, nil, accountProvisioning.Validate.Query, nil, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+	_, err = s.runQuery(ctx, s.db, nil, accountProvisioning.Validate.Query, nil, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		r, err := s.mapResource(ctx, rowMap)
 		if err != nil {
 			return false, err

@@ -85,7 +85,7 @@ func (s *SQLSyncer) listGrants(ctx context.Context, resource *v2.Resource, pToke
 	}
 
 	npt, err := s.iterateDBs(ctx, grantConfig.Scope, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
-		return s.runQuery(ctx, innerToken, grantConfig.Query, grantConfig.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+		return s.runQuery(ctx, s.db, innerToken, grantConfig.Query, grantConfig.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 			for _, mapping := range grantConfig.Map {
 				g, ok, err := s.mapGrant(ctx, resource, mapping, rowMap)
 				if err != nil {
