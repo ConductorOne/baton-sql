@@ -13,10 +13,10 @@ import (
 // Mirrors the character classes used by baton-sdk's crypto.GenerateRandomPassword.
 // Kept in sync with vendor/github.com/conductorone/baton-sdk/pkg/crypto/password.go.
 const (
-	pwUpperCaseLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	pwLowerCaseLetters = "abcdefghijklmnopqrstuvwxyz"
-	pwDigits           = "0123456789"
-	pwSymbols          = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+	charClassUpper   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	charClassLower   = "abcdefghijklmnopqrstuvwxyz"
+	charClassDigits  = "0123456789"
+	charClassSymbols = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
 )
 
 var (
@@ -44,10 +44,10 @@ func generateRandomPasswordFiltered(opts *v2.LocalCredentialOptions_RandomPasswo
 		disallowedSet[r] = struct{}{}
 	}
 
-	upper := filterRunes(pwUpperCaseLetters, disallowedSet)
-	lower := filterRunes(pwLowerCaseLetters, disallowedSet)
-	digits := filterRunes(pwDigits, disallowedSet)
-	symbols := filterRunes(pwSymbols, disallowedSet)
+	upper := filterRunes(charClassUpper, disallowedSet)
+	lower := filterRunes(charClassLower, disallowedSet)
+	digits := filterRunes(charClassDigits, disallowedSet)
+	symbols := filterRunes(charClassSymbols, disallowedSet)
 	pool := upper + lower + digits + symbols
 	if pool == "" {
 		return "", errEmptyPasswordPool
@@ -106,12 +106,13 @@ func filterRunes(s string, disallowed map[rune]struct{}) string {
 }
 
 func writeRandomChar(b *strings.Builder, set string) error {
-	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(set))))
+	runes := []rune(set)
+	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(runes))))
 	if err != nil {
-		return fmt.Errorf("failed to generate password: %w", err)
+		return fmt.Errorf("generating random char: %w", err)
 	}
-	if err := b.WriteByte(set[idx.Int64()]); err != nil {
-		return fmt.Errorf("failed to generate password: %w", err)
+	if _, err := b.WriteRune(runes[idx.Int64()]); err != nil {
+		return fmt.Errorf("generating random char: %w", err)
 	}
 	return nil
 }
@@ -121,7 +122,7 @@ func shuffleString(s string) (string, error) {
 	for i := len(runes) - 1; i > 0; i-- {
 		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
 		if err != nil {
-			return "", fmt.Errorf("failed to shuffle password: %w", err)
+			return "", fmt.Errorf("shuffling password: %w", err)
 		}
 		j := int(jBig.Int64())
 		runes[i], runes[j] = runes[j], runes[i]
