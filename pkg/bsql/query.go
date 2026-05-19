@@ -594,7 +594,7 @@ func (s *SQLSyncer) normalizeValue(val any) any {
 
 func (s *SQLSyncer) runQuery(
 	ctx context.Context,
-	db *sql.DB,
+	db executor,
 	pToken *pagination.Token,
 	query string,
 	pOpts *Pagination,
@@ -697,11 +697,16 @@ func (s *SQLSyncer) RunGrantProvisioning(
 
 	anno := annotations.New()
 
+	target, err := s.resolveProvisioningDB(vars)
+	if err != nil {
+		return nil, err
+	}
+
 	var committed bool
-	var executor executor = s.db
+	var executor executor = target
 
 	if useTx {
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := target.BeginTx(ctx, nil)
 		if err != nil {
 			return anno, err
 		}
@@ -721,7 +726,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 
 		var ret []*v2.Grant
 
-		_, err := s.runQuery(ctx, s.db, nil, replace.Query, nil, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+		_, err := s.runQuery(ctx, executor, nil, replace.Query, nil, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 			for _, mapping := range replace.Map {
 				if mapping.EntitlementResourceId == "" {
 					continue
@@ -730,6 +735,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				if mapping.SkipIf != "" {
 					skip, err := s.env.EvaluateBool(ctx, mapping.SkipIf, rowMap)
 					if err != nil {
+						l.Error("failed to evaluate skip_if", zap.Error(err))
 						continue
 					}
 
@@ -849,6 +855,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		valid := result.Next()
 
 		if err := result.Err(); err != nil {
+			_ = result.Close()
 			return anno, fmt.Errorf("failed to read validation query result: %w", err)
 		}
 
