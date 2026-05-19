@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	sdkResource "github.com/conductorone/baton-sdk/pkg/types/resource"
@@ -27,7 +26,7 @@ func NewEnv(ctx context.Context) (*Env, error) {
 		cel.Variable("cols", cel.MapType(cel.StringType, cel.AnyType)),
 		cel.Variable("resource", cel.MapType(cel.StringType, cel.AnyType)),
 		cel.Variable("principal", cel.MapType(cel.StringType, cel.AnyType)),
-		cel.Variable("entitlement", cel.MapType(types.StringType, types.StringType)),
+		cel.Variable("entitlement", cel.MapType(cel.StringType, cel.AnyType)),
 		cel.Variable("input", cel.MapType(cel.StringType, cel.AnyType)), // For action vars and account provisioning
 	)
 

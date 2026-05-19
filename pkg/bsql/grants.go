@@ -12,6 +12,8 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 )
 
+// Grants returns an opaque token nesting three pagination layers: grant-query
+// index (outer), DB iteration via iterateDBs (middle), runQuery page cursor (inner).
 func (s *SQLSyncer) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
 	if len(s.config.Grants) == 0 {
 		return nil, "", nil, nil
