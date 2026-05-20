@@ -313,12 +313,15 @@ func applyPasswordConstraints(credentialOptions *v2.LocalCredentialOptions, rand
 		return credentialOptions
 	}
 
-	constraints := make([]*v2.PasswordConstraint, len(randomPwdConfig.Constraints))
-	for i, c := range randomPwdConfig.Constraints {
-		constraints[i] = &v2.PasswordConstraint{
+	constraints := make([]*v2.PasswordConstraint, 0, len(randomPwdConfig.Constraints))
+	for _, c := range randomPwdConfig.Constraints {
+		if c.MinCount <= 0 {
+			continue
+		}
+		constraints = append(constraints, &v2.PasswordConstraint{
 			CharSet:  c.CharSet,
 			MinCount: uint32(c.MinCount),
-		}
+		})
 	}
 
 	cloned := proto.Clone(credentialOptions).(*v2.LocalCredentialOptions)

@@ -119,7 +119,7 @@ func validatePasswordConstraints(constraints []PasswordConstraintConfig) error {
 		if c.CharSet == "" {
 			return fmt.Errorf("random password constraint[%d]: char_set must not be empty", i)
 		}
-		if c.MinCount >= 0 {
+		if c.MinCount <= 0 {
 			return fmt.Errorf("random password constraint[%d]: min_count must be greater than zero", i)
 		}
 	}
