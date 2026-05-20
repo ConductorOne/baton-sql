@@ -208,8 +208,6 @@ resource_types:
           required: false
       credentials:
         random_password:
-          max_length: 20
-          min_length: 12
           preferred: true
           # Oracle passwords must start with a letter and may only contain letters, digits,
           # and the symbols #, _, $. Special characters are omitted here to stay safe

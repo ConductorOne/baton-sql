@@ -228,8 +228,6 @@ resource_types:
           required: false
       credentials:
         random_password:
-          max_length: 32
-          min_length: 16
           preferred: true
           constraints:
             - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"

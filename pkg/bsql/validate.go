@@ -138,18 +138,6 @@ func (l *AccountProvisioning) staticValidate(ctx context.Context, s *SQLSyncer) 
 	}
 
 	if l.Credentials.RandomPassword != nil {
-		if l.Credentials.RandomPassword.MaxLength <= 0 {
-			return errors.New("random password max_length must be greater than zero")
-		}
-
-		if l.Credentials.RandomPassword.MinLength <= 0 {
-			return errors.New("random password min_length must be greater than zero")
-		}
-
-		if l.Credentials.RandomPassword.MinLength > l.Credentials.RandomPassword.MaxLength {
-			return errors.New("random password min_length cannot be greater than max_length")
-		}
-
 		if err := validatePasswordConstraints(l.Credentials.RandomPassword.Constraints); err != nil {
 			return err
 		}

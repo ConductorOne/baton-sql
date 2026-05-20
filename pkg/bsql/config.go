@@ -480,8 +480,17 @@ type PasswordConstraintConfig struct {
 // RandomPasswordConfig defines configuration for random password generation.
 type RandomPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
-	MaxLength            int    `yaml:"max_length" json:"max_length"`
-	MinLength            int    `yaml:"min_length" json:"min_length"`
+
+	// Deprecated: MaxLength is parsed and validated but never applied to password generation.
+	// The actual password length is determined by the platform via LocalCredentialOptions.
+	MaxLength int `yaml:"max_length" json:"max_length"`
+
+	// Deprecated: MinLength is parsed and validated but never applied to password generation.
+	// The actual password length is determined by the platform via LocalCredentialOptions.
+	MinLength int `yaml:"min_length" json:"min_length"`
+
+	// Deprecated: DisallowedCharacters is not implemented and has no effect.
+	// Use Constraints to restrict which characters appear in generated passwords.
 	DisallowedCharacters string `yaml:"disallowed_characters" json:"disallowed_characters"`
 
 	// Constraints defines the character set rules enforced when generating a random password.

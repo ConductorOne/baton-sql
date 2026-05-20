@@ -89,8 +89,6 @@ func TestParse(t *testing.T) {
 
 				// Validate random_password config
 				require.NotNil(t, userResourceType.AccountProvisioning.Credentials.RandomPassword)
-				require.Equal(t, 128, userResourceType.AccountProvisioning.Credentials.RandomPassword.MaxLength)
-				require.Equal(t, 12, userResourceType.AccountProvisioning.Credentials.RandomPassword.MinLength)
 				require.True(t, userResourceType.AccountProvisioning.Credentials.RandomPassword.Preferred)
 
 				// Validate account creation configuration
@@ -165,8 +163,6 @@ resource_types:
       credentials:
         random_password:
           preferred: true
-          min_length: 16
-          max_length: 32
           constraints:
             - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
               min_count: 2
@@ -185,8 +181,6 @@ resource_types:
 			validate: func(t *testing.T, c *Config) {
 				rp := c.ResourceTypes["user"].AccountProvisioning.Credentials.RandomPassword
 				require.NotNil(t, rp)
-				require.Equal(t, 16, rp.MinLength)
-				require.Equal(t, 32, rp.MaxLength)
 				require.True(t, rp.Preferred)
 
 				require.Len(t, rp.Constraints, 4)
@@ -213,8 +207,7 @@ resource_types:
       schema: []
       credentials:
         random_password:
-          min_length: 8
-          max_length: 16
+          preferred: false
       validate:
         query: "SELECT 1"
       create:

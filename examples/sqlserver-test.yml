@@ -208,8 +208,6 @@ resource_types:
       # Credential options for password management
       credentials:
         random_password:
-          max_length: 32
-          min_length: 16
           preferred: true
           # SQL Server CHECK_POLICY requires at least one character from each of:
           # uppercase, lowercase, digit, and non-alphanumeric.

@@ -58,8 +58,6 @@ resource_types:
         no_password:
           preferred: false
         random_password:
-          max_length: 128
-          min_length: 12
           preferred: true
           constraints:
             - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
