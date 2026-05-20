@@ -203,7 +203,10 @@ func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, cred
 	if rotationConfig.Credentials != nil {
 		randPwdConfig = rotationConfig.Credentials.RandomPassword
 	}
-	effectiveOptions := applyPasswordConstraints(credentialOptions, randPwdConfig)
+	effectiveOptions, err := applyPasswordConstraints(credentialOptions, randPwdConfig)
+	if err != nil {
+		return nil, nil, err
+	}
 	password, err := generatePassword(ctx, effectiveOptions)
 	if err != nil {
 		return nil, nil, err

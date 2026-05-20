@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -265,8 +266,10 @@ func (s *SQLSyncer) prepareQueryInputs(
 		if provisioningConfig.Credentials != nil {
 			randPwdConfig = provisioningConfig.Credentials.RandomPassword
 		}
-		effectiveOptions := applyPasswordConstraints(credentialOptions, randPwdConfig)
-		var err error
+		effectiveOptions, err := applyPasswordConstraints(credentialOptions, randPwdConfig)
+		if err != nil {
+			return nil, nil, err
+		}
 		password, err := generatePassword(ctx, effectiveOptions)
 		if err != nil {
 			return nil, nil, err
@@ -304,29 +307,33 @@ func (s *SQLSyncer) prepareQueryInputs(
 // provided by the platform, giving the connector admin full control over the character set policy.
 // proto.Clone is used so that all fields — including unknown proto fields from newer platform versions —
 // are preserved; only the Constraints field is overwritten.
-func applyPasswordConstraints(credentialOptions *v2.LocalCredentialOptions, randomPwdConfig *RandomPasswordConfig) *v2.LocalCredentialOptions {
+func applyPasswordConstraints(credentialOptions *v2.LocalCredentialOptions, randomPwdConfig *RandomPasswordConfig) (*v2.LocalCredentialOptions, error) {
 	if credentialOptions == nil || randomPwdConfig == nil || len(randomPwdConfig.Constraints) == 0 {
-		return credentialOptions
+		return credentialOptions, nil
 	}
 
 	if _, ok := credentialOptions.Options.(*v2.LocalCredentialOptions_RandomPassword_); !ok {
-		return credentialOptions
+		return credentialOptions, nil
 	}
 
 	constraints := make([]*v2.PasswordConstraint, 0, len(randomPwdConfig.Constraints))
 	for _, c := range randomPwdConfig.Constraints {
-		if c.MinCount <= 0 {
-			continue
+		var minimumCount uint32
+		if c.MinCount > 0 && c.MinCount < math.MaxUint32 {
+			minimumCount = uint32(c.MinCount)
+		} else {
+			return nil, fmt.Errorf("baton-sql: password constraint min_count must be greater than zero and less than 4294967295, got %d", c.MinCount)
 		}
+
 		constraints = append(constraints, &v2.PasswordConstraint{
 			CharSet:  c.CharSet,
-			MinCount: uint32(c.MinCount),
+			MinCount: minimumCount,
 		})
 	}
 
 	cloned := proto.Clone(credentialOptions).(*v2.LocalCredentialOptions)
 	cloned.GetRandomPassword().SetConstraints(constraints)
-	return cloned
+	return cloned, nil
 }
 
 func generatePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (*string, error) {
