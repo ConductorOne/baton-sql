@@ -61,6 +61,15 @@ resource_types:
           max_length: 128
           min_length: 12
           preferred: true
+          constraints:
+            - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              min_count: 2
+            - char_set: "abcdefghijklmnopqrstuvwxyz"
+              min_count: 2
+            - char_set: "0123456789"
+              min_count: 2
+            - char_set: "!@#$%^&*"
+              min_count: 1
       validate:
         vars:
           email: "email"
