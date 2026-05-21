@@ -481,11 +481,11 @@ type PasswordConstraintConfig struct {
 type RandomPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
 
-	// Deprecated: MaxLength is parsed and validated but never applied to password generation.
+	// Deprecated: MaxLength  is not implemented and has no effect.
 	// The actual password length is determined by the platform via LocalCredentialOptions.
 	MaxLength int `yaml:"max_length" json:"max_length"`
 
-	// Deprecated: MinLength is parsed and validated but never applied to password generation.
+	// Deprecated: MinLength is not implemented and has no effect.
 	// The actual password length is determined by the platform via LocalCredentialOptions.
 	MinLength int `yaml:"min_length" json:"min_length"`
 

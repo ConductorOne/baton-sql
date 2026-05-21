@@ -316,6 +316,9 @@ func applyPasswordConstraints(credentialOptions *v2.LocalCredentialOptions, rand
 		return credentialOptions, nil
 	}
 
+	var pwdCharSet string
+	var pwdCharCount uint32
+
 	constraints := make([]*v2.PasswordConstraint, 0, len(randomPwdConfig.Constraints))
 	for _, c := range randomPwdConfig.Constraints {
 		var minimumCount uint32
@@ -329,7 +332,22 @@ func applyPasswordConstraints(credentialOptions *v2.LocalCredentialOptions, rand
 			CharSet:  c.CharSet,
 			MinCount: minimumCount,
 		})
+
+		pwdCharSet += c.CharSet
+		pwdCharCount += minimumCount
 	}
+
+	// To ensure we only use characters included on the constraints we create this last set with all the valid chars and the
+	// amount required is the amount missing to complete the password length.
+	var remainingCharCount uint32
+	pwdLength := credentialOptions.GetRandomPassword().Length
+	if pwdLength > int64(pwdCharCount) {
+		remainingCharCount = uint32(pwdLength - int64(pwdCharCount))
+	}
+	constraints = append(constraints, &v2.PasswordConstraint{
+		CharSet:  pwdCharSet,
+		MinCount: remainingCharCount,
+	})
 
 	cloned := proto.Clone(credentialOptions).(*v2.LocalCredentialOptions)
 	cloned.GetRandomPassword().SetConstraints(constraints)
