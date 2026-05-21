@@ -71,6 +71,8 @@ type DatabaseConfig struct {
 	// Params contains additional connection parameters (e.g., {"sslmode": "disable", "timeout": "30s"})
 	Params map[string]string `yaml:"params" json:"params"`
 
+	// Databases opts the connector into per-database iteration: each list/entitlements/grants
+	// query runs once per named database. Leave unset for single-database connectors.
 	Databases *DatabasesConfig `yaml:"databases,omitempty" json:"databases,omitempty"`
 }
 
