@@ -467,12 +467,37 @@ type NoPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
 }
 
+// PasswordConstraintConfig defines a character set constraint for random password generation.
+type PasswordConstraintConfig struct {
+	// CharSet is the set of characters that must appear in the generated password.
+	CharSet string `yaml:"char_set" json:"char_set"`
+
+	// MinCount is the minimum number of characters from CharSet that the password must contain.
+	// Must be greater than zero.
+	MinCount int `yaml:"min_count" json:"min_count"`
+}
+
 // RandomPasswordConfig defines configuration for random password generation.
 type RandomPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
-	MaxLength            int    `yaml:"max_length" json:"max_length"`
-	MinLength            int    `yaml:"min_length" json:"min_length"`
+
+	// Deprecated: MaxLength  is not implemented and has no effect.
+	// The actual password length is determined by the platform via LocalCredentialOptions.
+	MaxLength int `yaml:"max_length" json:"max_length"`
+
+	// Deprecated: MinLength is not implemented and has no effect.
+	// The actual password length is determined by the platform via LocalCredentialOptions.
+	MinLength int `yaml:"min_length" json:"min_length"`
+
+	// Deprecated: DisallowedCharacters is not implemented and has no effect.
+	// Use Constraints to restrict which characters appear in generated passwords.
 	DisallowedCharacters string `yaml:"disallowed_characters" json:"disallowed_characters"`
+
+	// Constraints defines the character set rules enforced when generating a random password.
+	// Each entry specifies a character set and the minimum number of characters from that set
+	// that must appear in the generated password. When set, these constraints replace any
+	// constraints provided by the platform.
+	Constraints []PasswordConstraintConfig `yaml:"constraints,omitempty" json:"constraints,omitempty"`
 }
 
 // EncryptedPasswordConfig defines configuration for encrypted password generation.

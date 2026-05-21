@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -11,6 +12,7 @@ import (
 	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 var ErrUnableFindResourceProvisioning = errors.New("unable to find resource for account provisioning")
@@ -260,8 +262,15 @@ func (s *SQLSyncer) prepareQueryInputs(
 	credentials := make(map[string]any)
 	var plaintextDataList []*v2.PlaintextData
 	if credentialOptions != nil {
-		var err error
-		password, err := generatePassword(ctx, credentialOptions)
+		var randPwdConfig *RandomPasswordConfig
+		if provisioningConfig.Credentials != nil {
+			randPwdConfig = provisioningConfig.Credentials.RandomPassword
+		}
+		effectiveOptions, err := applyPasswordConstraints(credentialOptions, randPwdConfig)
+		if err != nil {
+			return nil, nil, err
+		}
+		password, err := generatePassword(ctx, effectiveOptions)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -291,6 +300,59 @@ func (s *SQLSyncer) prepareQueryInputs(
 	}
 
 	return queryInputs, plaintextDataList, nil
+}
+
+// applyPasswordConstraints returns a clone of credentialOptions with the constraints from randomPwdConfig
+// applied to the RandomPassword option. When the config defines constraints they replace any constraints
+// provided by the platform, giving the connector admin full control over the character set policy.
+// proto.Clone is used so that all fields — including unknown proto fields from newer platform versions —
+// are preserved; only the Constraints field is overwritten.
+func applyPasswordConstraints(credentialOptions *v2.LocalCredentialOptions, randomPwdConfig *RandomPasswordConfig) (*v2.LocalCredentialOptions, error) {
+	if credentialOptions == nil || randomPwdConfig == nil || len(randomPwdConfig.Constraints) == 0 {
+		return credentialOptions, nil
+	}
+
+	if _, ok := credentialOptions.Options.(*v2.LocalCredentialOptions_RandomPassword_); !ok {
+		return credentialOptions, nil
+	}
+
+	var pwdCharSet string
+	var pwdCharCount int64
+
+	constraints := make([]*v2.PasswordConstraint, 0, len(randomPwdConfig.Constraints))
+	for _, c := range randomPwdConfig.Constraints {
+		var minimumCount uint32
+		if c.MinCount > 0 && c.MinCount < math.MaxUint32 {
+			minimumCount = uint32(c.MinCount)
+		} else {
+			return nil, fmt.Errorf("baton-sql: password constraint min_count must be greater than zero and less than 4294967295, got %d", c.MinCount)
+		}
+
+		constraints = append(constraints, &v2.PasswordConstraint{
+			CharSet:  c.CharSet,
+			MinCount: minimumCount,
+		})
+
+		pwdCharSet += c.CharSet
+		pwdCharCount += int64(minimumCount)
+	}
+
+	// To ensure we only use characters included on the constraints we create this last set with all the valid chars and the
+	// amount required is the amount missing to complete the password length.
+	var remainingCharCount int64
+	pwdLength := credentialOptions.GetRandomPassword().Length
+	if pwdLength > pwdCharCount {
+		remainingCharCount = pwdLength - pwdCharCount
+	}
+
+	constraints = append(constraints, &v2.PasswordConstraint{
+		CharSet:  pwdCharSet,
+		MinCount: uint32(remainingCharCount),
+	})
+
+	cloned := proto.Clone(credentialOptions).(*v2.LocalCredentialOptions)
+	cloned.GetRandomPassword().SetConstraints(constraints)
+	return cloned, nil
 }
 
 func generatePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (*string, error) {

@@ -199,7 +199,15 @@ func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, cred
 	queryInputs["resource_id"] = resourceId.Resource
 	credentials := make(map[string]any)
 	var plaintextDataList []*v2.PlaintextData
-	password, err := generatePassword(ctx, credentialOptions)
+	var randPwdConfig *RandomPasswordConfig
+	if rotationConfig.Credentials != nil {
+		randPwdConfig = rotationConfig.Credentials.RandomPassword
+	}
+	effectiveOptions, err := applyPasswordConstraints(credentialOptions, randPwdConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	password, err := generatePassword(ctx, effectiveOptions)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -114,6 +114,18 @@ func (l *GrantsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	return validateVarsInQuery(s, l.Query, l.Vars)
 }
 
+func validatePasswordConstraints(constraints []PasswordConstraintConfig) error {
+	for i, c := range constraints {
+		if c.CharSet == "" {
+			return fmt.Errorf("random password constraint[%d]: char_set must not be empty", i)
+		}
+		if c.MinCount <= 0 {
+			return fmt.Errorf("random password constraint[%d]: min_count must be greater than zero", i)
+		}
+	}
+	return nil
+}
+
 func (l *AccountProvisioning) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if l.Credentials == nil {
 		return errors.New("no credentials defined")
@@ -126,16 +138,8 @@ func (l *AccountProvisioning) staticValidate(ctx context.Context, s *SQLSyncer) 
 	}
 
 	if l.Credentials.RandomPassword != nil {
-		if l.Credentials.RandomPassword.MaxLength <= 0 {
-			return errors.New("random password max_length must be greater than zero")
-		}
-
-		if l.Credentials.RandomPassword.MinLength <= 0 {
-			return errors.New("random password min_length must be greater than zero")
-		}
-
-		if l.Credentials.RandomPassword.MinLength > l.Credentials.RandomPassword.MaxLength {
-			return errors.New("random password min_length cannot be greater than max_length")
+		if err := validatePasswordConstraints(l.Credentials.RandomPassword.Constraints); err != nil {
+			return err
 		}
 	}
 

@@ -252,9 +252,16 @@ resource_types:
           required: false
       credentials:
         random_password:
-          max_length: 32
-          min_length: 16
           preferred: true
+          constraints:
+            - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              min_count: 2
+            - char_set: "abcdefghijklmnopqrstuvwxyz"
+              min_count: 2
+            - char_set: "0123456789"
+              min_count: 2
+            - char_set: "!@#$%^&*"
+              min_count: 1
         no_password:
           preferred: false
         encrypted_password:
@@ -304,9 +311,16 @@ resource_types:
     credential_rotation:
       credentials:
         random_password:
-          max_length: 32
-          min_length: 16
           preferred: true
+          constraints:
+            - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              min_count: 2
+            - char_set: "abcdefghijklmnopqrstuvwxyz"
+              min_count: 2
+            - char_set: "0123456789"
+              min_count: 2
+            - char_set: "!@#$%^&*"
+              min_count: 1
         no_password:
           preferred: false
         encrypted_password:

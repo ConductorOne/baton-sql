@@ -89,8 +89,6 @@ func TestParse(t *testing.T) {
 
 				// Validate random_password config
 				require.NotNil(t, userResourceType.AccountProvisioning.Credentials.RandomPassword)
-				require.Equal(t, 128, userResourceType.AccountProvisioning.Credentials.RandomPassword.MaxLength)
-				require.Equal(t, 12, userResourceType.AccountProvisioning.Credentials.RandomPassword.MinLength)
 				require.True(t, userResourceType.AccountProvisioning.Credentials.RandomPassword.Preferred)
 
 				// Validate account creation configuration
@@ -149,6 +147,77 @@ func TestParse(t *testing.T) {
 				require.Equal(t, "member", roleResourceType.Grants[0].Map[0].Entitlement)
 				require.Equal(t, "offset", roleResourceType.Grants[0].Pagination.Strategy)
 				require.Equal(t, "user_id", roleResourceType.Grants[0].Pagination.PrimaryKey)
+			},
+		},
+		{
+			name: "random-password-constraints",
+			input: `
+app_name: Test
+connect:
+  dsn: "postgres://localhost/test"
+resource_types:
+  user:
+    name: User
+    account_provisioning:
+      schema: []
+      credentials:
+        random_password:
+          preferred: true
+          constraints:
+            - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              min_count: 2
+            - char_set: "abcdefghijklmnopqrstuvwxyz"
+              min_count: 2
+            - char_set: "0123456789"
+              min_count: 2
+            - char_set: "!@#$%"
+              min_count: 1
+      validate:
+        query: "SELECT 1"
+      create:
+        queries:
+          - "SELECT 1"
+`,
+			validate: func(t *testing.T, c *Config) {
+				rp := c.ResourceTypes["user"].AccountProvisioning.Credentials.RandomPassword
+				require.NotNil(t, rp)
+				require.True(t, rp.Preferred)
+
+				require.Len(t, rp.Constraints, 4)
+				require.Equal(t, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", rp.Constraints[0].CharSet)
+				require.Equal(t, 2, rp.Constraints[0].MinCount)
+				require.Equal(t, "abcdefghijklmnopqrstuvwxyz", rp.Constraints[1].CharSet)
+				require.Equal(t, 2, rp.Constraints[1].MinCount)
+				require.Equal(t, "0123456789", rp.Constraints[2].CharSet)
+				require.Equal(t, 2, rp.Constraints[2].MinCount)
+				require.Equal(t, "!@#$%", rp.Constraints[3].CharSet)
+				require.Equal(t, 1, rp.Constraints[3].MinCount)
+			},
+		},
+		{
+			name: "random-password-no-constraints",
+			input: `
+app_name: Test
+connect:
+  dsn: "postgres://localhost/test"
+resource_types:
+  user:
+    name: User
+    account_provisioning:
+      schema: []
+      credentials:
+        random_password:
+          preferred: false
+      validate:
+        query: "SELECT 1"
+      create:
+        queries:
+          - "SELECT 1"
+`,
+			validate: func(t *testing.T, c *Config) {
+				rp := c.ResourceTypes["user"].AccountProvisioning.Credentials.RandomPassword
+				require.NotNil(t, rp)
+				require.Empty(t, rp.Constraints)
 			},
 		},
 	}

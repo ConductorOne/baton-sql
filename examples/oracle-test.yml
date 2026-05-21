@@ -208,11 +208,17 @@ resource_types:
           required: false
       credentials:
         random_password:
-          max_length: 20
-          min_length: 12
-          # Oracle-safe character set (alphanumeric only to avoid SQL injection issues)
-          allowed_chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
           preferred: true
+          # Oracle passwords must start with a letter and may only contain letters, digits,
+          # and the symbols #, _, $. Special characters are omitted here to stay safe
+          # across all Oracle password-verification functions.
+          constraints:
+            - char_set: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              min_count: 2
+            - char_set: "abcdefghijklmnopqrstuvwxyz"
+              min_count: 2
+            - char_set: "0123456789"
+              min_count: 2
         no_password:
           preferred: false
       # Validation query to check if user already exists
