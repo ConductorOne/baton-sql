@@ -55,9 +55,10 @@ func TestBuildExclusionGroupAny(t *testing.T) {
 	t.Run("order and is_default are evaluated", func(t *testing.T) {
 		s := newTestSyncerWithEnv(t)
 		mapping := &ExclusionGroupMapping{
-			Id:        "'license'",
-			Order:     "'2'",
-			IsDefault: "true",
+			Id:                "'license'",
+			Order:             "'2'",
+			IsDefault:         "true",
+			IsScopeToResource: "true",
 		}
 		anyv, err := s.buildExclusionGroupAny(ctx, mapping, map[string]any{})
 		require.NoError(t, err)
@@ -67,6 +68,7 @@ func TestBuildExclusionGroupAny(t *testing.T) {
 		require.Equal(t, "license", got.GetExclusionGroupId())
 		require.Equal(t, uint32(2), got.GetOrder())
 		require.True(t, got.GetIsDefault())
+		require.True(t, got.GetScopeToResource())
 	})
 
 	t.Run("order reads from row inputs", func(t *testing.T) {

@@ -56,5 +56,14 @@ func (s *SQLSyncer) buildExclusionGroupAny(ctx context.Context, cfg *ExclusionGr
 
 	group.SetIsDefault(isDefault)
 
+	var isScopeToResource bool
+	if cfg.IsScopeToResource != "" {
+		isScopeToResource, err = s.env.EvaluateBool(ctx, cfg.IsScopeToResource, inputs)
+		if err != nil {
+			return nil, fmt.Errorf("exclusion_group.is_scoped_to_resource evaluation failed: %w", err)
+		}
+	}
+	group.SetScopeToResource(isScopeToResource)
+
 	return anypb.New(group)
 }

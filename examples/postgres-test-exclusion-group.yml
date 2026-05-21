@@ -380,6 +380,7 @@ resource_types:
           id: "'role-group'"
           order: "1"
           is_default: "'reader' == resource.ID"
+          is_scope_to_resource: "true"
         provisioning:
           vars:
             username: "principal.ID"
