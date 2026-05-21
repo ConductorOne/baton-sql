@@ -339,7 +339,7 @@ type ExclusionGroupMapping struct {
 	// IsDefault marks this entitlement as the group's default (proto field 3, bool).
 	IsDefault string `yaml:"is_default,omitempty" json:"is_default,omitempty"`
 
-	// ScopeToResource indicates whether to scope the exclusion group to each resource (proto field 4, bool).
+	// ScopeToResource indicates whether to scope the exclusion group to a resource on static entitlement (proto field 4, bool).
 	IsScopeToResource string `yaml:"is_scope_to_resource,omitempty" json:"is_scope_to_resource,omitempty"`
 }
 
