@@ -231,6 +231,64 @@ func (s *syncer) handleProgress(ctx context.Context, a *Action, c int) {
 	}
 }
 
+// maxEntitlementsPerExclusionGroup caps how many entitlements may share a
+// single exclusion_group_id. Phase 1 limit.
+const maxEntitlementsPerExclusionGroup = 50
+
+// recordEntitlementExclusionGroup enforces the invariants on an exclusion
+// group membership: a given exclusion_group_id must stay within one resource
+// type, a group may have at most one entitlement marked is_default, and a group
+// may contain at most maxEntitlementsPerExclusionGroup entitlements. Empty
+// group ids are treated as "no exclusion group" and skipped.
+func (s *syncer) recordEntitlementExclusionGroup(eg *v2.EntitlementExclusionGroup, entitlementID, resourceTypeID string) error {
+	groupID := eg.GetExclusionGroupId()
+	if groupID == "" {
+		return nil
+	}
+	if existing, conflict := s.state.CheckAndSetExclusionGroupResourceType(groupID, resourceTypeID); conflict {
+		return fmt.Errorf("exclusion group %q is used on multiple resource types (%q and %q); "+
+			"exclusion groups may span resources but must be scoped to a single resource type",
+			groupID, existing, resourceTypeID)
+	}
+	if eg.GetIsDefault() {
+		if existing, conflict := s.state.CheckAndSetExclusionGroupDefault(groupID, entitlementID); conflict {
+			return fmt.Errorf("exclusion group %q has multiple default entitlements (%q and %q); "+
+				"at most one entitlement per exclusion group may set is_default=true",
+				groupID, existing, entitlementID)
+		}
+	}
+	if count := s.state.IncrementExclusionGroupCount(groupID); count > maxEntitlementsPerExclusionGroup {
+		return fmt.Errorf("exclusion group %q has too many entitlements (%d); "+
+			"at most %d entitlements are allowed per exclusion group",
+			groupID, count, maxEntitlementsPerExclusionGroup)
+	}
+	return nil
+}
+
+// validateEntitlementExclusionGroups picks the exclusion group annotation off
+// each entitlement (if present) and forwards to recordEntitlementExclusionGroup.
+// Use this on lists of entitlements that may independently carry exclusion
+// group annotations (e.g., the dynamic ListEntitlements path); callers that
+// already have the annotation in hand should call recordEntitlementExclusionGroup
+// directly to avoid the per-entitlement Pick.
+func (s *syncer) validateEntitlementExclusionGroups(ents []*v2.Entitlement) error {
+	for _, ent := range ents {
+		eg := &v2.EntitlementExclusionGroup{}
+		entAnnos := annotations.Annotations(ent.GetAnnotations())
+		ok, err := entAnnos.Pick(eg)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		if err := s.recordEntitlementExclusionGroup(eg, ent.GetId(), ent.GetResource().GetId().GetResourceType()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // nextPageOrFinishAction updates the action with the next page token, or if there is no next page, finishes the action.
 // It also pushes any child actions before updating/finishing the action.
 // This is useful for pagination, and for actions that create other actions.
@@ -467,6 +525,7 @@ func (s *syncer) Sync(ctx context.Context) error {
 
 	// Force a checkpoint to clear completed actions & entitlement graph in sync_token.
 	s.state.ClearEntitlementGraph(ctx)
+	s.state.ClearExclusionGroupTracking(ctx)
 
 	err = s.Checkpoint(ctx, true)
 	if err != nil {
@@ -651,11 +710,10 @@ func (s *syncer) hasChildResources(resource *v2.Resource) bool {
 }
 
 // getSubResources fetches the sub resource types from a resources' annotations.
+// No span here: this is per-resource in-memory annotation iteration with no I/O.
+// At sync scale (100k+ resources per trace) the span overhead and trace bloat
+// outweighed any debugging value.
 func (s *syncer) getSubResources(ctx context.Context, parent *v2.Resource) error {
-	ctx, span := tracer.Start(ctx, "syncer.getSubResources")
-	var err error
-	defer func() { uotel.EndSpanWithError(span, err) }()
-
 	syncResourceTypeMap := make(map[string]bool)
 	for _, rt := range s.syncResourceTypes {
 		syncResourceTypeMap[rt] = true
@@ -827,11 +885,10 @@ func (s *syncer) SyncResources(ctx context.Context, action *Action) error {
 }
 
 // syncResources fetches a given resource from the connector, and returns a slice of new child resources to fetch.
+// No span here: this is the only call site of SyncResources, which already
+// owns a span — the duplicate inflated trace span counts without adding
+// information.
 func (s *syncer) syncResources(ctx context.Context, action *Action) error {
-	ctx, span := tracer.Start(ctx, "syncer.syncResources")
-	var err error
-	defer func() { uotel.EndSpanWithError(span, err) }()
-
 	req := v2.ResourcesServiceListResourcesRequest_builder{
 		ResourceTypeId: action.ResourceTypeID,
 		PageToken:      action.PageToken,
@@ -910,11 +967,11 @@ func (s *syncer) syncResources(ctx context.Context, action *Action) error {
 	return s.nextPageOrFinishAction(ctx, action, resp.GetNextPageToken())
 }
 
+// No span here: this is called per-resource, but only does I/O on the
+// first time a resource type is seen (cached afterward). The wrapped
+// C1File.GetResourceType call is itself spanned, so we still see the
+// uncached path.
 func (s *syncer) validateResourceTraits(ctx context.Context, r *v2.Resource) error {
-	ctx, span := tracer.Start(ctx, "syncer.validateResourceTraits")
-	var err error
-	defer func() { uotel.EndSpanWithError(span, err) }()
-
 	resourceTypeTraits, ok := s.resourceTypeTraits.Load(r.GetId().GetResourceType())
 	if !ok {
 		resourceTypeResponse, err := s.store.GetResourceType(ctx, reader_v2.ResourceTypesReaderServiceGetResourceTypeRequest_builder{
@@ -962,11 +1019,9 @@ func (s *syncer) validateResourceTraits(ctx context.Context, r *v2.Resource) err
 
 // shouldSkipEntitlementsAndGrants determines if we should sync entitlements for a given resource. We cache the
 // result of this function for each resource type to avoid constant lookups in the database.
+// No span here: the function is called per-resource and is almost always a cached map
+// lookup; the uncached path hits C1File.GetResourceType, which is itself spanned.
 func (s *syncer) shouldSkipEntitlementsAndGrants(ctx context.Context, r *v2.Resource) (bool, error) {
-	ctx, span := tracer.Start(ctx, "syncer.shouldSkipEntitlementsAndGrants")
-	var err error
-	defer func() { uotel.EndSpanWithError(span, err) }()
-
 	if s.state.ShouldSkipEntitlementsAndGrants() {
 		return true, nil
 	}
@@ -1009,11 +1064,10 @@ func (s *syncer) shouldSkipGrants(ctx context.Context, r *v2.Resource) (bool, er
 	return s.shouldSkipEntitlementsAndGrants(ctx, r)
 }
 
+// No span here: shouldSkipEntitlements is called per-resource and almost
+// always a cached map lookup; uncached path hits C1File.GetResourceType,
+// which is itself spanned.
 func (s *syncer) shouldSkipEntitlements(ctx context.Context, r *v2.Resource) (bool, error) {
-	ctx, span := tracer.Start(ctx, "syncer.shouldSkipEntitlements")
-	var err error
-	defer func() { uotel.EndSpanWithError(span, err) }()
-
 	ok, err := s.shouldSkipEntitlementsAndGrants(ctx, r)
 	if err != nil {
 		return false, err
@@ -1091,11 +1145,8 @@ func (s *syncer) SyncEntitlements(ctx context.Context, action *Action) error {
 }
 
 // syncEntitlementsForResource fetches the entitlements for a specific resource from the connector.
+// No span here: only call site is SyncEntitlements, which already owns a span.
 func (s *syncer) syncEntitlementsForResource(ctx context.Context, action *Action) error {
-	ctx, span := tracer.Start(ctx, "syncer.syncEntitlementsForResource")
-	var err error
-	defer func() { uotel.EndSpanWithError(span, err) }()
-
 	resourceID := v2.ResourceId_builder{
 		ResourceType: action.ResourceTypeID,
 		Resource:     action.ResourceID,
@@ -1115,6 +1166,9 @@ func (s *syncer) syncEntitlementsForResource(ctx context.Context, action *Action
 		ActiveSyncId: s.getActiveSyncID(),
 	}.Build())
 	if err != nil {
+		return err
+	}
+	if err := s.validateEntitlementExclusionGroups(resp.GetList()); err != nil {
 		return err
 	}
 	err = s.store.PutEntitlements(ctx, resp.GetList()...)
@@ -1216,9 +1270,16 @@ func (s *syncer) syncStaticEntitlementsForResourceType(ctx context.Context, acti
 					annos.Update(exclusionGroup)
 				}
 
+				entID := entitlement.NewEntitlementID(resource, ent.GetSlug())
+				if hasExclusionGroup {
+					if err := s.recordEntitlementExclusionGroup(exclusionGroup, entID, resource.GetId().GetResourceType()); err != nil {
+						return err
+					}
+				}
+
 				entitlements = append(entitlements, &v2.Entitlement{
 					Resource:    resource,
-					Id:          entitlement.NewEntitlementID(resource, ent.GetSlug()),
+					Id:          entID,
 					DisplayName: displayName,
 					Description: description,
 					GrantableTo: ent.GetGrantableTo(),
@@ -1692,11 +1753,8 @@ func (s *syncer) fetchEtaggedGrantsForResource(
 }
 
 // syncGrantsForResource fetches the grants for a specific resource from the connector.
+// No span here: only call site is SyncGrants, which already owns a span.
 func (s *syncer) syncGrantsForResource(ctx context.Context, action *Action) error {
-	ctx, span := tracer.Start(ctx, "syncer.syncGrantsForResource")
-	var err error
-	defer func() { uotel.EndSpanWithError(span, err) }()
-
 	resourceID := v2.ResourceId_builder{
 		ResourceType: action.ResourceTypeID,
 		Resource:     action.ResourceID,
