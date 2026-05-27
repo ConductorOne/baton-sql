@@ -220,6 +220,34 @@ resource_types:
 				require.Empty(t, rp.Constraints)
 			},
 		},
+		{
+			name: "grant-reject-if",
+			input: `
+app_name: Test
+connect:
+  dsn: "postgres://localhost/test"
+resource_types:
+  role:
+    name: Role
+    static_entitlements:
+      - id: member
+        provisioning:
+          vars:
+            user_id: principal.ID
+          grant:
+            reject_if:
+              query: "SELECT 1 WHERE ?<user_id> = 'blocked'"
+              reason: "'Grant rejected by policy.'"
+            queries:
+              - "INSERT INTO user_roles (user_id) VALUES (?<user_id>)"
+`,
+			validate: func(t *testing.T, c *Config) {
+				grant := c.ResourceTypes["role"].StaticEntitlements[0].Provisioning.Grant
+				require.NotNil(t, grant.RejectIf)
+				require.Equal(t, "SELECT 1 WHERE ?<user_id> = 'blocked'", grant.RejectIf.Query)
+				require.Equal(t, "'Grant rejected by policy.'", grant.RejectIf.Reason)
+			},
+		},
 	}
 
 	for _, tt := range tests {
