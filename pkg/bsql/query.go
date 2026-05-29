@@ -36,7 +36,7 @@ const (
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
 var ErrQueryAffectedMoreThanOneRow = errors.New("query affected more than one row, ending and rolling back")
 
-const defaultGrantRejectedReason = "Grant rejected by connector policy."
+const defaultGrantCancelledReason = "Grant cancelled by connector policy."
 
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -697,16 +697,16 @@ func (s *SQLSyncer) runGrantRejectIf(
 		return false, "", nil
 	}
 
-	var rejected bool
-	reason := defaultGrantRejectedReason
+	var cancelled bool
+	reason := defaultGrantCancelledReason
 
 	_, err := s.runQuery(ctx, executor, nil, rejectIf.Query, nil, vars, func(ctx context.Context, rowMap map[string]interface{}) (bool, error) {
-		rejected = true
+		cancelled = true
 
 		if rejectIf.Reason != "" {
 			out, err := s.env.EvaluateString(ctx, rejectIf.Reason, s.env.SyncInputs(rowMap))
 			if err != nil {
-				return false, fmt.Errorf("failed to evaluate grant rejection reason: %w", err)
+				return false, fmt.Errorf("failed to evaluate grant cancellation reason: %w", err)
 			}
 			reason = out
 		}
@@ -717,7 +717,7 @@ func (s *SQLSyncer) runGrantRejectIf(
 		return false, "", err
 	}
 
-	return rejected, reason, nil
+	return cancelled, reason, nil
 }
 
 func (s *SQLSyncer) RunGrantProvisioning(
@@ -758,13 +758,13 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}()
 	}
 
-	rejected, reason, err := s.runGrantRejectIf(ctx, executor, rejectIf, vars)
+	cancelled, reason, err := s.runGrantRejectIf(ctx, executor, rejectIf, vars)
 	if err != nil {
 		return anno, err
 	}
-	if rejected {
-		l.Info("grant rejected by connector policy", zap.String("reason", reason))
-		return sdkGrant.AppendGrantRejected(anno, reason), nil
+	if cancelled {
+		l.Info("grant cancelled by connector policy", zap.String("reason", reason))
+		return anno, sdkGrant.NewErrGrantCancelled(reason)
 	}
 
 	if replace != nil && replace.Query != "" {

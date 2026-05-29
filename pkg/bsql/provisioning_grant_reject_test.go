@@ -2,10 +2,12 @@ package bsql
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	sdkEntitlement "github.com/conductorone/baton-sdk/pkg/types/entitlement"
+	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/stretchr/testify/require"
@@ -39,7 +41,7 @@ func newGrantProvisioningTestSyncer(t *testing.T) (*SQLSyncer, *sql.DB) {
 	}, db
 }
 
-func TestRunGrantProvisioning_RejectIfMatchReturnsGrantRejectedAndSkipsMutations(t *testing.T) {
+func TestRunGrantProvisioning_RejectIfMatchReturnsGrantCancelledAndSkipsMutations(t *testing.T) {
 	s, db := newGrantProvisioningTestSyncer(t)
 
 	annos, err := s.RunGrantProvisioning(
@@ -55,16 +57,15 @@ func TestRunGrantProvisioning_RejectIfMatchReturnsGrantRejectedAndSkipsMutations
 		nil,
 		&GrantRejectIfProvisioningQuery{
 			Query:  `SELECT 1 AS rejected`,
-			Reason: `'Grant rejected: user already has a mutually exclusive role.'`,
+			Reason: `'Grant cancelled: user already has a mutually exclusive role.'`,
 		},
 	)
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.Empty(t, annos)
 
-	rejected := &v2.GrantRejected{}
-	ok, err := annos.Pick(rejected)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, "Grant rejected: user already has a mutually exclusive role.", rejected.GetReason())
+	var cancelled *sdkGrant.ErrGrantCancelled
+	require.True(t, errors.As(err, &cancelled))
+	require.Equal(t, "Grant cancelled: user already has a mutually exclusive role.", cancelled.Reason)
 
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM user_roles`).Scan(&count))
@@ -87,15 +88,12 @@ func TestRunGrantProvisioning_RejectIfNoMatchProceedsWithGrant(t *testing.T) {
 		nil,
 		&GrantRejectIfProvisioningQuery{
 			Query:  `SELECT 1 AS rejected WHERE 0`,
-			Reason: `'Grant rejected: user already has a mutually exclusive role.'`,
+			Reason: `'Grant cancelled: user already has a mutually exclusive role.'`,
 		},
 	)
 	require.NoError(t, err)
 
-	rejected := &v2.GrantRejected{}
-	ok, err := annos.Pick(rejected)
-	require.NoError(t, err)
-	require.False(t, ok)
+	require.Empty(t, annos)
 
 	var role string
 	require.NoError(t, db.QueryRow(`SELECT role FROM user_roles WHERE user_id = ?`, "user-1").Scan(&role))

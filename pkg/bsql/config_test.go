@@ -237,7 +237,7 @@ resource_types:
           grant:
             reject_if:
               query: "SELECT 1 WHERE ?<user_id> = 'blocked'"
-              reason: "'Grant rejected by policy.'"
+              reason: "'Grant cancelled by policy.'"
             queries:
               - "INSERT INTO user_roles (user_id) VALUES (?<user_id>)"
 `,
@@ -245,7 +245,7 @@ resource_types:
 				grant := c.ResourceTypes["role"].StaticEntitlements[0].Provisioning.Grant
 				require.NotNil(t, grant.RejectIf)
 				require.Equal(t, "SELECT 1 WHERE ?<user_id> = 'blocked'", grant.RejectIf.Query)
-				require.Equal(t, "'Grant rejected by policy.'", grant.RejectIf.Reason)
+				require.Equal(t, "'Grant cancelled by policy.'", grant.RejectIf.Reason)
 			},
 		},
 	}
