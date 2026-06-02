@@ -12,6 +12,7 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
 	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/google/cel-go/common/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -34,6 +35,8 @@ const (
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
 var ErrQueryAffectedMoreThanOneRow = errors.New("query affected more than one row, ending and rolling back")
+
+const defaultGrantCancelledReason = "Grant cancelled by connector policy."
 
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -684,6 +687,39 @@ func (s *SQLSyncer) runQuery(
 	return nextPageToken, nil
 }
 
+func (s *SQLSyncer) runGrantRejectIf(
+	ctx context.Context,
+	executor executor,
+	rejectIf *GrantRejectIfProvisioningQuery,
+	vars map[string]any,
+) (bool, string, error) {
+	if rejectIf == nil || rejectIf.Query == "" {
+		return false, "", nil
+	}
+
+	var cancelled bool
+	reason := defaultGrantCancelledReason
+
+	_, err := s.runQuery(ctx, executor, nil, rejectIf.Query, nil, vars, func(ctx context.Context, rowMap map[string]interface{}) (bool, error) {
+		cancelled = true
+
+		if rejectIf.Reason != "" {
+			out, err := s.env.EvaluateString(ctx, rejectIf.Reason, s.env.SyncInputs(rowMap))
+			if err != nil {
+				return false, fmt.Errorf("failed to evaluate grant cancellation reason: %w", err)
+			}
+			reason = out
+		}
+
+		return false, nil
+	})
+	if err != nil {
+		return false, "", err
+	}
+
+	return cancelled, reason, nil
+}
+
 func (s *SQLSyncer) RunGrantProvisioning(
 	ctx context.Context,
 	resource *v2.Resource,
@@ -692,6 +728,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	vars map[string]any,
 	useTx bool,
 	replace *GrantReplaceProvisioningQueries,
+	rejectIf *GrantRejectIfProvisioningQuery,
 ) (annotations.Annotations, error) {
 	l := ctxzap.Extract(ctx)
 
@@ -719,6 +756,15 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				}
 			}
 		}()
+	}
+
+	cancelled, reason, err := s.runGrantRejectIf(ctx, executor, rejectIf, vars)
+	if err != nil {
+		return anno, err
+	}
+	if cancelled {
+		l.Info("grant cancelled by connector policy", zap.String("reason", reason))
+		return anno, sdkGrant.NewErrGrantCancelled(reason)
 	}
 
 	if replace != nil && replace.Query != "" {

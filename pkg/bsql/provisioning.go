@@ -82,6 +82,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		provisioningVars,
 		useTx,
 		provisioningConfig.Grant.GrantReplace,
+		provisioningConfig.Grant.RejectIf,
 	)
 	if err != nil {
 		if errors.Is(err, ErrQueryAffectedZeroRows) {

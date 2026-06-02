@@ -374,8 +374,19 @@ type GrantReplaceProvisioningQueries struct {
 	Map []*GrantMapping `yaml:"map" json:"map"`
 }
 
+type GrantRejectIfProvisioningQuery struct {
+	// Query is the SQL statement used to determine whether to reject the grant.
+	Query string `yaml:"query" json:"query"`
+
+	// Reason is a CEL expression evaluated against the first returned row.
+	Reason string `yaml:"reason" json:"reason"`
+}
+
 type GrantEntitlementProvisioningQueries struct {
 	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
+
+	// RejectIf defines a policy query that intentionally rejects the grant when it returns at least one row.
+	RejectIf *GrantRejectIfProvisioningQuery `yaml:"reject_if,omitempty" json:"reject_if,omitempty"`
 
 	// GrantReplaceProvisioningQueries defines the SQL queries and settings for replacing existing grants with the new grant during provisioning.
 	GrantReplace *GrantReplaceProvisioningQueries `yaml:"grant_replace,omitempty" json:"grant_replace,omitempty"`

@@ -59,13 +59,8 @@ func (l *EntitlementsQuery) staticValidate(ctx context.Context, s *SQLSyncer) er
 			continue
 		}
 
-		if mapping.Provisioning.Grant != nil {
-			for _, query := range mapping.Provisioning.Grant.Queries {
-				err := validateVarsInQuery(s, query, mapping.Provisioning.Vars)
-				if err != nil {
-					return err
-				}
-			}
+		if err := validateGrantProvisioningQueries(s, mapping.Provisioning.Grant, mapping.Provisioning.Vars); err != nil {
+			return err
 		}
 
 		if mapping.Provisioning.Revoke != nil {
@@ -86,13 +81,8 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 		return nil
 	}
 
-	if l.Provisioning.Grant != nil {
-		for _, query := range l.Provisioning.Grant.Queries {
-			err := validateVarsInQuery(s, query, l.Provisioning.Vars)
-			if err != nil {
-				return err
-			}
-		}
+	if err := validateGrantProvisioningQueries(s, l.Provisioning.Grant, l.Provisioning.Vars); err != nil {
+		return err
 	}
 
 	if l.Provisioning.Revoke != nil {
@@ -101,6 +91,26 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	return nil
+}
+
+func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvisioningQueries, vars map[string]string) error {
+	if grant == nil {
+		return nil
+	}
+
+	if grant.RejectIf != nil {
+		if err := validateVarsInQuery(s, grant.RejectIf.Query, vars); err != nil {
+			return err
+		}
+	}
+
+	for _, query := range grant.Queries {
+		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
 		}
 	}
 
