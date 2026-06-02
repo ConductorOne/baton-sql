@@ -22,6 +22,11 @@ func (s *SQLSyncer) Entitlements(ctx context.Context, resource *v2.Resource, pTo
 func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	inputs := s.env.SyncInputsWithResource(nil, resource)
 
+	resourceTypes, err := s.fullConfig.GetResourceTypes(ctx)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
 	var ret []*v2.Entitlement
 	for _, e := range s.config.StaticEntitlements {
 		entitlement := &v2.Entitlement{
@@ -59,6 +64,14 @@ func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resourc
 			entitlement.Purpose = v2.Entitlement_PURPOSE_VALUE_PERMISSION
 		default:
 			entitlement.Purpose = v2.Entitlement_PURPOSE_VALUE_UNSPECIFIED
+		}
+
+		for _, rt := range e.GrantableTo {
+			for _, r := range resourceTypes {
+				if r.Id == rt {
+					entitlement.GrantableTo = append(entitlement.GrantableTo, r)
+				}
+			}
 		}
 
 		annos := annotations.Annotations(entitlement.Annotations)
