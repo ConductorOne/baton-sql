@@ -24,7 +24,7 @@ func newGrantProvisioningTestSyncer(t *testing.T) (*SQLSyncer, *sql.DB) {
 		require.NoError(t, db.Close())
 	})
 
-	_, err = db.Exec(`CREATE TABLE user_roles (user_id TEXT PRIMARY KEY, role TEXT)`)
+	_, err = db.ExecContext(t.Context(), `CREATE TABLE user_roles (user_id TEXT PRIMARY KEY, role TEXT)`)
 	require.NoError(t, err)
 
 	env, err := bcel.NewEnv(t.Context())
@@ -68,7 +68,7 @@ func TestRunGrantProvisioning_RejectIfMatchReturnsGrantCancelledAndSkipsMutation
 	require.Equal(t, "Grant cancelled: user already has a mutually exclusive role.", cancelled.Reason)
 
 	var count int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM user_roles`).Scan(&count))
+	require.NoError(t, db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM user_roles`).Scan(&count))
 	require.Equal(t, 0, count)
 }
 
@@ -96,7 +96,7 @@ func TestRunGrantProvisioning_RejectIfNoMatchProceedsWithGrant(t *testing.T) {
 	require.Empty(t, annos)
 
 	var role string
-	require.NoError(t, db.QueryRow(`SELECT role FROM user_roles WHERE user_id = ?`, "user-1").Scan(&role))
+	require.NoError(t, db.QueryRowContext(t.Context(), `SELECT role FROM user_roles WHERE user_id = ?`, "user-1").Scan(&role))
 	require.Equal(t, "admin", role)
 }
 
