@@ -211,8 +211,11 @@ resource_types:
       # we filter to the row matching resource.ID. identity_type is 'user' | 'role' |
       # 'group' | 'public'. PUBLIC rows are intentionally skipped here; modeling
       # PUBLIC requires a synthetic principal and is tracked as a follow-up.
+      # DISTINCT collapses the up-to-three privilege rows (TEMP, USAGE, CREATE) per
+      # principal into a single row, since all three map to the same `access`
+      # entitlement.
       - query: |
-          SELECT database_name, privilege_type, identity_name, identity_type
+          SELECT DISTINCT identity_name, identity_type, database_name
           FROM svv_database_privileges
           WHERE privilege_type IN ('TEMP', 'USAGE', 'CREATE')
           ORDER BY identity_name
