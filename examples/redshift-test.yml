@@ -173,8 +173,8 @@ resource_types:
           SELECT role_name, granted_role_name FROM svv_role_grants
           ORDER BY role_name, granted_role_name
         map:
-          - skip_if: ".role_name != resource.ID"
-            principal_id: ".granted_role_name"
+          - skip_if: ".granted_role_name != resource.ID"
+            principal_id: ".role_name"
             principal_type: role
             entitlement_id: member
 
