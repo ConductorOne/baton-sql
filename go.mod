@@ -4,7 +4,7 @@ go 1.25.2
 
 require (
 	github.com/SAP/go-hdb v1.14.5
-	github.com/conductorone/baton-sdk v0.12.0
+	github.com/conductorone/baton-sdk v0.12.1
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.9.2
@@ -22,6 +22,7 @@ require (
 	google.golang.org/grpc v1.81.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
+	modernc.org/sqlite v1.50.0
 )
 
 require (
@@ -136,5 +137,4 @@ require (
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.50.0 // indirect
 )
