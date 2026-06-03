@@ -198,35 +198,40 @@ resource_types:
         display_name: ".database_name"
         description: "'Redshift database ' + string(.database_name)"
     static_entitlements:
-      # Read-only: https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html lists CREATE/TEMP/USAGE/ALTER as the
-      # database-level grantable privileges, not CONNECT. svv_database_privileges
-      # still surfaces CONNECT rows, so visibility works, but a GRANT CONNECT path
-      # is not documented and is left out until validated.
-      - id: connect
-        display_name: "resource.DisplayName + ' CONNECT'"
-        description: "'CONNECT on database ' + resource.DisplayName"
+      # Read-only aggregate of database-level privileges (TEMP, USAGE, CREATE) per
+      # https://docs.aws.amazon.com/redshift/latest/dg/r_GRANT.html. svv_database_privileges
+      # never emits CONNECT despite the column name suggesting it; the actual rows are
+      # TEMP, USAGE, and CREATE granted to named principals or PUBLIC. Kept immutable
+      # until per-privilege provisioning is validated against a real cluster.
+      - id: access
+        display_name: "resource.DisplayName + ' access'"
+        description: "'Database-level access (TEMP/USAGE/CREATE) on ' + resource.DisplayName"
         purpose: permission
         grantable_to: [user, role, group]
-        slug: connect
+        slug: access
         immutable: true
     grants:
       # svv_database_privileges is per-database, so this query runs once per DB and
       # we filter to the row matching resource.ID. identity_type is 'user' | 'role' |
-      # 'group' | 'public'; one map entry per type, others skipped.
+      # 'group' | 'public'. PUBLIC rows are intentionally skipped here; modeling
+      # PUBLIC requires a synthetic principal and is tracked as a follow-up.
+      # DISTINCT collapses the up-to-three privilege rows (TEMP, USAGE, CREATE) per
+      # principal into a single row, since all three map to the same `access`
+      # entitlement.
       - query: |
-          SELECT database_name, privilege_type, identity_name, identity_type
+          SELECT DISTINCT identity_name, identity_type, database_name
           FROM svv_database_privileges
-          WHERE privilege_type = 'CONNECT'
+          WHERE privilege_type IN ('TEMP', 'USAGE', 'CREATE')
           ORDER BY identity_name
         map:
           - skip_if: ".database_name != resource.ID || .identity_type != 'user'"
             principal_id: ".identity_name"
             principal_type: user
-            entitlement_id: connect
+            entitlement_id: access
           - skip_if: ".database_name != resource.ID || .identity_type != 'role'"
             principal_id: ".identity_name"
             principal_type: role
-            entitlement_id: connect
+            entitlement_id: access
             expandable:
               entitlement_ids:
                 - "'role:' + .identity_name + ':member'"
@@ -234,7 +239,7 @@ resource_types:
           - skip_if: ".database_name != resource.ID || .identity_type != 'group'"
             principal_id: ".identity_name"
             principal_type: group
-            entitlement_id: connect
+            entitlement_id: access
             expandable:
               entitlement_ids:
                 - "'group:' + .identity_name + ':member'"
