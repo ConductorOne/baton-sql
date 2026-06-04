@@ -177,9 +177,12 @@ resource_types:
             principal_id: ".role_name"
             principal_type: role
             entitlement_id: member
+            # Expansion fans this grant out to the PRINCIPAL's members, so the source
+            # entitlement must reference the principal (role_name = the member role),
+            # not granted_role_name (the parent) — a mismatch aborts the entire sync.
             expandable:
               entitlement_ids:
-                - "'role:' + .granted_role_name + ':member'"
+                - "'role:' + .role_name + ':member'"
               shallow: true
 
   # --- Per-database catalog ---------------------------------------------------------
