@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	userTraitType  = "user"
-	appTraitType   = "app"
-	groupTraitType = "group"
-	roleTraitType  = "role"
+	userTraitType   = "user"
+	appTraitType    = "app"
+	groupTraitType  = "group"
+	roleTraitType   = "role"
+	secretTraitType = "secret"
+	agentTraitType  = "agent"
 
 	scopeCluster        = "cluster"
 	dbIterPageStateType = "db-iter"

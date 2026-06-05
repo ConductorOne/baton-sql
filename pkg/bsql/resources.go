@@ -59,6 +59,12 @@ func (s *SQLSyncer) fetchTraits() map[string]bool {
 
 		case mapTraits.App != nil:
 			traits[appTraitType] = true
+
+		case mapTraits.Secret != nil:
+			traits[secretTraitType] = true
+
+		case mapTraits.Agent != nil:
+			traits[agentTraitType] = true
 		}
 	}
 
@@ -372,6 +378,206 @@ func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map
 	return nil
 }
 
+func (s *SQLSyncer) mapSecretTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	l := ctxzap.Extract(ctx)
+
+	inputs := s.env.SyncInputs(rowMap)
+	mappings := s.config.List.Map.Traits.Secret
+
+	var opts []sdkResource.SecretTraitOption
+
+	if mappings.CredentialType != "" {
+		v, err := s.env.EvaluateString(ctx, mappings.CredentialType, inputs)
+		if err != nil {
+			return err
+		}
+
+		var credentialType v2.SecretTrait_CredentialType
+		switch strings.ToLower(v) {
+		case "static_secret":
+			credentialType = v2.SecretTrait_CREDENTIAL_TYPE_STATIC_SECRET
+		case "asymmetric_key":
+			credentialType = v2.SecretTrait_CREDENTIAL_TYPE_ASYMMETRIC_KEY
+		case "certificate":
+			credentialType = v2.SecretTrait_CREDENTIAL_TYPE_CERTIFICATE
+		default:
+			l.Warn("unexpected credential type value in mapping", zap.String("credential_type", v))
+			credentialType = v2.SecretTrait_CREDENTIAL_TYPE_UNSPECIFIED
+		}
+		opts = append(opts, sdkResource.WithSecretType(credentialType))
+	}
+
+	if mappings.CredentialDetail != "" {
+		v, err := s.env.EvaluateString(ctx, mappings.CredentialDetail, inputs)
+		if err != nil {
+			return err
+		}
+		if v != "" {
+			opts = append(opts, sdkResource.WithSecretDetail(v))
+		}
+	}
+
+	if mappings.ExpiresAt != "" {
+		v, err := s.env.EvaluateString(ctx, mappings.ExpiresAt, inputs)
+		if err != nil {
+			return err
+		}
+		if v != "" {
+			t, err := parseTimeWithEngine(v, s.dbEngine)
+			if err != nil {
+				l.Warn("failed to parse secret expires_at", zap.String("expires_at", v), zap.Error(err))
+			} else {
+				opts = append(opts, sdkResource.WithSecretExpiresAt(*t))
+			}
+		}
+	}
+
+	if mappings.LastUsedAt != "" {
+		v, err := s.env.EvaluateString(ctx, mappings.LastUsedAt, inputs)
+		if err != nil {
+			return err
+		}
+		if v != "" {
+			t, err := parseTimeWithEngine(v, s.dbEngine)
+			if err != nil {
+				l.Warn("failed to parse secret last_used_at", zap.String("last_used_at", v), zap.Error(err))
+			} else {
+				opts = append(opts, sdkResource.WithSecretLastUsedAt(*t))
+			}
+		}
+	}
+
+	t, err := sdkResource.NewSecretTrait(opts...)
+	if err != nil {
+		return err
+	}
+
+	annos := annotations.Annotations(r.Annotations)
+	annos.Update(t)
+	r.Annotations = annos
+
+	return nil
+}
+
+func (s *SQLSyncer) mapAgentTrait(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	l := ctxzap.Extract(ctx)
+
+	inputs := s.env.SyncInputs(rowMap)
+	mappings := s.config.List.Map.Traits.Agent
+
+	var opts []sdkResource.AgentTraitOption
+
+	if mappings.Status != "" {
+		v, err := s.env.EvaluateString(ctx, mappings.Status, inputs)
+		if err != nil {
+			return err
+		}
+
+		var status v2.AgentTrait_AgentStatus
+		switch strings.ToLower(v) {
+		case "ready", "active", "enabled":
+			status = v2.AgentTrait_AGENT_STATUS_READY
+		case "disabled", "inactive":
+			status = v2.AgentTrait_AGENT_STATUS_DISABLED
+		case "deleted":
+			status = v2.AgentTrait_AGENT_STATUS_DELETED
+		default:
+			l.Warn("unexpected agent status value in mapping", zap.String("status", v))
+			status = v2.AgentTrait_AGENT_STATUS_UNSPECIFIED
+		}
+		opts = append(opts, sdkResource.WithAgentStatus(status))
+	}
+
+	if mappings.IdentityResourceID != "" {
+		idValue, err := s.env.EvaluateString(ctx, mappings.IdentityResourceID, inputs)
+		if err != nil {
+			return err
+		}
+
+		typeValue := ""
+		if mappings.IdentityResourceType != "" {
+			typeValue, err = s.env.EvaluateString(ctx, mappings.IdentityResourceType, inputs)
+			if err != nil {
+				return err
+			}
+		}
+
+		if idValue != "" && typeValue != "" {
+			opts = append(opts, sdkResource.WithAgentIdentityResourceID(&v2.ResourceId{
+				ResourceType: typeValue,
+				Resource:     idValue,
+			}))
+		} else if idValue != "" {
+			l.Warn("agent identity_resource_id set without identity_resource_type; skipping identity reference")
+		}
+	}
+
+	profile := make(map[string]interface{})
+	for profileKey, profileValue := range mappings.Profile {
+		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
+		if err != nil {
+			return err
+		}
+		profile[profileKey] = v
+	}
+	if len(profile) > 0 {
+		opts = append(opts, sdkResource.WithAgentProfile(profile))
+	}
+
+	t, err := sdkResource.NewAgentTrait(opts...)
+	if err != nil {
+		return err
+	}
+
+	annos := annotations.Annotations(r.Annotations)
+	annos.Update(t)
+	r.Annotations = annos
+
+	return nil
+}
+
+// mapNonHumanIdentity attaches a kind-agnostic NonHumanIdentityTrait annotation
+// (K3) to the resource. It is applied independently of the resource's primary
+// trait, so a resource may be (for example) an app or role and also a non-human
+// identity, or a non-human identity with no other trait.
+func (s *SQLSyncer) mapNonHumanIdentity(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
+	l := ctxzap.Extract(ctx)
+
+	mapping := s.config.List.Map.NonHumanIdentity
+	inputs := s.env.SyncInputs(rowMap)
+
+	var nhiType v2.NonHumanIdentityTrait_NhiType
+	if mapping.NhiType != "" {
+		v, err := s.env.EvaluateString(ctx, mapping.NhiType, inputs)
+		if err != nil {
+			return err
+		}
+
+		switch strings.ToLower(v) {
+		case "app_registration":
+			nhiType = v2.NonHumanIdentityTrait_NHI_TYPE_APP_REGISTRATION
+		case "assumable_role":
+			nhiType = v2.NonHumanIdentityTrait_NHI_TYPE_ASSUMABLE_ROLE
+		case "managed_identity":
+			nhiType = v2.NonHumanIdentityTrait_NHI_TYPE_MANAGED_IDENTITY
+		default:
+			l.Warn("unexpected nhi type value in mapping", zap.String("nhi_type", v))
+			nhiType = v2.NonHumanIdentityTrait_NHI_TYPE_UNSPECIFIED
+		}
+	}
+
+	detail := ""
+	if mapping.NhiDetail != "" {
+		v, err := s.env.EvaluateString(ctx, mapping.NhiDetail, inputs)
+		if err != nil {
+			return err
+		}
+		detail = v
+	}
+
+	return sdkResource.WithNHIType(nhiType, detail)(r)
+}
+
 func (s *SQLSyncer) mapTraits(ctx context.Context, r *v2.Resource, rowMap map[string]any) error {
 	l := ctxzap.Extract(ctx)
 
@@ -397,6 +603,14 @@ func (s *SQLSyncer) mapTraits(ctx context.Context, r *v2.Resource, rowMap map[st
 			if err := s.mapGroupTrait(ctx, r, rowMap); err != nil {
 				return err
 			}
+		case secretTraitType:
+			if err := s.mapSecretTrait(ctx, r, rowMap); err != nil {
+				return err
+			}
+		case agentTraitType:
+			if err := s.mapAgentTrait(ctx, r, rowMap); err != nil {
+				return err
+			}
 		default:
 			l.Warn("unexpected trait type in mapping", zap.String("trait", trait))
 			continue
@@ -417,6 +631,14 @@ func (s *SQLSyncer) mapResource(ctx context.Context, rowMap map[string]any) (*v2
 	err = s.mapTraits(ctx, r, rowMap)
 	if err != nil {
 		return nil, err
+	}
+
+	// NHI is kind-agnostic and applied after the primary trait so it can
+	// co-exist with any (or no) trait.
+	if s.config.List.Map.NonHumanIdentity != nil {
+		if err := s.mapNonHumanIdentity(ctx, r, rowMap); err != nil {
+			return nil, err
+		}
 	}
 
 	return r, nil
