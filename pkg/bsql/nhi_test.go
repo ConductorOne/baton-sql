@@ -1,3 +1,4 @@
+//nolint:gosec // G101 false positives: string literals here are NHI trait config, not credentials.
 package bsql
 
 import (
