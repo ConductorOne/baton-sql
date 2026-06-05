@@ -160,8 +160,26 @@ type ResourceMapping struct {
 	// Traits defines specific attribute mappings for various resource subtypes (e.g., user, role).
 	Traits *Traits `yaml:"traits" json:"traits"`
 
+	// NonHumanIdentity marks the resource as a non-human identity (K3). It is
+	// kind-agnostic: it attaches a NonHumanIdentityTrait annotation alongside
+	// whatever primary trait (if any) the resource carries, so it lives here as
+	// a sibling of Traits rather than inside it.
+	NonHumanIdentity *NonHumanIdentityMapping `yaml:"non_human_identity,omitempty" json:"non_human_identity,omitempty"`
+
 	// Annotations includes additional metadata such as entitlement immutability and external links.
 	Annotations *Annotations `yaml:"annotations" json:"annotations"`
+}
+
+// NonHumanIdentityMapping declares that a resource is a non-human identity (K3).
+// Both fields are CEL expressions evaluated against the query row.
+type NonHumanIdentityMapping struct {
+	// NhiType is the kind of non-human identity.
+	// Supported values: app_registration, assumable_role, managed_identity.
+	NhiType string `yaml:"nhi_type" json:"nhi_type"`
+
+	// NhiDetail is a free-form descriptor of the identity, conventionally
+	// "<platform>.<object>" (e.g. "aws.iam_role").
+	NhiDetail string `yaml:"nhi_detail,omitempty" json:"nhi_detail,omitempty"`
 }
 
 // Annotations holds extra metadata for resource or grant mappings.
@@ -186,6 +204,50 @@ type Traits struct {
 
 	// User contains trait mappings for user resources.
 	User *UserTraitMapping `yaml:"user" json:"user"`
+
+	// Secret contains trait mappings for secret/credential resources (K1).
+	Secret *SecretTraitMapping `yaml:"secret,omitempty" json:"secret,omitempty"`
+
+	// Agent contains trait mappings for AI-agent resources.
+	Agent *AgentTraitMapping `yaml:"agent,omitempty" json:"agent,omitempty"`
+}
+
+// SecretTraitMapping defines attribute mappings for secret/credential resources (K1).
+// All fields are CEL expressions evaluated against the query row.
+type SecretTraitMapping struct {
+	// CredentialType classifies the secret.
+	// Supported values: static_secret, asymmetric_key, certificate.
+	CredentialType string `yaml:"credential_type" json:"credential_type"`
+
+	// CredentialDetail is a free-form descriptor of the credential,
+	// conventionally "<platform>.<object>" (e.g. "postgres.api_token").
+	CredentialDetail string `yaml:"credential_detail,omitempty" json:"credential_detail,omitempty"`
+
+	// ExpiresAt records when the credential expires (parsed using the DB engine's time format).
+	ExpiresAt string `yaml:"expires_at,omitempty" json:"expires_at,omitempty"`
+
+	// LastUsedAt records when the credential was last used.
+	LastUsedAt string `yaml:"last_used_at,omitempty" json:"last_used_at,omitempty"`
+}
+
+// AgentTraitMapping defines attribute mappings for AI-agent resources.
+// String fields are CEL expressions evaluated against the query row.
+type AgentTraitMapping struct {
+	// Status is the agent's lifecycle status.
+	// Supported values: ready (active, enabled), disabled (inactive), deleted.
+	Status string `yaml:"status,omitempty" json:"status,omitempty"`
+
+	// IdentityResourceType is the resource type of the identity the agent
+	// authenticates as. Required (together with IdentityResourceID) to set the
+	// agent's identity reference.
+	IdentityResourceType string `yaml:"identity_resource_type,omitempty" json:"identity_resource_type,omitempty"`
+
+	// IdentityResourceID is the resource id of the identity the agent
+	// authenticates as.
+	IdentityResourceID string `yaml:"identity_resource_id,omitempty" json:"identity_resource_id,omitempty"`
+
+	// Profile is a set of key-value pairs representing agent profile attributes.
+	Profile map[string]string `yaml:"profile,omitempty" json:"profile,omitempty"`
 }
 
 // UserTraitMapping defines attribute mappings specifically for user resources.

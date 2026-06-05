@@ -1,0 +1,118 @@
+---
+# Non-Human Identity (NHI) + AI-agent reference configuration
+# ===========================================================
+# Demonstrates how a baton-sql config author declares the NHI ontology and AI
+# agents so the engine emits the corresponding baton-sdk traits:
+#
+#   K1  secret / credential        -> map.traits.secret (SecretTrait)
+#   K2  service / system account   -> map.traits.user.account_type (UserTrait.account_type)
+#   K3  non-human identity         -> map.non_human_identity (NonHumanIdentityTrait, kind-agnostic)
+#   AI  agent                      -> map.traits.agent (AgentTrait)
+#
+# Every field below is optional and additive: configs that omit them sync
+# exactly as before. Column references and CEL expressions resolve against each
+# query row, identical to the other examples.
+
+app_name: NHI Reference Application
+
+connect:
+  scheme: "postgres"
+  host: "${DB_HOST}"
+  port: "5432"
+  database: "${DB_NAME}"
+  user: "${DB_USER}"
+  password: "${DB_PASS}"
+
+resource_types:
+  # K2 — service / system accounts.
+  # account_type maps to UserTrait.account_type: service | system | human (default).
+  service_account:
+    name: "Service Account"
+    description: "Machine accounts; classified service or system."
+    list:
+      query: |
+        SELECT id, username, kind FROM accounts
+        WHERE id > ?<Cursor> ORDER BY id ASC LIMIT ?<Limit>
+      map:
+        id: ".id"
+        display_name: ".username"
+        traits:
+          user:
+            # "service" -> ACCOUNT_TYPE_SERVICE, "system" -> ACCOUNT_TYPE_SYSTEM
+            account_type: ".kind"
+            login: ".username"
+      pagination:
+        strategy: "cursor"
+        primary_key: "id"
+
+  # K1 — secret / credential resources.
+  api_token:
+    name: "API Token"
+    description: "Long-lived API tokens issued by the platform."
+    list:
+      query: |
+        SELECT id, name, expires_at, last_used_at FROM api_tokens
+        WHERE id > ?<Cursor> ORDER BY id ASC LIMIT ?<Limit>
+      map:
+        id: ".id"
+        display_name: ".name"
+        traits:
+          secret:
+            # static_secret | asymmetric_key | certificate
+            credential_type: "'static_secret'"
+            # free-form "<platform>.<object>" descriptor
+            credential_detail: "'postgres.api_token'"
+            expires_at: ".expires_at"
+            last_used_at: ".last_used_at"
+      pagination:
+        strategy: "cursor"
+        primary_key: "id"
+
+  # K3 — non-human identity, attached alongside a primary (app) trait.
+  # NHI is kind-agnostic: non_human_identity is a sibling of traits, so the
+  # resource is both an app AND a non-human identity.
+  iam_role:
+    name: "IAM Role"
+    description: "Assumable roles modeled as app registrations / assumable roles."
+    list:
+      query: |
+        SELECT id, name, arn FROM iam_roles
+        WHERE id > ?<Cursor> ORDER BY id ASC LIMIT ?<Limit>
+      map:
+        id: ".id"
+        display_name: ".name"
+        traits:
+          app:
+            profile:
+              arn: ".arn"
+        non_human_identity:
+          # app_registration | assumable_role | managed_identity
+          nhi_type: "'assumable_role'"
+          nhi_detail: "'aws.iam_role'"
+      pagination:
+        strategy: "cursor"
+        primary_key: "id"
+
+  # AI agent — autonomous non-human actor that authenticates as an identity.
+  ai_agent:
+    name: "AI Agent"
+    description: "AI agents registered in the platform."
+    list:
+      query: |
+        SELECT id, name, state, identity_id, model FROM ai_agents
+        WHERE id > ?<Cursor> ORDER BY id ASC LIMIT ?<Limit>
+      map:
+        id: ".id"
+        display_name: ".name"
+        traits:
+          agent:
+            # ready (active, enabled) | disabled (inactive) | deleted
+            status: ".state"
+            # the identity the agent authenticates as (both fields required to set the ref)
+            identity_resource_type: "'service_account'"
+            identity_resource_id: ".identity_id"
+            profile:
+              model: ".model"
+      pagination:
+        strategy: "cursor"
+        primary_key: "id"
