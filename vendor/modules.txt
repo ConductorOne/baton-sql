@@ -469,7 +469,7 @@ github.com/golang/protobuf/ptypes/timestamp
 # github.com/golang/snappy v0.0.5-0.20231225225746-43d5d4cd4e0e
 ## explicit
 github.com/golang/snappy
-# github.com/google/cel-go v0.28.0
+# github.com/google/cel-go v0.28.1
 ## explicit; go 1.23.0
 github.com/google/cel-go/cel
 github.com/google/cel-go/checker
@@ -734,7 +734,7 @@ github.com/tklauser/go-sysconf
 # github.com/tklauser/numcpus v0.11.0
 ## explicit; go 1.24.0
 github.com/tklauser/numcpus
-# github.com/vertica/vertica-sql-go v1.3.5
+# github.com/vertica/vertica-sql-go v1.3.6
 ## explicit; go 1.13
 github.com/vertica/vertica-sql-go
 github.com/vertica/vertica-sql-go/common
@@ -862,6 +862,9 @@ go.uber.org/zap/internal/exit
 go.uber.org/zap/internal/pool
 go.uber.org/zap/internal/stacktrace
 go.uber.org/zap/zapcore
+# go.yaml.in/yaml/v3 v3.0.4
+## explicit; go 1.16
+go.yaml.in/yaml/v3
 # golang.org/x/crypto v0.53.0
 ## explicit; go 1.25.0
 golang.org/x/crypto/blowfish

@@ -8,7 +8,7 @@ require (
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.9.2
-	github.com/google/cel-go v0.28.0
+	github.com/google/cel-go v0.28.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/microsoft/go-mssqldb v1.8.0
@@ -16,7 +16,7 @@ require (
 	github.com/sijms/go-ora/v2 v2.8.24
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.11.1
-	github.com/vertica/vertica-sql-go v1.3.5
+	github.com/vertica/vertica-sql-go v1.3.6
 	go.uber.org/zap v1.28.0
 	golang.org/x/text v0.38.0
 	google.golang.org/grpc v1.81.1
@@ -145,6 +145,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/ratelimit v0.3.1 // indirect
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
 	golang.org/x/net v0.56.0 // indirect
