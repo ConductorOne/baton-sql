@@ -25,6 +25,7 @@
 - PostgreSQL
 - Vertica
 - Amazon Redshift
+- IBM DB2 — opt-in: requires a binary built with the `db2` tag and IBM's native CLI driver; see [DB2_SETUP.md](DB2_SETUP.md)
 
 ## Configuration
 
