@@ -12,5 +12,5 @@ import (
 // driver requires cgo and the IBM clidriver at build time, so it is only
 // included when building with -tags db2.
 func Connect(_ context.Context, _ string) (*sql.DB, error) {
-	return nil, errors.New("baton-sql: DB2 support not compiled into this binary; rebuild with -tags db2 (see DB2_SETUP.md)")
+	return nil, errors.New("baton-sql: DB2 support not compiled into this binary; rebuild with -tags db2 (see docs/db2.md)")
 }

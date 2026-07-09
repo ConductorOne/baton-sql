@@ -12,7 +12,7 @@ endif
 build:
 	go build -o ${OUTPUT_PATH} ./cmd/baton-sql
 
-# DB2 support requires the native IBM CLI driver at build and run time (see DB2_SETUP.md).
+# DB2 support requires the native IBM CLI driver at build and run time (see docs/db2.md).
 # Flags are scoped to this target only — do not export CGO_CFLAGS/CGO_LDFLAGS in your shell.
 # -ldb2 is omitted on purpose: go_ibm_db's cgo directives already add it. On macOS,
 # libdb2.dylib's install name is the bare filename, so rpath alone can't resolve it; the

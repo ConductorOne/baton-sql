@@ -10,7 +10,7 @@ What this means in practice:
 - `make build` (and CI, releases, cross-compilation) needs **no** IBM software, no CGO flags,
   and no environment variables. DB2 code is excluded from default builds.
 - A default binary given a `db2://` DSN fails with a clear error:
-  `baton-sql: DB2 support not compiled into this binary; rebuild with -tags db2 (see DB2_SETUP.md)`.
+  `baton-sql: DB2 support not compiled into this binary; rebuild with -tags db2 (see docs/db2.md)`.
 - `make build-db2` produces a DB2-capable binary. The CGO flags are scoped to that one make
   target — **do not export `CGO_CFLAGS`/`CGO_LDFLAGS` in your shell profile**. Global CGO flags
   leak into every cgo link on your machine and break unrelated Go builds.
