@@ -429,6 +429,12 @@ type EntitlementProvisioningQueries struct {
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
 }
 
+// RevokeOptions holds optional revoke-only behavior beyond the shared provisioning queries.
+type RevokeOptions struct {
+	// PrincipalDeletedCheck detects that a revoke deleted the principal itself (e.g. user is deleted when their last role is removed).
+	PrincipalDeletedCheck *PrincipalDeletedCheck `yaml:"principal_deleted_check,omitempty" json:"principal_deleted_check,omitempty"`
+}
+
 // PrincipalDeletedCheck configures a probe query that detects whether the
 // principal was deleted as a side effect of a revoke.
 type PrincipalDeletedCheck struct {
@@ -464,16 +470,12 @@ type GrantEntitlementProvisioningQueries struct {
 	GrantReplace *GrantReplaceProvisioningQueries `yaml:"grant_replace,omitempty" json:"grant_replace,omitempty"`
 }
 
-// RevokeEntitlementProvisioningQueries extends the shared provisioning query fields with revoke-only behavior
+// RevokeEntitlementProvisioningQueries extends the shared provisioning query fields with revoke-only behavior.
 type RevokeEntitlementProvisioningQueries struct {
 	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
 
-	// PrincipalDeletedCheck detects that a revoke deleted the principal itself
-	// (e.g. the downstream app deletes the user when their last role is
-	// removed). When configured and the probe finds the principal gone, the
-	// revoke response carries a ResourceDeleted annotation so ConductorOne can
-	// mark the account deleted without waiting for the next full sync.
-	PrincipalDeletedCheck *PrincipalDeletedCheck `yaml:"principal_deleted_check,omitempty" json:"principal_deleted_check,omitempty"`
+	// RevokeOptions groups optional revoke-only settings such as principal_deleted_check.
+	RevokeOptions *RevokeOptions `yaml:"revoke_options,omitempty" json:"revoke_options,omitempty"`
 }
 
 // GrantsQuery defines the structure for querying existing entitlement grants.

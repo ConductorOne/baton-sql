@@ -118,11 +118,11 @@ func validateRevokeProvisioningQueries(s *SQLSyncer, revoke *RevokeEntitlementPr
 		}
 	}
 
-	if revoke.PrincipalDeletedCheck != nil {
-		if revoke.PrincipalDeletedCheck.Query == "" {
+	if revoke.RevokeOptions != nil && revoke.RevokeOptions.PrincipalDeletedCheck != nil {
+		if revoke.RevokeOptions.PrincipalDeletedCheck.Query == "" {
 			return errors.New("principal_deleted_check requires a non-empty query")
 		}
-		if err := validateVarsInQuery(s, revoke.PrincipalDeletedCheck.Query, vars); err != nil {
+		if err := validateVarsInQuery(s, revoke.RevokeOptions.PrincipalDeletedCheck.Query, vars); err != nil {
 			return err
 		}
 	}

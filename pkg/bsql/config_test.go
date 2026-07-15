@@ -254,10 +254,11 @@ resource_types:
 			validate: func(t *testing.T, c *Config) {
 				revoke := c.ResourceTypes["role"].StaticEntitlements[0].Provisioning.Revoke
 				require.NotNil(t, revoke)
-				require.NotNil(t, revoke.PrincipalDeletedCheck)
+				require.NotNil(t, revoke.RevokeOptions)
+				require.NotNil(t, revoke.RevokeOptions.PrincipalDeletedCheck)
 				require.Equal(t,
 					normalizeQueryString("SELECT 1 FROM Users WHERE Username = ?<username>"),
-					normalizeQueryString(revoke.PrincipalDeletedCheck.Query),
+					normalizeQueryString(revoke.RevokeOptions.PrincipalDeletedCheck.Query),
 				)
 			},
 		},

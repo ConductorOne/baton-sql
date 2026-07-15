@@ -2,15 +2,15 @@
 # Example: reporting a side-effect user deletion from a revoke.
 #
 # Some applications delete the user record when their last role is revoked.
-# When that happens ConductorOne would otherwise not learn the account is gone
+# When that happens C1 would otherwise not learn the account is gone
 # until the next full sync, which blocks an immediate re-grant. Configuring
-# `principal_deleted_check` under an entitlement's `revoke` makes the connector
-# probe for the principal after the revoke queries run (on the same
-# transaction). If the probe returns no rows the connector attaches a
-# ResourceDeleted annotation to the revoke response so ConductorOne marks the
+# `revoke_options.principal_deleted_check` under an entitlement's `revoke`
+# makes the connector probe for the principal after the revoke queries run (on
+# the same transaction). If the probe returns no rows the connector attaches a
+# ResourceDeleted annotation to the revoke response so C1 marks the
 # account deleted right away.
 app_name: SQL Server Revoke-Deletes-User Example
-app_description: Demonstrates principal_deleted_check for apps that delete a user when their last role is revoked
+app_description: Demonstrates revoke_options.principal_deleted_check for apps that delete a user when their last role is revoked
 
 connect:
   dsn: "sqlserver://${DB_HOST}:${DB_PORT}?database=${DB_DATABASE}"
@@ -142,9 +142,10 @@ resource_types:
             # After the revoke queries run, probe for the principal. No rows
             # means the app deleted the user, so the connector reports a
             # ResourceDeleted annotation on the revoke response.
-            principal_deleted_check:
-              query: |
-                SELECT 1 FROM Users WHERE Username = ?<username>
+            revoke_options:
+              principal_deleted_check:
+                query: |
+                  SELECT 1 FROM Users WHERE Username = ?<username>
 
     grants:
       - query: |

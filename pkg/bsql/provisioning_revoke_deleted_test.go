@@ -207,7 +207,9 @@ func withRevokeDeletesUserConfig(s *SQLSyncer) {
 						EntitlementProvisioningQueries: EntitlementProvisioningQueries{
 							Queries: revokeDeletesUserQueries,
 						},
-						PrincipalDeletedCheck: &PrincipalDeletedCheck{Query: `SELECT 1 FROM users WHERE id = ?<principal_id>`},
+						RevokeOptions: &RevokeOptions{
+							PrincipalDeletedCheck: &PrincipalDeletedCheck{Query: `SELECT 1 FROM users WHERE id = ?<principal_id>`},
+						},
 					},
 				},
 			},
@@ -268,7 +270,7 @@ func TestRevoke_NoDeletedCheckReturnsNoResourceDeleted(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	withRevokeDeletesUserConfig(s)
 	// strip the deleted check to confirm the annotation is absent without it
-	s.config.StaticEntitlements[0].Provisioning.Revoke.PrincipalDeletedCheck = nil
+	s.config.StaticEntitlements[0].Provisioning.Revoke.RevokeOptions = nil
 	seedUserWithRoles(t, db, "user-1", "admin")
 
 	annos, err := s.Revoke(t.Context(), revokeGrantFor("user-1", "admin"))
