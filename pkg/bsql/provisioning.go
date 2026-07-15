@@ -9,6 +9,7 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/crypto"
+	sdkResource "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -134,10 +135,27 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 	}
 
 	useTx := !provisioningConfig.Revoke.NoTransaction
-	err = s.RunProvisioningQueries(ctx, provisioningConfig.Revoke.Queries, provisioningConfig.Revoke.ValidationQueries, provisioningVars, useTx)
+	principalDeleted, err := s.RunRevokeProvisioning(
+		ctx,
+		provisioningConfig.Revoke.Queries,
+		provisioningConfig.Revoke.ValidationQueries,
+		provisioningConfig.Revoke.PrincipalDeletedCheck,
+		provisioningVars,
+		useTx,
+	)
+
+	anno := annotations.Annotations{}
+	if principalDeleted {
+		anno.Append(sdkResource.NewResourceDeleted(grant.GetPrincipal().GetId()))
+		l.Info(
+			"revoke deleted principal; reporting ResourceDeleted",
+			zap.String("grant_id", grant.GetId()),
+			zap.String("principal_id", grant.GetPrincipal().GetId().GetResource()),
+		)
+	}
+
 	if err != nil {
 		if errors.Is(err, ErrQueryAffectedZeroRows) {
-			anno := annotations.Annotations{}
 			anno.Update(&v2.GrantAlreadyRevoked{})
 			return anno, nil
 		}
@@ -146,7 +164,7 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 	}
 
 	l.Debug("revoked grant", zap.String("grant_id", grant.GetId()))
-	return nil, nil
+	return anno, nil
 }
 
 func (s *SQLSyncer) prepareProvisioningVars(ctx context.Context, vars map[string]string, principal *v2.Resource, entitlement *v2.Entitlement) (map[string]any, error) {

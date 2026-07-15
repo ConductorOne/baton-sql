@@ -427,6 +427,24 @@ type EntitlementProvisioningQueries struct {
 
 	// Queries is a list of SQL statements to execute for the provisioning operation.
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
+
+	// PrincipalDeletedCheck detects that a revoke deleted the principal itself
+	// (e.g. the downstream app deletes the user when their last role is
+	// removed). It is only consulted on the revoke path; the grant path ignores
+	// it. When configured and the probe finds the principal gone, the revoke
+	// response carries a ResourceDeleted annotation so ConductorOne can mark the
+	// account deleted without waiting for the next full sync.
+	PrincipalDeletedCheck *PrincipalDeletedCheck `yaml:"principal_deleted_check,omitempty" json:"principal_deleted_check,omitempty"`
+}
+
+// PrincipalDeletedCheck configures a probe query that detects whether the
+// principal was deleted as a side effect of a revoke.
+type PrincipalDeletedCheck struct {
+	// Query runs after the revoke queries on the same executor/transaction with
+	// the same provisioning vars. If it returns no rows, the principal is
+	// considered deleted and a ResourceDeleted annotation is attached to the
+	// revoke response. If it returns any row, the principal still exists.
+	Query string `yaml:"query" json:"query"`
 }
 
 type GrantReplaceProvisioningQueries struct {

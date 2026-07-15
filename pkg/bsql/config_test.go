@@ -248,6 +248,19 @@ resource_types:
 				require.Equal(t, "'Grant cancelled by policy.'", grant.RejectIf.Reason)
 			},
 		},
+		{
+			name:  "mssql-revoke-deletes-user-example",
+			input: loadExampleConfig(t, "mssql-revoke-deletes-user"),
+			validate: func(t *testing.T, c *Config) {
+				revoke := c.ResourceTypes["role"].StaticEntitlements[0].Provisioning.Revoke
+				require.NotNil(t, revoke)
+				require.NotNil(t, revoke.PrincipalDeletedCheck)
+				require.Equal(t,
+					normalizeQueryString("SELECT 1 FROM Users WHERE Username = ?<username>"),
+					normalizeQueryString(revoke.PrincipalDeletedCheck.Query),
+				)
+			},
+		},
 	}
 
 	for _, tt := range tests {
