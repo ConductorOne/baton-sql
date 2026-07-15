@@ -107,7 +107,7 @@ func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvi
 	return nil
 }
 
-func validateRevokeProvisioningQueries(s *SQLSyncer, revoke *EntitlementProvisioningQueries, vars map[string]string) error {
+func validateRevokeProvisioningQueries(s *SQLSyncer, revoke *RevokeEntitlementProvisioningQueries, vars map[string]string) error {
 	if revoke == nil {
 		return nil
 	}

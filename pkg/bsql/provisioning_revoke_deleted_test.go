@@ -203,8 +203,10 @@ func withRevokeDeletesUserConfig(s *SQLSyncer) {
 						"principal_id": "principal.ID",
 						"role":         "resource.ID",
 					},
-					Revoke: &EntitlementProvisioningQueries{
-						Queries:               revokeDeletesUserQueries,
+					Revoke: &RevokeEntitlementProvisioningQueries{
+						EntitlementProvisioningQueries: EntitlementProvisioningQueries{
+							Queries: revokeDeletesUserQueries,
+						},
 						PrincipalDeletedCheck: &PrincipalDeletedCheck{Query: `SELECT 1 FROM users WHERE id = ?<principal_id>`},
 					},
 				},

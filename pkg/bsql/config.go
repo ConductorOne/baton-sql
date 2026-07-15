@@ -411,7 +411,7 @@ type EntitlementProvisioning struct {
 	Grant *GrantEntitlementProvisioningQueries `yaml:"grant,omitempty" json:"grant,omitempty"`
 
 	// Revoke defines the SQL queries and settings for revoking this entitlement.
-	Revoke *EntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
+	Revoke *RevokeEntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
 
 	// Vars provides variables that can be used within provisioning SQL queries.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
@@ -427,14 +427,6 @@ type EntitlementProvisioningQueries struct {
 
 	// Queries is a list of SQL statements to execute for the provisioning operation.
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
-
-	// PrincipalDeletedCheck detects that a revoke deleted the principal itself
-	// (e.g. the downstream app deletes the user when their last role is
-	// removed). It is only consulted on the revoke path; the grant path ignores
-	// it. When configured and the probe finds the principal gone, the revoke
-	// response carries a ResourceDeleted annotation so ConductorOne can mark the
-	// account deleted without waiting for the next full sync.
-	PrincipalDeletedCheck *PrincipalDeletedCheck `yaml:"principal_deleted_check,omitempty" json:"principal_deleted_check,omitempty"`
 }
 
 // PrincipalDeletedCheck configures a probe query that detects whether the
@@ -470,6 +462,18 @@ type GrantEntitlementProvisioningQueries struct {
 
 	// GrantReplaceProvisioningQueries defines the SQL queries and settings for replacing existing grants with the new grant during provisioning.
 	GrantReplace *GrantReplaceProvisioningQueries `yaml:"grant_replace,omitempty" json:"grant_replace,omitempty"`
+}
+
+// RevokeEntitlementProvisioningQueries extends the shared provisioning query fields with revoke-only behavior
+type RevokeEntitlementProvisioningQueries struct {
+	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
+
+	// PrincipalDeletedCheck detects that a revoke deleted the principal itself
+	// (e.g. the downstream app deletes the user when their last role is
+	// removed). When configured and the probe finds the principal gone, the
+	// revoke response carries a ResourceDeleted annotation so ConductorOne can
+	// mark the account deleted without waiting for the next full sync.
+	PrincipalDeletedCheck *PrincipalDeletedCheck `yaml:"principal_deleted_check,omitempty" json:"principal_deleted_check,omitempty"`
 }
 
 // GrantsQuery defines the structure for querying existing entitlement grants.
