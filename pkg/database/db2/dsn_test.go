@@ -64,6 +64,16 @@ func TestConvertToDB2DSN(t *testing.T) {
 			want: "HOSTNAME=dbhost;DATABASE=testdb;PORT=50000;PROTOCOL=TCPIP;UID=user;PWD={DATABASE=x}",
 		},
 		{
+			name: "hostname with semicolon is brace-quoted",
+			dsn:  "db2://user:pass@evil;SECURITY=NONE/testdb",
+			want: "HOSTNAME={evil;SECURITY=NONE};DATABASE=testdb;PORT=50000;PROTOCOL=TCPIP;UID=user;PWD=pass",
+		},
+		{
+			name: "ipv6 hostname passes through unquoted",
+			dsn:  "db2://user:pass@[::1]:50000/testdb",
+			want: "HOSTNAME=::1;DATABASE=testdb;PORT=50000;PROTOCOL=TCPIP;UID=user;PWD=pass",
+		},
+		{
 			name: "query parameters forwarded as keywords sorted",
 			dsn:  "db2://user:pass@dbhost:50000/testdb?Security=SSL&CurrentSchema=MYSCHEMA",
 			want: "HOSTNAME=dbhost;DATABASE=testdb;PORT=50000;PROTOCOL=TCPIP;UID=user;PWD=pass;CURRENTSCHEMA=MYSCHEMA;SECURITY=SSL",

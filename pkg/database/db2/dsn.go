@@ -48,7 +48,10 @@ func convertToDB2DSN(dsn string) (string, error) {
 		return "", fmt.Errorf("expected db2:// scheme, got %s", parsedURL.Scheme)
 	}
 
-	hostname := parsedURL.Hostname()
+	hostname, err := quoteDB2Value(parsedURL.Hostname())
+	if err != nil {
+		return "", fmt.Errorf("invalid hostname: %w", err)
+	}
 	port := parsedURL.Port()
 	if port == "" {
 		port = "50000" // Default DB2 port
