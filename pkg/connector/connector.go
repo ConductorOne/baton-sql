@@ -104,13 +104,39 @@ func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 }
 
 // New returns a new instance of the connector.
-func New(ctx context.Context, configFilePath string) (*Connector, error) {
+func New(ctx context.Context, configFilePath string, opts ...NewOption) (*Connector, error) {
 	c, err := bsql.LoadConfigFromFile(configFilePath)
 	if err != nil {
 		return nil, err
 	}
 
+	// Apply options to override config values
+	for _, opt := range opts {
+		opt(c)
+	}
+
 	return newConnector(ctx, c)
+}
+
+// NewOption is a function that modifies the config.
+type NewOption func(*bsql.Config)
+
+// WithAppName sets the app name, overriding the config file value.
+func WithAppName(name string) NewOption {
+	return func(c *bsql.Config) {
+		if name != "" {
+			c.AppName = name
+		}
+	}
+}
+
+// WithAppDescription sets the app description, overriding the config file value.
+func WithAppDescription(description string) NewOption {
+	return func(c *bsql.Config) {
+		if description != "" {
+			c.AppDescription = description
+		}
+	}
 }
 
 func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
