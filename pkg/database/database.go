@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/conductorone/baton-sql/pkg/database/db2"
 	"github.com/conductorone/baton-sql/pkg/database/hdb"
 	"github.com/conductorone/baton-sql/pkg/database/mysql"
 	"github.com/conductorone/baton-sql/pkg/database/oracle"
@@ -32,6 +33,7 @@ const (
 	Oracle
 	HDB
 	Vertica
+	DB2
 )
 
 // ConnectOptions represents the structured configuration used to build a DSN.
@@ -424,6 +426,13 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 			return nil, Unknown, err
 		}
 		return db, Vertica, nil
+
+	case "db2":
+		db, err := db2.Connect(ctx, parsedDsn.String())
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, DB2, nil
 
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)

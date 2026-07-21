@@ -10,6 +10,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.2
 	github.com/google/cel-go v0.28.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
+	github.com/ibmdb/go_ibm_db v0.5.2
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/microsoft/go-mssqldb v1.8.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
@@ -88,6 +89,7 @@ require (
 	github.com/golang/snappy v0.0.5-0.20231225225746-43d5d4cd4e0e // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
+	github.com/ibmruntimes/go-recordio/v2 v2.0.0-20240416213906-ae0ad556db70 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

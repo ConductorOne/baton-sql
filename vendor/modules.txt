@@ -512,6 +512,14 @@ github.com/grpc-ecosystem/go-grpc-middleware/validator
 github.com/grpc-ecosystem/grpc-gateway/v2/internal/httprule
 github.com/grpc-ecosystem/grpc-gateway/v2/runtime
 github.com/grpc-ecosystem/grpc-gateway/v2/utilities
+# github.com/ibmdb/go_ibm_db v0.5.2
+## explicit; go 1.22.1
+github.com/ibmdb/go_ibm_db
+github.com/ibmdb/go_ibm_db/api
+github.com/ibmdb/go_ibm_db/log2
+# github.com/ibmruntimes/go-recordio/v2 v2.0.0-20240416213906-ae0ad556db70
+## explicit; go 1.18
+github.com/ibmruntimes/go-recordio/v2/utils
 # github.com/inconshreveable/mousetrap v1.1.0
 ## explicit; go 1.18
 github.com/inconshreveable/mousetrap
