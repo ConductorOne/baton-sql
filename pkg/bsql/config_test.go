@@ -255,10 +255,10 @@ resource_types:
 				revoke := c.ResourceTypes["role"].StaticEntitlements[0].Provisioning.Revoke
 				require.NotNil(t, revoke)
 				require.NotNil(t, revoke.RevokeOptions)
-				require.NotNil(t, revoke.RevokeOptions.PrincipalDeletedCheck)
+				require.NotNil(t, revoke.RevokeOptions.PrincipalExistsCheck)
 				require.Equal(t,
 					normalizeQueryString("SELECT 1 FROM Users WHERE Username = ?<username>"),
-					normalizeQueryString(revoke.RevokeOptions.PrincipalDeletedCheck.Query),
+					normalizeQueryString(revoke.RevokeOptions.PrincipalExistsCheck.Query),
 				)
 			},
 		},

@@ -135,15 +135,15 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 	}
 
 	useTx := !provisioningConfig.Revoke.NoTransaction
-	var deletedCheck *PrincipalDeletedCheck
+	var existsCheck *PrincipalExistsCheck
 	if provisioningConfig.Revoke.RevokeOptions != nil {
-		deletedCheck = provisioningConfig.Revoke.RevokeOptions.PrincipalDeletedCheck
+		existsCheck = provisioningConfig.Revoke.RevokeOptions.PrincipalExistsCheck
 	}
 	principalDeleted, err := s.RunRevokeProvisioning(
 		ctx,
 		provisioningConfig.Revoke.Queries,
 		provisioningConfig.Revoke.ValidationQueries,
-		deletedCheck,
+		existsCheck,
 		provisioningVars,
 		useTx,
 	)

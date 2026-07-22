@@ -444,10 +444,10 @@ func (s *SQLSyncer) RunProvisioningQueries(
 }
 
 // RunRevokeProvisioning runs revoke queries like RunProvisioningQueries, and
-// additionally runs an optional principal-deleted probe on the same executor
+// additionally runs an optional principal-exists probe on the same executor
 // after the revoke queries. The probe detects the case where the revoke deleted
 // the principal itself downstream (e.g. removing a user's last role deletes the
-// user row). It returns principalDeleted=true when the probe finds no rows.
+// user row): when the exists-check returns no rows, principalDeleted is true.
 //
 // When every revoke query affects zero rows the function still runs the probe
 // and commits, then returns ErrQueryAffectedZeroRows so the caller can report
@@ -457,7 +457,7 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
-	deletedCheck *PrincipalDeletedCheck,
+	existsCheck *PrincipalExistsCheck,
 	vars map[string]any,
 	useTx bool,
 ) (bool, error) {
@@ -492,7 +492,7 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	}
 
 	// Tolerate the all-zero-rows case (already revoked) so we can still run the
-	// deleted-check probe and report a deletion on retried revokes. Any other
+	// exists-check probe and report a deletion on retried revokes. Any other
 	// error aborts before the probe and rolls the transaction back.
 	var allZero bool
 	err = s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, vars, executor)
@@ -504,11 +504,14 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	}
 
 	var principalDeleted bool
-	if deletedCheck != nil {
-		principalDeleted, err = s.runPrincipalDeletedCheck(ctx, executor, deletedCheck, vars)
+	if existsCheck != nil {
+		var exists bool
+		exists, err = s.runPrincipalExistsCheck(ctx, executor, existsCheck, vars)
 		if err != nil {
 			return false, err
 		}
+		// No rows from the exists-check => the principal was deleted by the revoke.
+		principalDeleted = !exists
 	}
 
 	if useTx {
@@ -528,45 +531,46 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	return principalDeleted, nil
 }
 
-// runPrincipalDeletedCheck executes the deleted-check probe on the given
-// executor. No rows returned means the principal no longer exists.
-func (s *SQLSyncer) runPrincipalDeletedCheck(
+// runPrincipalExistsCheck executes the exists-check probe on the given
+// executor. It returns true when the probe returns at least one row (the
+// principal still exists); no rows means the principal is gone.
+func (s *SQLSyncer) runPrincipalExistsCheck(
 	ctx context.Context,
 	executor executor,
-	deletedCheck *PrincipalDeletedCheck,
+	existsCheck *PrincipalExistsCheck,
 	vars map[string]any,
 ) (bool, error) {
 	l := ctxzap.Extract(ctx)
 
-	q, qArgs, err := s.prepareProvisioningQuery(deletedCheck.Query, vars)
+	q, qArgs, err := s.prepareProvisioningQuery(existsCheck.Query, vars)
 	if err != nil {
-		return false, fmt.Errorf("failed to prepare principal deleted check query: %w", err)
+		return false, fmt.Errorf("failed to prepare principal exists check query: %w", err)
 	}
 
 	l.Debug(
-		"running principal deleted check query",
+		"running principal exists check query",
 		zap.String("query", q),
 		zap.Any("args", qArgs),
 	)
 
 	rows, err := executor.QueryContext(ctx, q, qArgs...)
 	if err != nil {
-		return false, fmt.Errorf("failed to execute principal deleted check query: %w", err)
+		return false, fmt.Errorf("failed to execute principal exists check query: %w", err)
 	}
 
 	exists := rows.Next()
 
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return false, fmt.Errorf("failed to read principal deleted check result: %w", err)
+		return false, fmt.Errorf("failed to read principal exists check result: %w", err)
 	}
 
 	if err := rows.Close(); err != nil {
-		return false, fmt.Errorf("failed to close principal deleted check result: %w", err)
+		return false, fmt.Errorf("failed to close principal exists check result: %w", err)
 	}
 
-	// No rows => the principal is gone => it was deleted by the revoke.
-	return !exists, nil
+	// >=1 row => the principal still exists.
+	return exists, nil
 }
 
 func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(

@@ -4,13 +4,13 @@
 # Some applications delete the user record when their last role is revoked.
 # When that happens C1 would otherwise not learn the account is gone
 # until the next full sync, which blocks an immediate re-grant. Configuring
-# `revoke_options.principal_deleted_check` under an entitlement's `revoke`
+# `revoke_options.principal_exists_check` under an entitlement's `revoke`
 # makes the connector probe for the principal after the revoke queries run (on
 # the same transaction). If the probe returns no rows the connector attaches a
 # ResourceDeleted annotation to the revoke response so C1 marks the
 # account deleted right away.
 app_name: SQL Server Revoke-Deletes-User Example
-app_description: Demonstrates revoke_options.principal_deleted_check for apps that delete a user when their last role is revoked
+app_description: Demonstrates revoke_options.principal_exists_check for apps that delete a user when their last role is revoked
 
 connect:
   dsn: "sqlserver://${DB_HOST}:${DB_PORT}?database=${DB_DATABASE}"
@@ -139,11 +139,11 @@ resource_types:
                   INNER JOIN Users u2 ON ur.UserID = u2.UserID
                   WHERE u2.Username = ?<username>
                 )
-            # After the revoke queries run, probe for the principal. No rows
-            # means the app deleted the user, so the connector reports a
-            # ResourceDeleted annotation on the revoke response.
+            # After the revoke queries run, probe whether the principal still
+            # exists. No rows means the app deleted the user, so the connector
+            # reports a ResourceDeleted annotation on the revoke response.
             revoke_options:
-              principal_deleted_check:
+              principal_exists_check:
                 query: |
                   SELECT 1 FROM Users WHERE Username = ?<username>
 

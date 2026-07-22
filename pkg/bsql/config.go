@@ -431,17 +431,16 @@ type EntitlementProvisioningQueries struct {
 
 // RevokeOptions holds optional revoke-only behavior beyond the shared provisioning queries.
 type RevokeOptions struct {
-	// PrincipalDeletedCheck detects that a revoke deleted the principal itself (e.g. user is deleted when their last role is removed).
-	PrincipalDeletedCheck *PrincipalDeletedCheck `yaml:"principal_deleted_check,omitempty" json:"principal_deleted_check,omitempty"`
+	// PrincipalExistsCheck probes whether the principal still exists after the revoke queries run.
+	// No rows means the principal was deleted as a side effect of the revoke.
+	PrincipalExistsCheck *PrincipalExistsCheck `yaml:"principal_exists_check,omitempty" json:"principal_exists_check,omitempty"`
 }
 
-// PrincipalDeletedCheck configures a probe query that detects whether the
-// principal was deleted as a side effect of a revoke.
-type PrincipalDeletedCheck struct {
-	// Query runs after the revoke queries on the same executor/transaction with
-	// the same provisioning vars. If it returns no rows, the principal is
-	// considered deleted and a ResourceDeleted annotation is attached to the
-	// revoke response. If it returns any row, the principal still exists.
+// PrincipalExistsCheck configures a probe query that reports whether the principal still exists after a revoke.
+type PrincipalExistsCheck struct {
+	// Query runs after the revoke queries on the same executor/transaction with the same provisioning vars.
+	// Returning at least one row means the principal still exists;
+	// returning no rows means it was deleted as a side effect of the revoke.
 	Query string `yaml:"query" json:"query"`
 }
 
@@ -474,7 +473,7 @@ type GrantEntitlementProvisioningQueries struct {
 type RevokeEntitlementProvisioningQueries struct {
 	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
 
-	// RevokeOptions groups optional revoke-only settings such as principal_deleted_check.
+	// RevokeOptions groups optional revoke-only settings such as principal_exists_check.
 	RevokeOptions *RevokeOptions `yaml:"revoke_options,omitempty" json:"revoke_options,omitempty"`
 }
 

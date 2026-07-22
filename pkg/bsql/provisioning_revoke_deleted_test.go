@@ -19,8 +19,8 @@ var revokeDeletesUserQueries = []string{
 	`DELETE FROM users WHERE id = ?<principal_id> AND NOT EXISTS (SELECT 1 FROM user_roles WHERE user_id = ?<principal_id>)`,
 }
 
-func principalExistsCheck() *PrincipalDeletedCheck {
-	return &PrincipalDeletedCheck{Query: `SELECT 1 FROM users WHERE id = ?<principal_id>`}
+func principalExistsCheck() *PrincipalExistsCheck {
+	return &PrincipalExistsCheck{Query: `SELECT 1 FROM users WHERE id = ?<principal_id>`}
 }
 
 func newRevokeProvisioningTestSyncer(t *testing.T) (*SQLSyncer, *sql.DB) {
@@ -144,7 +144,7 @@ func TestRunRevokeProvisioning_AllZeroRowsWithSurvivingPrincipal(t *testing.T) {
 	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM users WHERE id = ?`, "user-1"))
 }
 
-func TestRunRevokeProvisioning_NoDeletedCheckBehavesLikeBefore(t *testing.T) {
+func TestRunRevokeProvisioning_NoExistsCheckBehavesLikeBefore(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	seedUserWithRoles(t, db, "user-1", "admin")
 
@@ -182,7 +182,7 @@ func TestRunRevokeProvisioning_ProbeErrorRollsBack(t *testing.T) {
 		t.Context(),
 		[]string{`DELETE FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`},
 		nil,
-		&PrincipalDeletedCheck{Query: `SELECT 1 FROM nonexistent_table WHERE id = ?<principal_id>`},
+		&PrincipalExistsCheck{Query: `SELECT 1 FROM nonexistent_table WHERE id = ?<principal_id>`},
 		map[string]any{"principal_id": "user-1", "role": "admin"},
 		true,
 	)
@@ -208,7 +208,7 @@ func withRevokeDeletesUserConfig(s *SQLSyncer) {
 							Queries: revokeDeletesUserQueries,
 						},
 						RevokeOptions: &RevokeOptions{
-							PrincipalDeletedCheck: &PrincipalDeletedCheck{Query: `SELECT 1 FROM users WHERE id = ?<principal_id>`},
+							PrincipalExistsCheck: &PrincipalExistsCheck{Query: `SELECT 1 FROM users WHERE id = ?<principal_id>`},
 						},
 					},
 				},
@@ -266,10 +266,10 @@ func TestRevoke_ReportsResourceDeletedAndAlreadyRevokedOnRetry(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestRevoke_NoDeletedCheckReturnsNoResourceDeleted(t *testing.T) {
+func TestRevoke_NoExistsCheckReturnsNoResourceDeleted(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	withRevokeDeletesUserConfig(s)
-	// strip the deleted check to confirm the annotation is absent without it
+	// strip the exists check to confirm the annotation is absent without it
 	s.config.StaticEntitlements[0].Provisioning.Revoke.RevokeOptions = nil
 	seedUserWithRoles(t, db, "user-1", "admin")
 
