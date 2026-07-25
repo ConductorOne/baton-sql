@@ -37,7 +37,8 @@ resource_types:
         strategy: offset
         primary_key: id
       map:
-        id: ".username"
+        # Resource id must be a stable immutable PK (not a renameable login).
+        id: ".id"
         display_name: ".username"
         description: ".email"
         traits:
