@@ -133,18 +133,12 @@ func resourceToCELMap(resource *v2.Resource) map[string]any {
 		"DisplayName": resource.DisplayName,
 	}
 
-	if t, err := sdkResource.GetGroupTrait(resource); err == nil && t.GetProfile() != nil {
-		out["profile"] = t.GetProfile().AsMap()
-	} else if t, err := sdkResource.GetUserTrait(resource); err == nil && t.GetProfile() != nil {
-		out["profile"] = t.GetProfile().AsMap()
-	} else if t, err := sdkResource.GetRoleTrait(resource); err == nil && t.GetProfile() != nil {
-		out["profile"] = t.GetProfile().AsMap()
-	} else if t, err := sdkResource.GetAppTrait(resource); err == nil && t.GetProfile() != nil {
-		out["profile"] = t.GetProfile().AsMap()
-	}
-
-	// Empty default so `has(resource.profile.X)` is well-defined for optional fields.
-	if _, exists := out["profile"]; !exists {
+	// Profile lives on Resource (trait-level profile is deprecated SA1019).
+	// GetProfile reads resource-level first and falls back to legacy trait fields.
+	if profile := sdkResource.GetProfile(resource); profile != nil {
+		out["profile"] = profile.AsMap()
+	} else {
+		// Empty default so `has(resource.profile.X)` is well-defined for optional fields.
 		out["profile"] = map[string]any{}
 	}
 

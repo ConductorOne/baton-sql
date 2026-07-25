@@ -171,11 +171,17 @@ func TestMapResource_AgentTrait(t *testing.T) {
 
 	at, err := sdkResource.GetAgentTrait(r)
 	require.NoError(t, err)
-	require.Equal(t, v2.AgentTrait_AGENT_STATUS_READY, at.GetStatus())
+	// Status and profile live on Resource (trait-level getters are deprecated SA1019).
+	// Agent READY maps to RESOURCE_STATUS_ENABLED (identical enum values).
+	st := sdkResource.GetStatus(r)
+	require.NotNil(t, st)
+	require.Equal(t, v2.Status_RESOURCE_STATUS_ENABLED, st.GetStatus())
 	require.NotNil(t, at.GetIdentityResourceId())
 	require.Equal(t, "user", at.GetIdentityResourceId().GetResourceType())
 	require.Equal(t, "svc-acct-1", at.GetIdentityResourceId().GetResource())
-	require.Equal(t, "claude-opus", at.GetProfile().GetFields()["model"].GetStringValue())
+	profile := sdkResource.GetProfile(r)
+	require.NotNil(t, profile)
+	require.Equal(t, "claude-opus", profile.GetFields()["model"].GetStringValue())
 }
 
 // Graceful degradation — a plain user resource emits only a UserTrait, no

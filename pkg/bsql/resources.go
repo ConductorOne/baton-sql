@@ -101,45 +101,47 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 		opts = append(opts, sdkResource.WithEmail(v, primary))
 	}
 
-	// Status
+	// Status lives on Resource (trait-level status options are deprecated SA1019).
+	var resourceStatus *v2.Status_ResourceStatus
+	var statusDetails string
 	if mappings.Status != "" {
 		statusValue, err := s.env.EvaluateString(ctx, mappings.Status, inputs)
 		if err != nil {
 			return err
 		}
 
-		var status v2.UserTrait_Status_Status
+		var status v2.Status_ResourceStatus
 		switch strings.ToLower(statusValue) {
 		case "active":
-			status = v2.UserTrait_Status_STATUS_ENABLED
+			status = v2.Status_RESOURCE_STATUS_ENABLED
 		case "enabled":
-			status = v2.UserTrait_Status_STATUS_ENABLED
+			status = v2.Status_RESOURCE_STATUS_ENABLED
 		case "disabled":
-			status = v2.UserTrait_Status_STATUS_DISABLED
+			status = v2.Status_RESOURCE_STATUS_DISABLED
 		case "inactive":
-			status = v2.UserTrait_Status_STATUS_DISABLED
+			status = v2.Status_RESOURCE_STATUS_DISABLED
 		case "suspended":
-			status = v2.UserTrait_Status_STATUS_DISABLED
+			status = v2.Status_RESOURCE_STATUS_DISABLED
 		case "locked":
-			status = v2.UserTrait_Status_STATUS_DISABLED
+			status = v2.Status_RESOURCE_STATUS_DISABLED
 		case "deleted":
-			status = v2.UserTrait_Status_STATUS_DELETED
+			status = v2.Status_RESOURCE_STATUS_DELETED
 		default:
 			l.Warn("unexpected status value in mapping", zap.String("status", statusValue))
-			status = v2.UserTrait_Status_STATUS_UNSPECIFIED
+			status = v2.Status_RESOURCE_STATUS_UNSPECIFIED
 		}
+		resourceStatus = &status
 
 		if mappings.StatusDetails != "" {
 			v, err := s.env.EvaluateString(ctx, mappings.StatusDetails, inputs)
 			if err != nil {
 				return err
 			}
-			opts = append(opts, sdkResource.WithDetailedStatus(status, v))
-		} else {
-			opts = append(opts, sdkResource.WithStatus(status))
+			statusDetails = v
 		}
 	}
 
+	// Profile lives on Resource (trait-level profile options are deprecated SA1019).
 	profile := make(map[string]interface{})
 	for profileKey, profileValue := range mappings.Profile {
 		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
@@ -147,10 +149,6 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 			return err
 		}
 		profile[profileKey] = v
-	}
-
-	if len(profile) > 0 {
-		opts = append(opts, sdkResource.WithUserProfile(profile))
 	}
 
 	// Last Login
@@ -271,6 +269,17 @@ func (s *SQLSyncer) mapUserTrait(ctx context.Context, r *v2.Resource, rowMap map
 	annos.Update(t)
 	r.Annotations = annos
 
+	if resourceStatus != nil {
+		if err := sdkResource.WithResourceStatus(*resourceStatus, statusDetails)(r); err != nil {
+			return err
+		}
+	}
+	if len(profile) > 0 {
+		if err := sdkResource.WithResourceProfile(profile)(r); err != nil {
+			return err
+		}
+	}
+
 	// Annotation applied
 
 	return nil
@@ -291,6 +300,7 @@ func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[
 		opts = append(opts, sdkResource.WithAppHelpURL(v))
 	}
 
+	// Profile lives on Resource (trait-level profile options are deprecated SA1019).
 	profile := make(map[string]interface{})
 	for profileKey, profileValue := range mappings.Profile {
 		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
@@ -298,10 +308,6 @@ func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[
 			return err
 		}
 		profile[profileKey] = v
-	}
-
-	if len(profile) > 0 {
-		opts = append(opts, sdkResource.WithAppProfile(profile))
 	}
 
 	t, err := sdkResource.NewAppTrait(opts...)
@@ -313,6 +319,12 @@ func (s *SQLSyncer) mapAppTrait(ctx context.Context, r *v2.Resource, rowMap map[
 	annos.Update(t)
 	r.Annotations = annos
 
+	if len(profile) > 0 {
+		if err := sdkResource.WithResourceProfile(profile)(r); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -321,8 +333,7 @@ func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap ma
 
 	mappings := s.config.List.Map.Traits.Group
 
-	var opts []sdkResource.GroupTraitOption
-
+	// Profile lives on Resource (trait-level profile options are deprecated SA1019).
 	profile := make(map[string]interface{})
 	for profileKey, profileValue := range mappings.Profile {
 		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
@@ -331,11 +342,8 @@ func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap ma
 		}
 		profile[profileKey] = v
 	}
-	if len(profile) > 0 {
-		opts = append(opts, sdkResource.WithGroupProfile(profile))
-	}
 
-	t, err := sdkResource.NewGroupTrait(opts...)
+	t, err := sdkResource.NewGroupTrait()
 	if err != nil {
 		return err
 	}
@@ -343,6 +351,12 @@ func (s *SQLSyncer) mapGroupTrait(ctx context.Context, r *v2.Resource, rowMap ma
 	annos := annotations.Annotations(r.Annotations)
 	annos.Update(t)
 	r.Annotations = annos
+
+	if len(profile) > 0 {
+		if err := sdkResource.WithResourceProfile(profile)(r); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -352,8 +366,7 @@ func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map
 
 	mappings := s.config.List.Map.Traits.Role
 
-	var opts []sdkResource.RoleTraitOption
-
+	// Profile lives on Resource (trait-level profile options are deprecated SA1019).
 	profile := make(map[string]interface{})
 	for profileKey, profileValue := range mappings.Profile {
 		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
@@ -362,11 +375,8 @@ func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map
 		}
 		profile[profileKey] = v
 	}
-	if len(profile) > 0 {
-		opts = append(opts, sdkResource.WithRoleProfile(profile))
-	}
 
-	t, err := sdkResource.NewRoleTrait(opts...)
+	t, err := sdkResource.NewRoleTrait()
 	if err != nil {
 		return err
 	}
@@ -374,6 +384,12 @@ func (s *SQLSyncer) mapRoleTrait(ctx context.Context, r *v2.Resource, rowMap map
 	annos := annotations.Annotations(r.Annotations)
 	annos.Update(t)
 	r.Annotations = annos
+
+	if len(profile) > 0 {
+		if err := sdkResource.WithResourceProfile(profile)(r); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -467,25 +483,29 @@ func (s *SQLSyncer) mapAgentTrait(ctx context.Context, r *v2.Resource, rowMap ma
 
 	var opts []sdkResource.AgentTraitOption
 
+	// Status lives on Resource (trait-level status options are deprecated SA1019).
+	// AgentTrait_AgentStatus and Status_ResourceStatus share the same numeric values
+	// (READY maps to ENABLED).
+	var resourceStatus *v2.Status_ResourceStatus
 	if mappings.Status != "" {
 		v, err := s.env.EvaluateString(ctx, mappings.Status, inputs)
 		if err != nil {
 			return err
 		}
 
-		var status v2.AgentTrait_AgentStatus
+		var status v2.Status_ResourceStatus
 		switch strings.ToLower(v) {
 		case "ready", "active", "enabled":
-			status = v2.AgentTrait_AGENT_STATUS_READY
+			status = v2.Status_RESOURCE_STATUS_ENABLED
 		case "disabled", "inactive":
-			status = v2.AgentTrait_AGENT_STATUS_DISABLED
+			status = v2.Status_RESOURCE_STATUS_DISABLED
 		case "deleted":
-			status = v2.AgentTrait_AGENT_STATUS_DELETED
+			status = v2.Status_RESOURCE_STATUS_DELETED
 		default:
 			l.Warn("unexpected agent status value in mapping", zap.String("status", v))
-			status = v2.AgentTrait_AGENT_STATUS_UNSPECIFIED
+			status = v2.Status_RESOURCE_STATUS_UNSPECIFIED
 		}
-		opts = append(opts, sdkResource.WithAgentStatus(status))
+		resourceStatus = &status
 	}
 
 	if mappings.IdentityResourceID != "" {
@@ -512,6 +532,7 @@ func (s *SQLSyncer) mapAgentTrait(ctx context.Context, r *v2.Resource, rowMap ma
 		}
 	}
 
+	// Profile lives on Resource (trait-level profile options are deprecated SA1019).
 	profile := make(map[string]interface{})
 	for profileKey, profileValue := range mappings.Profile {
 		v, err := s.env.EvaluateString(ctx, profileValue, inputs)
@@ -519,9 +540,6 @@ func (s *SQLSyncer) mapAgentTrait(ctx context.Context, r *v2.Resource, rowMap ma
 			return err
 		}
 		profile[profileKey] = v
-	}
-	if len(profile) > 0 {
-		opts = append(opts, sdkResource.WithAgentProfile(profile))
 	}
 
 	t, err := sdkResource.NewAgentTrait(opts...)
@@ -532,6 +550,17 @@ func (s *SQLSyncer) mapAgentTrait(ctx context.Context, r *v2.Resource, rowMap ma
 	annos := annotations.Annotations(r.Annotations)
 	annos.Update(t)
 	r.Annotations = annos
+
+	if resourceStatus != nil {
+		if err := sdkResource.WithResourceStatus(*resourceStatus, "")(r); err != nil {
+			return err
+		}
+	}
+	if len(profile) > 0 {
+		if err := sdkResource.WithResourceProfile(profile)(r); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
