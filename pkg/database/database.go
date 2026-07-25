@@ -22,6 +22,11 @@ import (
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
+// LookupFunc resolves ${KEY} placeholders during DSN/connect field expansion.
+// When nil is passed to expand helpers, os.LookupEnv is used (CLI compatibility).
+// Library embedders should pass a map-backed LookupFunc and never mutate process env.
+type LookupFunc func(key string) (string, bool)
+
 type DbEngine uint8
 
 const (
@@ -50,15 +55,28 @@ type ConnectOptions struct {
 	Password string
 
 	Params map[string]string
+
+	// Lookup resolves ${KEY} placeholders. When nil, os.LookupEnv is used.
+	Lookup LookupFunc
 }
 
-func updateFromEnv(dsn string) (string, error) {
+func (opts ConnectOptions) resolveLookup() LookupFunc {
+	if opts.Lookup != nil {
+		return opts.Lookup
+	}
+	return os.LookupEnv
+}
+
+func updateFromLookup(dsn string, lookup LookupFunc) (string, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	var err error
 
 	result := DSNREnvRegex.ReplaceAllStringFunc(dsn, func(match string) string {
 		varName := match[2 : len(match)-1]
 
-		value, exists := os.LookupEnv(varName)
+		value, exists := lookup(varName)
 		if !exists {
 			err = errors.Join(err, fmt.Errorf("environment variable %s is not set", varName))
 			return match
@@ -72,11 +90,19 @@ func updateFromEnv(dsn string) (string, error) {
 	return result, nil
 }
 
+// updateFromEnv expands placeholders using process environment (CLI path).
+func updateFromEnv(dsn string) (string, error) {
+	return updateFromLookup(dsn, os.LookupEnv)
+}
+
 // extractPlaceholders replaces ${...} placeholders with unique sentinels
 // using the _PH-999000_ format for all placeholders to avoid collisions.
 // Port sentinels are expanded before URL parsing (in expandDSN) since ports must be numeric.
 // Returns: the string with sentinels, a mapping of sentinel->value, and any error.
-func extractPlaceholders(s string) (string, map[string]string, error) {
+func extractPlaceholders(s string, lookup LookupFunc) (string, map[string]string, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	mapping := make(map[string]string)
 	counter := 0
 	var err error
@@ -85,8 +111,7 @@ func extractPlaceholders(s string) (string, map[string]string, error) {
 		sentinel := fmt.Sprintf("_PH-999%03d_", counter)
 		varName := match[2 : len(match)-1] // Extract VAR from ${VAR}
 
-		// Look up the environment variable immediately
-		value, exists := os.LookupEnv(varName)
+		value, exists := lookup(varName)
 		if !exists {
 			err = errors.Join(err, fmt.Errorf("environment variable %s is not set", varName))
 			return sentinel // Return sentinel anyway to allow URL parsing for better error messages
@@ -258,15 +283,18 @@ func expandPortSentinel(sentinelDSN string, mapping map[string]string) string {
 }
 
 // expandDSN expands environment variable placeholders in a DSN using a three-phase approach:
-// 1. Replace ${...} with safe sentinel values and lookup env vars
+// 1. Replace ${...} with safe sentinel values and lookup values
 // 2. Parse the URL structure with sentinels
 // 3. Expand sentinels component-by-component with appropriate encoding
 //
 // This approach ensures that special characters in environment variables (like #, @, :)
 // don't break URL parsing, since they are expanded after the URL structure is established.
-func expandDSN(dsn string) (string, error) {
-	// Phase 1: Replace ${...} with sentinels and lookup env vars
-	sentinelDSN, mapping, err := extractPlaceholders(dsn)
+func expandDSN(dsn string, lookup LookupFunc) (string, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	// Phase 1: Replace ${...} with sentinels and lookup values
+	sentinelDSN, mapping, err := extractPlaceholders(dsn, lookup)
 	if err != nil {
 		return "", err
 	}
@@ -282,7 +310,7 @@ func expandDSN(dsn string) (string, error) {
 	if len(matches) == 1 && strings.TrimSpace(dsn) == strings.TrimSpace(matches[0]) {
 		// Get the variable name
 		varName := matches[0][2 : len(matches[0])-1]
-		value, exists := os.LookupEnv(varName)
+		value, exists := lookup(varName)
 		if !exists {
 			return "", fmt.Errorf("environment variable %s is not set", varName)
 		}
@@ -327,8 +355,9 @@ func expandDSN(dsn string) (string, error) {
 // ResolveDatabaseName returns the database opts would connect to, merging the DSN
 // path with the structured field. Empty when neither supplies one.
 func ResolveDatabaseName(opts ConnectOptions) string {
+	lookup := opts.resolveLookup()
 	if opts.Database != "" {
-		if expanded, err := expandValue(opts.Database); err == nil && expanded != "" {
+		if expanded, err := expandValue(opts.Database, lookup); err == nil && expanded != "" {
 			return expanded
 		}
 	}
@@ -444,9 +473,10 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		parsedUrl *url.URL
 		err       error
 	)
+	lookup := opts.resolveLookup()
 
 	if opts.DSN != "" {
-		populatedDSN, err := expandDSN(opts.DSN)
+		populatedDSN, err := expandDSN(opts.DSN, lookup)
 		if err != nil {
 			return nil, err
 		}
@@ -458,7 +488,7 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		parsedUrl = &url.URL{}
 	}
 
-	scheme, err := expandValue(opts.Scheme)
+	scheme, err := expandValue(opts.Scheme, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -466,12 +496,12 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		parsedUrl.Scheme = scheme
 	}
 
-	host, err := expandValue(opts.Host)
+	host, err := expandValue(opts.Host, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	port, err := expandValue(opts.Port)
+	port, err := expandValue(opts.Port, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +540,7 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		return nil, fmt.Errorf("port provided without host")
 	}
 
-	databaseName, err := expandValue(opts.Database)
+	databaseName, err := expandValue(opts.Database, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -522,12 +552,12 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		}
 	}
 
-	user, err := expandValue(opts.User)
+	user, err := expandValue(opts.User, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	password, err := expandValue(opts.Password)
+	password, err := expandValue(opts.Password, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -546,11 +576,11 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 			values = url.Values{}
 		}
 		for k, v := range opts.Params {
-			key, err := expandValue(k)
+			key, err := expandValue(k, lookup)
 			if err != nil {
 				return nil, err
 			}
-			value, err := expandValue(v)
+			value, err := expandValue(v, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -566,12 +596,12 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 	return parsedUrl, nil
 }
 
-func expandValue(s string) (string, error) {
+func expandValue(s string, lookup LookupFunc) (string, error) {
 	if s == "" {
 		return s, nil
 	}
 	if DSNREnvRegex.MatchString(s) {
-		return updateFromEnv(s)
+		return updateFromLookup(s, lookup)
 	}
 	return s, nil
 }
