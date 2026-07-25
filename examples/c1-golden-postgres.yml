@@ -17,7 +17,9 @@ connect:
   user: ${DB_USER}
   password: ${DB_PASSWORD}
   params:
-    sslmode: disable
+    # require: default for C1 SaaS / public-internet customer DBs (TLS).
+    # disable: only for non-TLS local lab DBs — not the golden path.
+    sslmode: require
 
 resource_types:
   user:
