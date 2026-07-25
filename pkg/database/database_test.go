@@ -548,7 +548,7 @@ func Test_expandDSN(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			got, err := expandDSN(tt.dsn)
+			got, err := expandDSN(tt.dsn, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("expandDSN() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -631,7 +631,7 @@ func Test_extractPlaceholders(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			gotSentinel, gotMapping, err := extractPlaceholders(tt.input)
+			gotSentinel, gotMapping, err := extractPlaceholders(tt.input, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("extractPlaceholders() error = %v, wantErr %v", err, tt.wantErr)
 				return

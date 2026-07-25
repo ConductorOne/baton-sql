@@ -103,6 +103,10 @@ func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 	return nil, nil
 }
 
+// LookupFunc resolves ${KEY} placeholders for library embeds (same shape as baton-http).
+// Prefer database.LookupFunc; this alias keeps the connector package self-documenting.
+type LookupFunc = database.LookupFunc
+
 // New returns a new instance of the connector.
 func New(ctx context.Context, configFilePath string) (*Connector, error) {
 	c, err := bsql.LoadConfigFromFile(configFilePath)
@@ -110,10 +114,35 @@ func New(ctx context.Context, configFilePath string) (*Connector, error) {
 		return nil, err
 	}
 
-	return newConnector(ctx, c)
+	return newConnector(ctx, c, nil)
 }
 
-func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
+// NewWithConfig constructs a connector from an already-parsed config.
+// Placeholder expansion uses process environment (nil LookupFunc).
+func NewWithConfig(ctx context.Context, cfg *bsql.Config) (*Connector, error) {
+	if cfg == nil {
+		return nil, errors.New("connector: config is nil")
+	}
+	return newConnector(ctx, cfg, nil)
+}
+
+// NewFromYAML parses YAML config bytes, expands ${KEY} via lookup (or env when nil),
+// and opens the connector. Library embeds must pass a non-nil lookup over map values
+// and must not mutate process environment.
+func NewFromYAML(ctx context.Context, data []byte, lookup LookupFunc) (*Connector, error) {
+	cfg, err := bsql.Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	return newConnector(ctx, cfg, lookup)
+}
+
+// Config returns the parsed connector configuration.
+func (c *Connector) Config() *bsql.Config {
+	return c.config
+}
+
+func newConnector(ctx context.Context, c *bsql.Config, lookup LookupFunc) (*Connector, error) {
 	opts := database.ConnectOptions{
 		DSN:      c.Connect.DSN,
 		Scheme:   c.Connect.Scheme,
@@ -123,6 +152,7 @@ func newConnector(ctx context.Context, c *bsql.Config) (*Connector, error) {
 		User:     c.Connect.User,
 		Password: c.Connect.Password,
 		Params:   c.Connect.Params,
+		Lookup:   lookup,
 	}
 
 	dbs, dbEngine, err := openDatabases(ctx, opts, c.Connect.Databases)
