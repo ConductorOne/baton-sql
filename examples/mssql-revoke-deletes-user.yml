@@ -5,8 +5,8 @@
 # When that happens C1 would otherwise not learn the account is gone
 # until the next full sync, which blocks an immediate re-grant. Configuring
 # `revoke_options.principal_exists_check` under an entitlement's `revoke`
-# makes the connector probe for the principal after the revoke queries run (on
-# the same transaction). If the probe returns no rows the connector attaches a
+# makes the connector probe for the principal once the revoke queries have
+# committed. If the probe returns no rows the connector attaches a
 # ResourceDeleted annotation to the revoke response so C1 marks the
 # account deleted right away.
 app_name: SQL Server Revoke-Deletes-User Example
@@ -139,7 +139,7 @@ resource_types:
                   INNER JOIN Users u2 ON ur.UserID = u2.UserID
                   WHERE u2.Username = ?<username>
                 )
-            # After the revoke queries run, probe whether the principal still
+            # Once the revoke queries commit, probe whether the principal still
             # exists. No rows means the app deleted the user, so the connector
             # reports a ResourceDeleted annotation on the revoke response.
             revoke_options:

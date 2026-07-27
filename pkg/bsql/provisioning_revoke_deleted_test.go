@@ -174,7 +174,9 @@ func TestRunRevokeProvisioning_NoExistsCheckBehavesLikeBefore(t *testing.T) {
 	require.False(t, deleted)
 }
 
-func TestRunRevokeProvisioning_ProbeErrorRollsBack(t *testing.T) {
+// The exists check is optional reporting, so a broken probe must not undo a
+// revoke that already committed.
+func TestRunRevokeProvisioning_ProbeErrorKeepsRevoke(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	seedUserWithRoles(t, db, "user-1", "admin")
 
@@ -186,11 +188,30 @@ func TestRunRevokeProvisioning_ProbeErrorRollsBack(t *testing.T) {
 		map[string]any{"principal_id": "user-1", "role": "admin"},
 		true,
 	)
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.False(t, deleted)
 
-	// the revoke DELETE was rolled back, so the role is still present
-	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
+	require.Equal(t, 0, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
+}
+
+// A probe failure leaves the revoke successful, so Revoke() reports no
+// annotations rather than failing the whole operation.
+func TestRevoke_ProbeErrorStillSucceedsWithoutAnnotation(t *testing.T) {
+	s, db := newRevokeProvisioningTestSyncer(t)
+	withRevokeDeletesUserConfig(s)
+	s.config.StaticEntitlements[0].Provisioning.Revoke.RevokeOptions.PrincipalExistsCheck =
+		&PrincipalExistsCheck{Query: `SELECT 1 FROM nonexistent_table WHERE id = ?<principal_id>`}
+	seedUserWithRoles(t, db, "user-1", "admin")
+
+	annos, err := s.Revoke(t.Context(), revokeGrantFor("user-1", "admin"))
+	require.NoError(t, err)
+
+	resourceDeleted := &v2.ResourceDeleted{}
+	ok, err := annos.Pick(resourceDeleted)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	require.Equal(t, 0, countRows(t, db, `SELECT COUNT(*) FROM users WHERE id = ?`, "user-1"))
 }
 
 func withRevokeDeletesUserConfig(s *SQLSyncer) {

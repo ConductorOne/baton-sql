@@ -438,9 +438,10 @@ type RevokeOptions struct {
 
 // PrincipalExistsCheck configures a probe query that reports whether the principal still exists after a revoke.
 type PrincipalExistsCheck struct {
-	// Query runs after the revoke queries on the same executor/transaction with the same provisioning vars.
+	// Query runs with the same provisioning vars once the revoke queries have committed.
 	// Returning at least one row means the principal still exists;
 	// returning no rows means it was deleted as a side effect of the revoke.
+	// A query that fails does not fail the revoke; the deletion just goes unreported.
 	Query string `yaml:"query" json:"query"`
 }
 

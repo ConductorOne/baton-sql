@@ -444,13 +444,18 @@ func (s *SQLSyncer) RunProvisioningQueries(
 }
 
 // RunRevokeProvisioning runs revoke queries like RunProvisioningQueries, and
-// additionally runs an optional principal-exists probe on the same executor
-// after the revoke queries. The probe detects the case where the revoke deleted
-// the principal itself downstream (e.g. removing a user's last role deletes the
-// user row): when the exists-check returns no rows, principalDeleted is true.
+// additionally runs an optional principal-exists probe once the revoke has
+// committed. The probe detects the case where the revoke deleted the principal
+// itself downstream (e.g. removing a user's last role deletes the user row):
+// when the exists-check returns no rows, principalDeleted is true.
 //
-// When every revoke query affects zero rows the function still runs the probe
-// and commits, then returns ErrQueryAffectedZeroRows so the caller can report
+// The probe only decides whether the caller reports the deletion, so it runs
+// outside the revoke transaction: a probe failure must not roll back a revoke
+// that already succeeded. Probe failures are logged and reported as "not
+// deleted", leaving the next sync to pick up the deletion.
+//
+// When every revoke query affects zero rows the function still commits and
+// probes, then returns ErrQueryAffectedZeroRows so the caller can report
 // GrantAlreadyRevoked — combined with ResourceDeleted when the principal is
 // also gone, so retried revokes still surface the deletion.
 func (s *SQLSyncer) RunRevokeProvisioning(
@@ -472,6 +477,45 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 		return false, err
 	}
 
+	allZero, err := s.runRevokeQueries(ctx, queries, validationQueries, vars, useTx, target)
+	if err != nil {
+		return false, err
+	}
+
+	var principalDeleted bool
+	if existsCheck != nil {
+		exists, err := s.runPrincipalExistsCheck(ctx, target, existsCheck, vars)
+		if err != nil {
+			l.Error(
+				"revoke succeeded but the principal exists check failed; not reporting a principal deletion",
+				zap.Error(err),
+			)
+		} else {
+			// No rows from the exists-check => the principal was deleted by the revoke.
+			principalDeleted = !exists
+		}
+	}
+
+	if allZero {
+		return principalDeleted, ErrQueryAffectedZeroRows
+	}
+	return principalDeleted, nil
+}
+
+// runRevokeQueries executes the revoke queries against target, committing when
+// useTx is set. It reports whether every query affected zero rows, which means
+// the grant was already revoked; that case commits rather than failing so the
+// caller can still probe the principal and annotate the response.
+func (s *SQLSyncer) runRevokeQueries(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	useTx bool,
+	target *sql.DB,
+) (bool, error) {
+	l := ctxzap.Extract(ctx)
+
 	var committed bool
 	var executor executor = target
 
@@ -491,27 +535,13 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 		}()
 	}
 
-	// Tolerate the all-zero-rows case (already revoked) so we can still run the
-	// exists-check probe and report a deletion on retried revokes. Any other
-	// error aborts before the probe and rolls the transaction back.
 	var allZero bool
-	err = s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, vars, executor)
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, vars, executor)
 	if err != nil {
 		if !errors.Is(err, ErrQueryAffectedZeroRows) {
 			return false, err
 		}
 		allZero = true
-	}
-
-	var principalDeleted bool
-	if existsCheck != nil {
-		var exists bool
-		exists, err = s.runPrincipalExistsCheck(ctx, executor, existsCheck, vars)
-		if err != nil {
-			return false, err
-		}
-		// No rows from the exists-check => the principal was deleted by the revoke.
-		principalDeleted = !exists
 	}
 
 	if useTx {
@@ -525,10 +555,7 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 		committed = true
 	}
 
-	if allZero {
-		return principalDeleted, ErrQueryAffectedZeroRows
-	}
-	return principalDeleted, nil
+	return allZero, nil
 }
 
 // runPrincipalExistsCheck executes the exists-check probe on the given
