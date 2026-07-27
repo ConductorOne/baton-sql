@@ -147,6 +147,12 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 		provisioningVars,
 		useTx,
 	)
+	// The exists-check still runs when the revoke queries affected zero rows, so
+	// principalDeleted is only meaningful on the success and already-revoked paths.
+	alreadyRevoked := errors.Is(err, ErrQueryAffectedZeroRows)
+	if err != nil && !alreadyRevoked {
+		return nil, err
+	}
 
 	anno := annotations.Annotations{}
 	if principalDeleted {
@@ -158,13 +164,9 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 		)
 	}
 
-	if err != nil {
-		if errors.Is(err, ErrQueryAffectedZeroRows) {
-			anno.Update(&v2.GrantAlreadyRevoked{})
-			return anno, nil
-		}
-
-		return nil, err
+	if alreadyRevoked {
+		anno.Update(&v2.GrantAlreadyRevoked{})
+		return anno, nil
 	}
 
 	l.Debug("revoked grant", zap.String("grant_id", grant.GetId()))
