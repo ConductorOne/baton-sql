@@ -31,11 +31,13 @@
 
 The connector is configured using a YAML file that defines:
 
-- **Database Connection**: Connection details via DSN (Data Source Name)
+- **Database Connection**: Connection details via DSN (Data Source Name) and optional `connect.params`
 - **Resource Types**: Map database tables/queries to resources (users, roles, etc.)
 - **Account Provisioning**: Define schemas and credential options for user creation
 - **Entitlements**: Permissions and roles that can be granted to resources
 - **Provisioning Actions**: SQL queries for granting/revoking entitlements
+
+For the `postgres` scheme, baton-sql defaults `default_query_exec_mode` to `simple_protocol` when unset so transaction-mode poolers (PgBouncer, Supabase pooler, etc.) work without prepared-statement conflicts. Set the param explicitly (DSN query or `connect.params`) to override.
 
 See examples in the [examples](https://github.com/ConductorOne/baton-sql/tree/main/examples) directory.
 

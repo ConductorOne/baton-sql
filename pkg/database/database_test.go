@@ -718,7 +718,7 @@ func Test_buildConnectionURL(t *testing.T) {
 			opts: ConnectOptions{
 				DSN: "postgres://user:pass@localhost:5432/db?sslmode=disable",
 			},
-			want: "postgres://user:pass@localhost:5432/db?sslmode=disable",
+			want: "postgres://user:pass@localhost:5432/db?default_query_exec_mode=simple_protocol&sslmode=disable",
 		},
 		{
 			name: "Override DSN components",
@@ -735,7 +735,7 @@ func Test_buildConnectionURL(t *testing.T) {
 					"application_name": "baton",
 				},
 			},
-			want: "postgres://override_user:override%23pass@override.internal:6543/override_db?application_name=baton&connect_timeout=10&sslmode=require",
+			want: "postgres://override_user:override%23pass@override.internal:6543/override_db?application_name=baton&connect_timeout=10&default_query_exec_mode=simple_protocol&sslmode=require",
 		},
 		{
 			name: "Structured config only",
@@ -750,7 +750,7 @@ func Test_buildConnectionURL(t *testing.T) {
 					"sslmode": "disable",
 				},
 			},
-			want: "postgres://app_user:s3cr3t%21@db.internal:5432/appdb?sslmode=disable",
+			want: "postgres://app_user:s3cr3t%21@db.internal:5432/appdb?default_query_exec_mode=simple_protocol&sslmode=disable",
 		},
 		{
 			name: "Port without host",
@@ -770,7 +770,7 @@ func Test_buildConnectionURL(t *testing.T) {
 				User:     "testuser",
 				Password: "testpass",
 			},
-			want: "postgres://testuser:testpass@[::1]:5432/testdb",
+			want: "postgres://testuser:testpass@[::1]:5432/testdb?default_query_exec_mode=simple_protocol",
 		},
 		{
 			name: "IPv6 host without brackets gets brackets added by JoinHostPort",
@@ -780,7 +780,7 @@ func Test_buildConnectionURL(t *testing.T) {
 				Port:     "5432",
 				Database: "testdb",
 			},
-			want: "postgres://[2001:db8::1]:5432/testdb",
+			want: "postgres://[2001:db8::1]:5432/testdb?default_query_exec_mode=simple_protocol",
 		},
 	}
 
@@ -800,6 +800,106 @@ func Test_buildConnectionURL(t *testing.T) {
 
 			if got.String() != tt.want {
 				t.Fatalf("buildConnectionURL() = %s, want %s", got.String(), tt.want)
+			}
+		})
+	}
+}
+
+func Test_buildConnectionURL_PostgresSimpleProtocolDefault(t *testing.T) {
+	const modeKey = "default_query_exec_mode"
+
+	tests := []struct {
+		name      string
+		opts      ConnectOptions
+		wantMode  string // empty means key must be absent
+		wantOther map[string]string
+	}{
+		{
+			name: "postgres DSN without mode injects simple_protocol",
+			opts: ConnectOptions{
+				DSN: "postgres://user:pass@localhost:5432/db",
+			},
+			wantMode: "simple_protocol",
+		},
+		{
+			name: "structured postgres with sslmode only also gets simple_protocol",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "db.example",
+				Port:     "5432",
+				Database: "app",
+				User:     "u",
+				Password: "p",
+				Params: map[string]string{
+					"sslmode": "require",
+				},
+			},
+			wantMode: "simple_protocol",
+			wantOther: map[string]string{
+				"sslmode": "require",
+			},
+		},
+		{
+			name: "DSN already sets cache_statement is preserved",
+			opts: ConnectOptions{
+				DSN: "postgres://user:pass@localhost:5432/db?default_query_exec_mode=cache_statement",
+			},
+			wantMode: "cache_statement",
+		},
+		{
+			name: "Params set exec is preserved",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "db.example",
+				Database: "app",
+				Params: map[string]string{
+					"default_query_exec_mode": "exec",
+				},
+			},
+			wantMode: "exec",
+		},
+		{
+			name: "mysql scheme does not inject mode",
+			opts: ConnectOptions{
+				Scheme:   "mysql",
+				Host:     "db.example",
+				Port:     "3306",
+				Database: "app",
+				User:     "u",
+				Password: "p",
+			},
+			wantMode: "",
+		},
+		{
+			name: "mysql DSN does not inject mode",
+			opts: ConnectOptions{
+				DSN: "mysql://user:pass@localhost:3306/db",
+			},
+			wantMode: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildConnectionURL(tt.opts)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			q := got.Query()
+			gotMode := q.Get(modeKey)
+			if gotMode != tt.wantMode {
+				t.Fatalf("%s = %q, want %q (url=%s)", modeKey, gotMode, tt.wantMode, got.String())
+			}
+			if tt.wantMode == "" {
+				if _, ok := q[modeKey]; ok {
+					t.Fatalf("%s present on non-postgres url: %s", modeKey, got.String())
+				}
+			}
+			for k, want := range tt.wantOther {
+				if got := q.Get(k); got != want {
+					t.Fatalf("query %s = %q, want %q", k, got, want)
+				}
 			}
 		})
 	}
