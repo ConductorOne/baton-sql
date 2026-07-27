@@ -718,7 +718,7 @@ func Test_buildConnectionURL(t *testing.T) {
 			opts: ConnectOptions{
 				DSN: "postgres://user:pass@localhost:5432/db?sslmode=disable",
 			},
-			want: "postgres://user:pass@localhost:5432/db?default_query_exec_mode=simple_protocol&sslmode=disable",
+			want: "postgres://user:pass@localhost:5432/db?sslmode=disable",
 		},
 		{
 			name: "Override DSN components",
@@ -735,7 +735,7 @@ func Test_buildConnectionURL(t *testing.T) {
 					"application_name": "baton",
 				},
 			},
-			want: "postgres://override_user:override%23pass@override.internal:6543/override_db?application_name=baton&connect_timeout=10&default_query_exec_mode=simple_protocol&sslmode=require",
+			want: "postgres://override_user:override%23pass@override.internal:6543/override_db?application_name=baton&connect_timeout=10&sslmode=require",
 		},
 		{
 			name: "Structured config only",
@@ -750,7 +750,7 @@ func Test_buildConnectionURL(t *testing.T) {
 					"sslmode": "disable",
 				},
 			},
-			want: "postgres://app_user:s3cr3t%21@db.internal:5432/appdb?default_query_exec_mode=simple_protocol&sslmode=disable",
+			want: "postgres://app_user:s3cr3t%21@db.internal:5432/appdb?sslmode=disable",
 		},
 		{
 			name: "Port without host",
@@ -770,7 +770,7 @@ func Test_buildConnectionURL(t *testing.T) {
 				User:     "testuser",
 				Password: "testpass",
 			},
-			want: "postgres://testuser:testpass@[::1]:5432/testdb?default_query_exec_mode=simple_protocol",
+			want: "postgres://testuser:testpass@[::1]:5432/testdb",
 		},
 		{
 			name: "IPv6 host without brackets gets brackets added by JoinHostPort",
@@ -780,7 +780,7 @@ func Test_buildConnectionURL(t *testing.T) {
 				Port:     "5432",
 				Database: "testdb",
 			},
-			want: "postgres://[2001:db8::1]:5432/testdb?default_query_exec_mode=simple_protocol",
+			want: "postgres://[2001:db8::1]:5432/testdb",
 		},
 	}
 
@@ -805,7 +805,7 @@ func Test_buildConnectionURL(t *testing.T) {
 	}
 }
 
-func Test_buildConnectionURL_PostgresSimpleProtocolDefault(t *testing.T) {
+func Test_buildConnectionURL_PostgresQueryExecMode(t *testing.T) {
 	const modeKey = "default_query_exec_mode"
 
 	tests := []struct {
@@ -815,14 +815,14 @@ func Test_buildConnectionURL_PostgresSimpleProtocolDefault(t *testing.T) {
 		wantOther map[string]string
 	}{
 		{
-			name: "postgres DSN without mode injects simple_protocol",
+			name: "unset postgres DSN does not inject default_query_exec_mode",
 			opts: ConnectOptions{
 				DSN: "postgres://user:pass@localhost:5432/db",
 			},
-			wantMode: "simple_protocol",
+			wantMode: "",
 		},
 		{
-			name: "structured postgres with sslmode only also gets simple_protocol",
+			name: "structured postgres with sslmode only has no mode key",
 			opts: ConnectOptions{
 				Scheme:   "postgres",
 				Host:     "db.example",
@@ -834,7 +834,7 @@ func Test_buildConnectionURL_PostgresSimpleProtocolDefault(t *testing.T) {
 					"sslmode": "require",
 				},
 			},
-			wantMode: "simple_protocol",
+			wantMode: "",
 			wantOther: map[string]string{
 				"sslmode": "require",
 			},
@@ -857,6 +857,18 @@ func Test_buildConnectionURL_PostgresSimpleProtocolDefault(t *testing.T) {
 				},
 			},
 			wantMode: "exec",
+		},
+		{
+			name: "Params set simple_protocol is preserved",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "db.example",
+				Database: "app",
+				Params: map[string]string{
+					"default_query_exec_mode": "simple_protocol",
+				},
+			},
+			wantMode: "simple_protocol",
 		},
 		{
 			name: "mysql scheme does not inject mode",
@@ -893,7 +905,7 @@ func Test_buildConnectionURL_PostgresSimpleProtocolDefault(t *testing.T) {
 			}
 			if tt.wantMode == "" {
 				if _, ok := q[modeKey]; ok {
-					t.Fatalf("%s present on non-postgres url: %s", modeKey, got.String())
+					t.Fatalf("%s present when unset: %s", modeKey, got.String())
 				}
 			}
 			for k, want := range tt.wantOther {

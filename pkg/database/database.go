@@ -589,19 +589,6 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		parsedUrl.RawQuery = values.Encode()
 	}
 
-	// Postgres/pgx defaults to prepared-statement caching (cache_statement), which
-	// breaks behind transaction-mode poolers (PgBouncer, Supabase pooler, etc.)
-	// with SQLSTATE 42P05. Inject simple_protocol when the caller has not set an
-	// explicit default_query_exec_mode so pooler deployments work out of the box.
-	// Explicit DSN/Params values always win.
-	if parsedUrl.Scheme == "postgres" {
-		q := parsedUrl.Query()
-		if q.Get("default_query_exec_mode") == "" {
-			q.Set("default_query_exec_mode", "simple_protocol")
-			parsedUrl.RawQuery = q.Encode()
-		}
-	}
-
 	if parsedUrl.Scheme == "" && opts.DSN == "" {
 		return nil, fmt.Errorf("database scheme must be specified")
 	}

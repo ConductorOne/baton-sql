@@ -36,10 +36,9 @@
 # Serverless, native IdP federation (CREATE IDENTITY PROVIDER), CREATE USER / CREATE
 # ROLE, AD-group -> DbGroups mapping (lives in the IdP).
 #
-# Driver note: baton-sql uses jackc/pgx/v5 for the postgres scheme and defaults
-# default_query_exec_mode to simple_protocol (pooler-safe). Override with
-# default_query_exec_mode=cache_statement (DSN or connect.params) if you need
-# prepared-statement caching on a direct connection.
+# Driver caveat: baton-sql uses jackc/pgx/v5 for the postgres scheme. If prepared-
+# statement quirks surface, pin to simple-query protocol via the DSN parameter
+# default_query_exec_mode=simple_protocol (or connect.params).
 app_name: Amazon Redshift
 app_description: Sync Redshift cluster identities, roles, groups, schemas, and tables.
 
