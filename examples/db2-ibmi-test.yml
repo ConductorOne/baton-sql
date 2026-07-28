@@ -1,0 +1,98 @@
+---
+# Application name for this connector configuration
+app_name: DB2 for i Test
+
+# Connection settings for DB2 for i (AS/400 / IBM i).
+# Requires a binary built with `make build-db2` AND a customer-supplied Db2 Connect
+# license in clidriver/license/ — connections fail with SQL1598N without it.
+# See the "DB2 for i (AS/400)" section in docs/db2.md.
+connect:
+  # Port 446 is the DDM/DRDA service (NOT 8471, which is the IBM i Access host server).
+  # DB_RDB_NAME is the relational database name from WRKRDBDIRE (*LOCAL entry) — usually
+  # the system name, never an application library. CurrentSchema sets the default
+  # library for unqualified table names; queries below qualify QSYS2 explicitly, so it
+  # only matters for application-table queries you add.
+  dsn: "db2://${DB_HOST}:446/${DB_RDB_NAME}?CurrentSchema=${DB_LIBRARY}"
+  # Username and password are provided separately so they can be properly URL encoded.
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+
+# This example is sync-only. Provisioning user profiles or group membership on IBM i
+# is done with CL commands (CRTUSRPRF/CHGUSRPRF), not SQL — wire those through
+# CALL QSYS2.QCMDEXC(...) only with care, since GRPPRF/SUPGRPPRF changes replace the
+# current values rather than appending.
+resource_types:
+  # IBM i user profiles
+  user:
+    name: "User"
+    description: "A user profile on the IBM i system"
+    list:
+      # QSYS2.USER_INFO is the SQL catalog view over user profiles.
+      # Group profiles also appear here; GROUP_ID_NUMBER > 0 filters them out of the
+      # user list (they are synced as groups below). OFFSET/FETCH needs IBM i 7.3+.
+      query: |
+        SELECT
+          AUTHORIZATION_NAME AS "username",
+          STATUS AS "status",
+          TEXT_DESCRIPTION AS "description",
+          USER_CLASS_NAME AS "user_class",
+          PREVIOUS_SIGNON AS "last_signon"
+        FROM QSYS2.USER_INFO
+        WHERE GROUP_ID_NUMBER = 0
+        ORDER BY AUTHORIZATION_NAME
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      pagination:
+        strategy: "offset"
+        primary_key: "username"
+      map:
+        id: ".username"
+        display_name: ".username"
+        description: ".description"
+        traits:
+          user:
+            # *ENABLED / *DISABLED from the profile status
+            status: '.status == "*ENABLED" ? "enabled" : "disabled"'
+            login: ".username"
+            last_login: ".last_signon"
+            profile:
+              username: ".username"
+              user_class: ".user_class"
+
+  # IBM i group profiles (a group is a user profile with a group ID)
+  group:
+    name: "Group"
+    description: "A group profile on the IBM i system"
+    list:
+      query: |
+        SELECT DISTINCT
+          GROUP_PROFILE_NAME AS "group_name"
+        FROM QSYS2.GROUP_PROFILE_ENTRIES
+        ORDER BY GROUP_PROFILE_NAME
+      map:
+        id: ".group_name"
+        display_name: ".group_name"
+        description: ""
+        traits:
+          group:
+            profile:
+              group_name: ".group_name"
+    static_entitlements:
+      - id: "member"
+        display_name: "resource.DisplayName + ' Group Member'"
+        description: "'Member of the ' + resource.DisplayName + ' group profile'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+    grants:
+      # QSYS2.GROUP_PROFILE_ENTRIES lists every (group profile, member) pair,
+      # covering both the primary group (GRPPRF) and supplemental groups (SUPGRPPRF).
+      - query: |
+          SELECT
+            GROUP_PROFILE_NAME AS "group_name",
+            USER_PROFILE_NAME AS "username"
+          FROM QSYS2.GROUP_PROFILE_ENTRIES
+        map:
+          - skip_if: ".group_name != resource.ID"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "member"

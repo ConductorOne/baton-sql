@@ -248,6 +248,38 @@ resource_types:
 				require.Equal(t, "'Grant cancelled by policy.'", grant.RejectIf.Reason)
 			},
 		},
+		{
+			name:  "db2-luw-example",
+			input: loadExampleConfig(t, "db2-test"),
+			validate: func(t *testing.T, c *Config) {
+				require.Equal(t, "DB2 LUW Test", c.AppName)
+				require.Equal(t, "db2://${DB_HOST}:${DB_PORT}/${DB_NAME}", c.Connect.DSN)
+				require.Equal(t, "${DB_USER}", c.Connect.User)
+				require.Len(t, c.ResourceTypes, 2)
+
+				roleResourceType := c.ResourceTypes["role"]
+				require.Len(t, roleResourceType.StaticEntitlements, 2)
+				require.Len(t, roleResourceType.Grants, 1)
+				require.NotNil(t, roleResourceType.StaticEntitlements[0].Provisioning)
+			},
+		},
+		{
+			name:  "db2-ibmi-example",
+			input: loadExampleConfig(t, "db2-ibmi-test"),
+			validate: func(t *testing.T, c *Config) {
+				require.Equal(t, "DB2 for i Test", c.AppName)
+				require.Equal(t, "db2://${DB_HOST}:446/${DB_RDB_NAME}?CurrentSchema=${DB_LIBRARY}", c.Connect.DSN)
+				require.Len(t, c.ResourceTypes, 2)
+
+				userResourceType := c.ResourceTypes["user"]
+				require.NotNil(t, userResourceType.List)
+				require.Equal(t, "offset", userResourceType.List.Pagination.Strategy)
+
+				groupResourceType := c.ResourceTypes["group"]
+				require.Len(t, groupResourceType.StaticEntitlements, 1)
+				require.Len(t, groupResourceType.Grants, 1)
+			},
+		},
 	}
 
 	for _, tt := range tests {
