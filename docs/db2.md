@@ -116,6 +116,38 @@ DB2's native form is also accepted as-is:
 HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=db2inst1;PWD=pass123;PROTOCOL=TCPIP
 ```
 
+## DB2 for i (AS/400)
+
+Connecting to DB2 for i works through the same CLI driver but differs from LUW on every
+DSN component, and connection details copied from an existing IBM i Access / JDBC (jt400)
+setup will **not** work as-is:
+
+- **License (go/no-go):** the CLI driver requires a **Db2 Connect license** for IBM i
+  targets. The customer copies their `db2consv_*.lic` into `clidriver/license/`. Without it
+  every connection fails with `SQL1598N` — if the customer has no Db2 Connect entitlement,
+  this driver cannot connect at all.
+- **Port is 446** (the DDM/DRDA service; confirm it's running with `STRTCPSVR SERVER(*DDM)`
+  on the i side). Port **8471** belongs to the IBM i Access database host server — a
+  different protocol our driver does not speak; using it fails with `SQL30081N`.
+- **Database = the RDB name**, not an application library. Find it with `WRKRDBDIRE`
+  (the `*LOCAL` entry) on the system, or `SELECT CURRENT SERVER FROM SYSIBM.SYSDUMMY1`
+  from any working connection. It is usually the system name.
+- **Libraries are schemas.** Set the default with `?CurrentSchema=MYLIB`, or
+  schema-qualify tables in the configured queries (`MYLIB.USERS`), which is more explicit
+  and recommended. The multi-library `DBQ` list is an IBM i Access ODBC feature and does
+  not exist here.
+
+```text
+db2://USER:PASS@my-ibmi.example.com:446/RDBNAME?CurrentSchema=MYLIB
+```
+
+`USER`, `PASS`, `RDBNAME`, and `MYLIB` are placeholders — in particular `RDBNAME` is the
+value `WRKRDBDIRE` reports, not the application library name.
+
+Columns tagged CCSID 65535 (binary) are common on IBM i application libraries and come
+back untranslated; cast them in the configured query (`CAST(col AS CHAR(n) CCSID 37)`) if
+values look like garbage.
+
 ## Troubleshooting
 
 **`'sqlcli1.h' file not found`** — clidriver missing or `DB2HOME` wrong. Check that
