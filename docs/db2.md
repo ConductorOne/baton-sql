@@ -125,7 +125,12 @@ setup will **not** work as-is:
 - **License (go/no-go):** the CLI driver requires a **Db2 Connect license** for IBM i
   targets. The customer copies their `db2consv_*.lic` into `clidriver/license/`. Without it
   every connection fails with `SQL1598N` — if the customer has no Db2 Connect entitlement,
-  this driver cannot connect at all.
+  this driver cannot connect at all. The `.lic` file comes from the customer's IBM Passport
+  Advantage downloads or from any Db2 Connect server they already run (`sqllib/license/`);
+  only the file is needed — no Db2 Connect installation on the connector host.
+  Alternatively, if they run a **Db2 Connect gateway server**, point the DSN at the gateway
+  instead of the IBM i system — licensing is then handled server-side and no local `.lic`
+  file is required.
 - **Port is 446** (the DDM/DRDA service; confirm it's running with `STRTCPSVR SERVER(*DDM)`
   on the i side). Port **8471** belongs to the IBM i Access database host server — a
   different protocol our driver does not speak; using it fails with `SQL30081N`.
@@ -168,6 +173,12 @@ binaries — the baked paths are the reliable option.
 
 **`error while loading shared libraries: libxml2.so.2`** (Linux) — the clidriver depends on
 the OS libxml2 package: `apt-get install libxml2` / `yum install libxml2`.
+
+**`SQL1598N` (licensing problem on connect)** — the target is z/OS or IBM i and no Db2
+Connect license is present. Diagnostically this means networking, port, and RDB name are
+all correct — the DRDA handshake succeeded and only the entitlement check failed. Fix per
+the license bullet in the DB2 for i section above: drop the customer's `db2consv_*.lic`
+into `clidriver/license/` (no rebuild needed) or route through their Db2 Connect gateway.
 
 **`go vet` / `golangci-lint` with `-tags db2` fails** — type-checking the tagged path needs
 the clidriver headers too. Default-tag lint and vet need nothing.
