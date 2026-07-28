@@ -1,0 +1,122 @@
+---
+# Application name for this connector configuration
+app_name: DB2 LUW Test
+
+# Connection settings for DB2 LUW (Linux/Unix/Windows).
+# Requires a binary built with `make build-db2` — see docs/db2.md.
+connect:
+  # Data Source Name (DSN) — default DB2 LUW port is 50000.
+  # Extra CLI keywords can be passed as query parameters, e.g. ?CurrentSchema=MYSCHEMA
+  dsn: "db2://${DB_HOST}:${DB_PORT}/${DB_NAME}"
+  # Username and password are provided separately so they can be properly URL encoded.
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+
+# Definition of different resource types managed by this connector
+resource_types:
+  # DB2 LUW does not store users itself (authentication is OS/LDAP); the closest
+  # identity inventory is the set of authorization IDs that hold database authorities.
+  user:
+    name: "User"
+    description: "An authorization ID with database authorities in DB2"
+    list:
+      # SYSCAT.DBAUTH lists database-level authorities; GRANTEETYPE 'U' = user IDs
+      query: |
+        SELECT DISTINCT
+          GRANTEE AS "username"
+        FROM SYSCAT.DBAUTH
+        WHERE GRANTEETYPE = 'U'
+        ORDER BY GRANTEE
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      pagination:
+        strategy: "offset"
+        primary_key: "username"
+      map:
+        id: ".username"
+        display_name: ".username"
+        description: ""
+        traits:
+          user:
+            login: ".username"
+            profile:
+              username: ".username"
+
+  # Roles defined in the database (CREATE ROLE)
+  role:
+    name: "Role"
+    description: "A role within the DB2 database"
+    list:
+      query: |
+        SELECT
+          ROLENAME AS "role_name"
+        FROM SYSCAT.ROLES
+        ORDER BY ROLENAME
+      map:
+        id: ".role_name"
+        display_name: ".role_name"
+        description: ""
+        traits:
+          role:
+            profile:
+              role_name: ".role_name"
+    static_entitlements:
+      - id: "assigned"
+        display_name: "resource.DisplayName + ' Role Member'"
+        description: "'Member of the ' + resource.DisplayName + ' role'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+        provisioning:
+          vars:
+            principal_name: principal.ID
+            role_name: resource.ID
+          grant:
+            no_transaction: true
+            queries:
+              # GRANT is DDL — parameter binding is not allowed, so identifiers are
+              # inlined with ?<...|unquoted> (values are sanitized, never escaped).
+              - |
+                GRANT ROLE ?<role_name|unquoted> TO USER ?<principal_name|unquoted>
+          revoke:
+            no_transaction: true
+            queries:
+              - |
+                REVOKE ROLE ?<role_name|unquoted> FROM USER ?<principal_name|unquoted>
+      - id: "admin"
+        display_name: "resource.DisplayName + ' Role Admin'"
+        description: "'Can administer the ' + resource.DisplayName + ' role'"
+        purpose: "permission"
+        grantable_to:
+          - "user"
+        provisioning:
+          vars:
+            principal_name: principal.ID
+            role_name: resource.ID
+          grant:
+            no_transaction: true
+            queries:
+              - |
+                GRANT ROLE ?<role_name|unquoted> TO USER ?<principal_name|unquoted> WITH ADMIN OPTION
+          revoke:
+            no_transaction: true
+            queries:
+              - |
+                REVOKE ADMIN OPTION FOR ROLE ?<role_name|unquoted> FROM USER ?<principal_name|unquoted>
+    grants:
+      # SYSCAT.ROLEAUTH holds role memberships; ADMIN = 'Y' marks WITH ADMIN OPTION
+      - query: |
+          SELECT
+            GRANTEE AS "username",
+            ROLENAME AS "role_name",
+            ADMIN AS "admin"
+          FROM SYSCAT.ROLEAUTH
+          WHERE GRANTEETYPE = 'U'
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "assigned"
+          - skip_if: ".role_name != resource.ID || .admin != 'Y'"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "admin"

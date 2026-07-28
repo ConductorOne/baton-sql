@@ -116,6 +116,43 @@ DB2's native form is also accepted as-is:
 HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=db2inst1;PWD=pass123;PROTOCOL=TCPIP
 ```
 
+## DB2 for i (AS/400)
+
+Connecting to DB2 for i works through the same CLI driver but differs from LUW on every
+DSN component, and connection details copied from an existing IBM i Access / JDBC (jt400)
+setup will **not** work as-is:
+
+- **License (go/no-go):** the CLI driver requires a **Db2 Connect license** for IBM i
+  targets. The customer copies their `db2consv_*.lic` into `clidriver/license/`. Without it
+  every connection fails with `SQL1598N` — if the customer has no Db2 Connect entitlement,
+  this driver cannot connect at all. The `.lic` file comes from the customer's IBM Passport
+  Advantage downloads or from any Db2 Connect server they already run (`sqllib/license/`);
+  only the file is needed — no Db2 Connect installation on the connector host.
+  Alternatively, if they run a **Db2 Connect gateway server**, point the DSN at the gateway
+  instead of the IBM i system — licensing is then handled server-side and no local `.lic`
+  file is required.
+- **Port is 446** (the DDM/DRDA service; confirm it's running with `STRTCPSVR SERVER(*DDM)`
+  on the i side). Port **8471** belongs to the IBM i Access database host server — a
+  different protocol our driver does not speak; using it fails with `SQL30081N`.
+- **Database = the RDB name**, not an application library. Find it with `WRKRDBDIRE`
+  (the `*LOCAL` entry) on the system, or `SELECT CURRENT SERVER FROM SYSIBM.SYSDUMMY1`
+  from any working connection. It is usually the system name.
+- **Libraries are schemas.** Set the default with `?CurrentSchema=MYLIB`, or
+  schema-qualify tables in the configured queries (`MYLIB.USERS`), which is more explicit
+  and recommended. The multi-library `DBQ` list is an IBM i Access ODBC feature and does
+  not exist here.
+
+```text
+db2://USER:PASS@my-ibmi.example.com:446/RDBNAME?CurrentSchema=MYLIB
+```
+
+`USER`, `PASS`, `RDBNAME`, and `MYLIB` are placeholders — in particular `RDBNAME` is the
+value `WRKRDBDIRE` reports, not the application library name.
+
+Columns tagged CCSID 65535 (binary) are common on IBM i application libraries and come
+back untranslated; cast them in the configured query (`CAST(col AS CHAR(n) CCSID 37)`) if
+values look like garbage.
+
 ## Troubleshooting
 
 **`'sqlcli1.h' file not found`** — clidriver missing or `DB2HOME` wrong. Check that
@@ -136,6 +173,18 @@ binaries — the baked paths are the reliable option.
 
 **`error while loading shared libraries: libxml2.so.2`** (Linux) — the clidriver depends on
 the OS libxml2 package: `apt-get install libxml2` / `yum install libxml2`.
+
+**`SQL1598N` / SQLSTATE `42968` (licensing problem on connect)** — the target is z/OS or
+IBM i and no valid Db2 Connect license is present. Diagnostically this means networking,
+port, and RDB name are all correct — the DRDA handshake succeeded and only the entitlement
+check failed. Fix per the license bullet in the DB2 for i section above: drop the
+customer's `db2consv_*.lic` into `clidriver/license/` (no rebuild needed) or route through
+their Db2 Connect gateway. License files are **Db2-version-specific**: a v11.5 license
+will not activate a v12.x clidriver and produces this same error — check the driver level
+with `clidriver/bin/db2level` and match the clidriver version to the customer's
+entitlement (IBM's download site keeps per-version directories). `clidriver/bin/db2cli
+validate` tests the DSN and license directly against the driver, independent of the
+connector.
 
 **`go vet` / `golangci-lint` with `-tags db2` fails** — type-checking the tagged path needs
 the clidriver headers too. Default-tag lint and vet need nothing.
