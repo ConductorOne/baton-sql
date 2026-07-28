@@ -486,10 +486,12 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	if existsCheck != nil {
 		exists, err := s.runPrincipalExistsCheck(ctx, target, existsCheck, vars)
 		if err != nil {
-			l.Error(
+			l.Warn(
 				"revoke succeeded but the principal exists check failed; not reporting a principal deletion",
 				zap.Error(err),
 			)
+			// failed to probe the principal: don't report a deletion, and also don't return an error
+			principalDeleted = false
 		} else {
 			// No rows from the exists-check => the principal was deleted by the revoke.
 			principalDeleted = !exists
