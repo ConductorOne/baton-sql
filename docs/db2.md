@@ -174,11 +174,17 @@ binaries — the baked paths are the reliable option.
 **`error while loading shared libraries: libxml2.so.2`** (Linux) — the clidriver depends on
 the OS libxml2 package: `apt-get install libxml2` / `yum install libxml2`.
 
-**`SQL1598N` (licensing problem on connect)** — the target is z/OS or IBM i and no Db2
-Connect license is present. Diagnostically this means networking, port, and RDB name are
-all correct — the DRDA handshake succeeded and only the entitlement check failed. Fix per
-the license bullet in the DB2 for i section above: drop the customer's `db2consv_*.lic`
-into `clidriver/license/` (no rebuild needed) or route through their Db2 Connect gateway.
+**`SQL1598N` / SQLSTATE `42968` (licensing problem on connect)** — the target is z/OS or
+IBM i and no valid Db2 Connect license is present. Diagnostically this means networking,
+port, and RDB name are all correct — the DRDA handshake succeeded and only the entitlement
+check failed. Fix per the license bullet in the DB2 for i section above: drop the
+customer's `db2consv_*.lic` into `clidriver/license/` (no rebuild needed) or route through
+their Db2 Connect gateway. License files are **Db2-version-specific**: a v11.5 license
+will not activate a v12.x clidriver and produces this same error — check the driver level
+with `clidriver/bin/db2level` and match the clidriver version to the customer's
+entitlement (IBM's download site keeps per-version directories). `clidriver/bin/db2cli
+validate` tests the DSN and license directly against the driver, independent of the
+connector.
 
 **`go vet` / `golangci-lint` with `-tags db2` fails** — type-checking the tagged path needs
 the clidriver headers too. Default-tag lint and vet need nothing.
