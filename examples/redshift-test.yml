@@ -38,7 +38,7 @@
 #
 # Driver caveat: baton-sql uses jackc/pgx/v5 for the postgres scheme. If prepared-
 # statement quirks surface, pin to simple-query protocol via the DSN parameter
-# default_query_exec_mode=simple_protocol.
+# default_query_exec_mode=simple_protocol (or connect.params).
 app_name: Amazon Redshift
 app_description: Sync Redshift cluster identities, roles, groups, schemas, and tables.
 
