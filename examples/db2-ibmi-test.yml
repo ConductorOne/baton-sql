@@ -30,13 +30,16 @@ resource_types:
       # QSYS2.USER_INFO is the SQL catalog view over user profiles.
       # Group profiles also appear here; GROUP_ID_NUMBER > 0 filters them out of the
       # user list (they are synced as groups below). OFFSET/FETCH needs IBM i 7.3+.
+      # Nullable columns are normalized in SQL (COALESCE) so CEL expressions only ever
+      # see strings — CEL operations on NULL or timestamp values fail with
+      # "no such overload".
       query: |
         SELECT
           AUTHORIZATION_NAME AS "username",
           STATUS AS "status",
-          TEXT_DESCRIPTION AS "description",
+          COALESCE(TEXT_DESCRIPTION, '') AS "description",
           USER_CLASS_NAME AS "user_class",
-          PREVIOUS_SIGNON AS "last_signon"
+          COALESCE(VARCHAR(PREVIOUS_SIGNON), '') AS "last_signon"
         FROM QSYS2.USER_INFO
         WHERE GROUP_ID_NUMBER = 0
         ORDER BY AUTHORIZATION_NAME
