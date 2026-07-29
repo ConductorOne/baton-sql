@@ -29,9 +29,24 @@ func TestConvertToDB2DSN(t *testing.T) {
 			want: "HOSTNAME=dbhost;PORT=50000;DATABASE=testdb;UID=user;PWD=pass",
 		},
 		{
+			name: "db2i scheme without port uses DRDA default 446",
+			dsn:  "db2i://user:pass@ibmi/MYRDB",
+			want: "HOSTNAME=ibmi;DATABASE=MYRDB;PORT=446;PROTOCOL=TCPIP;UID=user;PWD=pass",
+		},
+		{
+			name: "db2i scheme with explicit port",
+			dsn:  "db2i://user:pass@ibmi:8471/MYRDB",
+			want: "HOSTNAME=ibmi;DATABASE=MYRDB;PORT=8471;PROTOCOL=TCPIP;UID=user;PWD=pass",
+		},
+		{
+			name: "protocol overridable via query param (no duplicate default)",
+			dsn:  "db2://user:pass@dbhost:50000/testdb?PROTOCOL=IPC",
+			want: "HOSTNAME=dbhost;DATABASE=testdb;PORT=50000;UID=user;PWD=pass;PROTOCOL=IPC",
+		},
+		{
 			name:    "wrong scheme",
 			dsn:     "postgres://dbhost/testdb",
-			wantErr: "expected db2:// scheme",
+			wantErr: "expected db2:// or db2i:// scheme",
 		},
 		{
 			name:    "missing database name",
