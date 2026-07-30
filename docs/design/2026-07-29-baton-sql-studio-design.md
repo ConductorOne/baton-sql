@@ -104,11 +104,15 @@ For every mapped field, in escalating order of power:
    Internally this is a plain column reference; optionally surfaced as a
    `SELECT col AS canonical` alias.
 2. **Apply a transform recipe** — a curated, deterministic CEL library offered as
-   one-click options on a mapped column, covering the patterns the survey found
-   pervasive: `slugify`, **composite id** (concatenate N columns with a separator),
-   **status ternary** (map raw values → enabled/disabled/deleted), `titleCase`,
-   **type coerce** (`string(...)`, int), **null-default** (`x != null ? x : ''`).
-   Studio generates the CEL.
+   one-click options on a mapped column. **The recipe set is seeded directly from the
+   CEL patterns observed in the 21 surveyed configs** (not an invented canonical set);
+   those examples are the guide for which recipes ship and how they behave. The
+   observed patterns are: `slugify`, **composite id** (concatenate N columns with a
+   separator — e.g. `db + '.' + schema + '.' + table`), **status ternary** (map raw
+   values → enabled/disabled/deleted — e.g. `STATUS == 0 ? 'enabled':'disabled'`),
+   `titleCase`, **type coerce** (`string(...)`, int), **null-default**
+   (`x != null ? string(x) : ''`), and an **account-type ternary** (e.g.
+   `name.startsWith('_SYS') ? 'system' : 'human'`). Studio generates the CEL.
 3. **Raw CEL with live preview** — a field-level CEL editor that runs against the
    query's sample rows and shows the computed value in real time. The escape hatch
    for the long tail (e.g. `phpDeserializeStringArray`), used *inside* the wizard
