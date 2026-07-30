@@ -142,6 +142,39 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 		putNode(n, "entitlements", ent)
 	}
 
+	if len(rt.Grants) > 0 {
+		gseq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, g := range rt.Grants {
+			gm := mapNode()
+			putScalar(gm, "query", g.Query)
+			if g.ResourceVar != "" {
+				vars := mapNode()
+				putScalar(vars, g.ResourceVar, "resource.ID")
+				putNode(gm, "vars", vars)
+			}
+			row := mapNode()
+			for _, fm := range g.Fields {
+				cel, err := CompileField(fm)
+				if err != nil {
+					return nil, err
+				}
+				switch fm.Field {
+				case "principal_id", "skip_if", "resource_id":
+					putScalar(row, fm.Field, cel)
+				}
+			}
+			putScalar(row, "principal_type", g.PrincipalType)
+			if g.Entitlement != "" {
+				putScalar(row, "entitlement_id", g.Entitlement)
+			}
+			mseq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+			mseq.Content = append(mseq.Content, row)
+			putNode(gm, "map", mseq)
+			gseq.Content = append(gseq.Content, gm)
+		}
+		putNode(n, "grants", gseq)
+	}
+
 	// Trap #3: no entitlements and no grants => skip flag, emitted as a real bool.
 	if rt.Entitlements.Mode == "none" && len(rt.Grants) == 0 {
 		putBool(n, "skip_entitlements_and_grants", true)

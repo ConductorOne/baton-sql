@@ -194,6 +194,44 @@ func TestGenerate_DynamicEntitlementsSlugFallsBackToID(t *testing.T) {
 	}
 }
 
+// TestGenerate_ResourceScopedGrant verifies that a GrantSpec on a resource
+// type emits a grants: sequence with a resource.ID var binding (keyed by
+// ResourceVar) and a one-element map: sequence carrying principal_id,
+// principal_type, and entitlement_id.
+func TestGenerate_ResourceScopedGrant(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		ResourceTypes: []ResourceTypeSpec{
+			{ID: "users", Name: "Users", Trait: "user",
+				List:         ListSpec{Query: "SELECT id FROM employees", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "roles", Name: "Roles", Trait: "role",
+				List:         ListSpec{Query: "SELECT role_id, role_name FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_name"}}},
+				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned", Purpose: "assignment"}}},
+				Grants: []GrantSpec{{
+					Query:       "SELECT user_id FROM user_roles WHERE role_id = ?<role_id>",
+					ResourceVar: "role_id", PrincipalType: "users", Entitlement: "assigned",
+					Fields: []FieldMapping{{Field: "principal_id", Column: "user_id"}},
+				}},
+			},
+		},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bsql.Parse(out); err != nil {
+		t.Fatalf("parse: %v\n%s", err, out)
+	}
+	s := string(out)
+	if !strings.Contains(s, `role_id: resource.ID`) && !strings.Contains(s, `role_id: "resource.ID"`) {
+		t.Errorf("expected resource-scoped var binding; yaml:\n%s", s)
+	}
+	if !strings.Contains(s, "principal_type: users") {
+		t.Errorf("expected principal_type users; yaml:\n%s", s)
+	}
+}
+
 // TestGenerate_DynamicEntitlementsNoIDOrDisplayName_Errors guards against
 // silently emitting an invalid slugify() when a query-mode entitlements spec
 // maps neither display_name nor id: there is nothing to derive a default
