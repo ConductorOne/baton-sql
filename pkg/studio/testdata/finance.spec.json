@@ -52,7 +52,7 @@
       "entitlements": {
         "mode": "static",
         "static": [
-          {"id": "assigned", "display_name": "Assigned", "purpose": "Grants membership in this role"}
+          {"id": "assigned", "display_name": "Assigned", "purpose": "assignment", "grantable_to": ["users"]}
         ]
       },
       "grants": [

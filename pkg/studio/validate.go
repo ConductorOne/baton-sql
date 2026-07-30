@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"database/sql"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
@@ -10,6 +11,42 @@ import (
 	"github.com/conductorone/baton-sql/pkg/bsql"
 	"github.com/conductorone/baton-sql/pkg/database"
 )
+
+// validPurpose reports whether p is an accepted entitlement purpose. bsql
+// only recognizes "assignment" and "permission" (config-driven switch);
+// anything else is silently mapped to UNSPECIFIED. Empty is allowed (means
+// unspecified intentionally).
+func validPurpose(p string) bool {
+	switch p {
+	case "", "assignment", "permission":
+		return true
+	default:
+		return false
+	}
+}
+
+// literalPurpose extracts a literal string value from a raw CEL expression
+// that is a single quoted string literal (e.g. `'assignment'` or
+// `"permission"`). It returns ok=false when the expression is not a bare
+// string literal (e.g. a function call or column ref), in which case the
+// purpose is evaluated per-row and cannot be checked statically.
+func literalPurpose(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	if len(s) < 2 {
+		return "", false
+	}
+	q := s[0]
+	if (q != '\'' && q != '"') || s[len(s)-1] != q {
+		return "", false
+	}
+	inner := s[1 : len(s)-1]
+	// Reject if the inner value itself contains the quote char (i.e. this
+	// wasn't a single simple literal).
+	if strings.IndexByte(inner, q) >= 0 {
+		return "", false
+	}
+	return inner, true
+}
 
 type Issue struct {
 	Scope   string `json:"scope"`
@@ -45,6 +82,57 @@ func Validate(ctx context.Context, spec *Spec, opts ValidateOptions) (*Report, e
 				rep.OK = false
 				rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "principal_type",
 					Message: "principal_type \"" + g.PrincipalType + "\" is not a defined resource type"})
+			}
+			// FIX-2: resource_id is not a supported grant mapping key (bsql's
+			// GrantMapping has no such field) — a user who maps it gets a
+			// silent no-op, so flag it instead.
+			for _, fm := range g.Fields {
+				if fm.Field == "resource_id" {
+					rep.OK = false
+					rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "resource_id",
+						Message: "\"resource_id\" is not a supported grant mapping; remove it (the grant is already scoped to its resource type)"})
+				}
+			}
+		}
+
+		// FIX-1: every grantable_to entry (static per-entitlement and dynamic)
+		// must reference a defined resource-type ID; bsql matches these
+		// literally and silently drops any that don't resolve.
+		for _, e := range rt.Entitlements.Static {
+			for _, gt := range e.GrantableTo {
+				if !defined[gt] {
+					rep.OK = false
+					rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "grantable_to",
+						Message: "grantable_to \"" + gt + "\" is not a defined resource type"})
+				}
+			}
+			// FIX-3: purpose must be assignment|permission (or empty); bsql
+			// treats anything else as UNSPECIFIED silently.
+			if !validPurpose(e.Purpose) {
+				rep.OK = false
+				rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "purpose",
+					Message: "purpose \"" + e.Purpose + "\" must be \"assignment\" or \"permission\""})
+			}
+		}
+		for _, gt := range rt.Entitlements.GrantableTo {
+			if !defined[gt] {
+				rep.OK = false
+				rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "grantable_to",
+					Message: "grantable_to \"" + gt + "\" is not a defined resource type"})
+			}
+		}
+		// FIX-3: a dynamic entitlement's purpose is authored as a field
+		// mapping. Only a literal (raw_cel quoted-string) purpose is
+		// statically checkable — a column-sourced purpose is evaluated
+		// per-row and its value can't be known here.
+		for _, fm := range rt.Entitlements.Fields {
+			if fm.Field != "purpose" || fm.Transform == nil {
+				continue
+			}
+			if p, ok := literalPurpose(fm.Transform.RawCEL); ok && !validPurpose(p) {
+				rep.OK = false
+				rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "purpose",
+					Message: "purpose \"" + p + "\" must be \"assignment\" or \"permission\""})
 			}
 		}
 	}

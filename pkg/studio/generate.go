@@ -18,7 +18,7 @@ func Generate(spec *Spec) ([]byte, error) {
 	rts := mapNode()
 	for i := range spec.ResourceTypes {
 		rt := &spec.ResourceTypes[i]
-		node, err := genResourceType(spec, rt)
+		node, err := genResourceType(rt)
 		if err != nil {
 			return nil, err
 		}
@@ -28,7 +28,7 @@ func Generate(spec *Spec) ([]byte, error) {
 	return yaml.Marshal(root)
 }
 
-func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
+func genResourceType(rt *ResourceTypeSpec) (*yaml.Node, error) {
 	n := mapNode()
 	putScalar(n, "name", rt.Name)
 
@@ -81,19 +81,40 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 	putNode(list, "map", mp)
 	putNode(n, "list", list)
 
-	switch rt.Entitlements.Mode {
+	// Track whether an entitlements block was actually emitted so the skip
+	// flag can key on real emptiness rather than the Mode sentinel (Trap #3):
+	// a "static" mode with an empty list, for example, emits nothing.
+	entitlementsEmitted := false
+	mode := rt.Entitlements.Mode
+	switch mode {
+	case "", "none":
+		// no entitlements block
 	case "static":
 		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		for _, e := range rt.Entitlements.Static {
 			item := mapNode()
 			putScalar(item, "id", e.ID)
 			putScalar(item, "display_name", e.DisplayName)
+			if e.Description != "" {
+				putScalar(item, "description", e.Description)
+			}
 			if e.Purpose != "" {
 				putScalar(item, "purpose", e.Purpose)
 			}
+			// grantable_to is a literal list of resource-type IDs, not a
+			// per-row CEL ref (which would silently match nothing).
+			if len(e.GrantableTo) > 0 {
+				putLiteralSeq(item, "grantable_to", e.GrantableTo)
+			}
+			if e.Immutable {
+				putBool(item, "immutable", true)
+			}
 			seq.Content = append(seq.Content, item)
 		}
-		putNode(n, "static_entitlements", seq)
+		if len(seq.Content) > 0 {
+			putNode(n, "static_entitlements", seq)
+			entitlementsEmitted = true
+		}
 	case "query":
 		ent := mapNode()
 		putScalar(ent, "query", rt.Entitlements.Query)
@@ -107,8 +128,6 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 			switch fm.Field {
 			case "id", "display_name", "description", "purpose", "slug":
 				putScalar(mp, fm.Field, cel)
-			case "grantable_to":
-				putSeq(mp, "grantable_to", cel)
 			}
 			switch fm.Field {
 			case "display_name":
@@ -116,6 +135,14 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 			case "id":
 				idCELForSlug = cel
 			}
+		}
+		// grantable_to is a literal list of resource-type IDs sourced from the
+		// spec (EntitlementsSpec.GrantableTo), NOT a CEL ref compiled from a
+		// query column — the bsql grantable_to matcher compares each entry
+		// literally against defined resource-type IDs, so a CEL ref like
+		// ".column" would silently match nothing.
+		if len(rt.Entitlements.GrantableTo) > 0 {
+			putLiteralSeq(mp, "grantable_to", rt.Entitlements.GrantableTo)
 		}
 		// Trap #3: always emit a valid slug. Prefer display_name, then fall
 		// back to id — never emit slugify() with an empty argument, which
@@ -140,8 +167,14 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 		mapSeq.Content = append(mapSeq.Content, mp)
 		putNode(ent, "map", mapSeq)
 		putNode(n, "entitlements", ent)
+		entitlementsEmitted = true
+	default:
+		// An unrecognized mode would otherwise be silently treated as "none"
+		// (emitting a skip flag) — surface it as an error instead.
+		return nil, fmt.Errorf("resource type %q: unknown entitlements mode %q (want static, query, none, or empty)", rt.ID, mode)
 	}
 
+	grantsEmitted := false
 	if len(rt.Grants) > 0 {
 		gseq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		for _, g := range rt.Grants {
@@ -159,7 +192,9 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 					return nil, err
 				}
 				switch fm.Field {
-				case "principal_id", "skip_if", "resource_id":
+				// resource_id is NOT a bsql GrantMapping key — emitting it would
+				// be silently dropped by bsql, so we never emit it here.
+				case "principal_id", "skip_if":
 					putScalar(row, fm.Field, cel)
 				}
 			}
@@ -173,10 +208,14 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 			gseq.Content = append(gseq.Content, gm)
 		}
 		putNode(n, "grants", gseq)
+		grantsEmitted = true
 	}
 
-	// Trap #3: no entitlements and no grants => skip flag, emitted as a real bool.
-	if rt.Entitlements.Mode == "none" && len(rt.Grants) == 0 {
+	// Trap #3: nothing actually emitted for entitlements AND grants => skip
+	// flag, emitted as a real bool. Keyed on real emptiness, not the Mode
+	// sentinel, so an empty static list (which emits nothing) still gets the
+	// flag.
+	if !entitlementsEmitted && !grantsEmitted {
 		putBool(n, "skip_entitlements_and_grants", true)
 	}
 	return n, nil
@@ -216,6 +255,17 @@ func putNode(m *yaml.Node, key string, v *yaml.Node) {
 func putSeq(m *yaml.Node, key, item string) {
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 	seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: item})
+	putNode(m, key, seq)
+}
+
+// putLiteralSeq emits a YAML sequence of literal string scalars (not CEL
+// refs). Used for grantable_to, whose entries bsql compares literally against
+// defined resource-type IDs.
+func putLiteralSeq(m *yaml.Node, key string, items []string) {
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, it := range items {
+		seq.Content = append(seq.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: it})
+	}
 	putNode(m, key, seq)
 }
 

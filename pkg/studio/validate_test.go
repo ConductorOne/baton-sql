@@ -111,3 +111,114 @@ func TestValidate_BsqlValidationErrorReported(t *testing.T) {
 		t.Fatalf("expected a bsql-layer validation issue, got %+v", rep.Errors)
 	}
 }
+
+// TestValidate_GrantableToUndefinedResourceTypeReported verifies FIX-1's
+// validation: a grantable_to entry (static or dynamic) that does not reference
+// a defined resource type is flagged with Field "grantable_to".
+func TestValidate_GrantableToUndefinedResourceTypeReported(t *testing.T) {
+	// static case
+	specStatic := &Spec{
+		AppName: "x",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "roles", Name: "Roles", Trait: "role",
+			List:         ListSpec{Query: "SELECT role_id FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_id"}}},
+			Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned", GrantableTo: []string{"ghosts"}}}},
+		}},
+	}
+	rep, err := Validate(context.Background(), specStatic, ValidateOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if rep.OK || !hasField(rep.Errors, "grantable_to") {
+		t.Fatalf("expected a grantable_to issue for static entitlement, got %+v (ok=%v)", rep.Errors, rep.OK)
+	}
+
+	// dynamic case
+	specDyn := &Spec{
+		AppName: "x",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "menu", Name: "Menu", Trait: "role",
+			List: ListSpec{Query: "SELECT menu_id, menu_name FROM menus", Fields: []FieldMapping{{Field: "id", Column: "menu_id"}, {Field: "display_name", Column: "menu_name"}}},
+			Entitlements: EntitlementsSpec{
+				Mode: "query", Query: "SELECT fid, fname FROM functions WHERE menu_id = ?<menu_id>",
+				GrantableTo: []string{"ghosts"},
+				Fields:      []FieldMapping{{Field: "id", Column: "fid"}, {Field: "display_name", Column: "fname"}},
+			},
+		}},
+	}
+	rep, err = Validate(context.Background(), specDyn, ValidateOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if rep.OK || !hasField(rep.Errors, "grantable_to") {
+		t.Fatalf("expected a grantable_to issue for dynamic entitlement, got %+v (ok=%v)", rep.Errors, rep.OK)
+	}
+}
+
+// TestValidate_GrantResourceIDReported verifies FIX-2's validation: a grant
+// field mapping named resource_id is flagged (Field "resource_id") rather than
+// silently dropped.
+func TestValidate_GrantResourceIDReported(t *testing.T) {
+	spec := &Spec{
+		AppName: "x",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "roles", Name: "Roles", Trait: "role",
+			List:         ListSpec{Query: "SELECT role_id FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_id"}}},
+			Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned"}}},
+			Grants: []GrantSpec{{
+				Query: "SELECT u, r FROM t", PrincipalType: "roles", Entitlement: "assigned",
+				Fields: []FieldMapping{{Field: "principal_id", Column: "u"}, {Field: "resource_id", Column: "r"}},
+			}},
+		}},
+	}
+	rep, err := Validate(context.Background(), spec, ValidateOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if rep.OK || !hasField(rep.Errors, "resource_id") {
+		t.Fatalf("expected a resource_id issue, got %+v (ok=%v)", rep.Errors, rep.OK)
+	}
+}
+
+// TestValidate_InvalidPurposeReported verifies FIX-3: an invalid purpose is
+// flagged (Field "purpose"), while "assignment", "permission", and "" are
+// accepted.
+func TestValidate_InvalidPurposeReported(t *testing.T) {
+	mk := func(purpose string) *Spec {
+		return &Spec{
+			AppName: "x",
+			ResourceTypes: []ResourceTypeSpec{{
+				ID: "roles", Name: "Roles", Trait: "role",
+				List:         ListSpec{Query: "SELECT role_id FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_id"}}},
+				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned", Purpose: purpose}}},
+			}},
+		}
+	}
+	// invalid
+	rep, err := Validate(context.Background(), mk("Grants membership"), ValidateOptions{})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if rep.OK || !hasField(rep.Errors, "purpose") {
+		t.Fatalf("expected a purpose issue, got %+v (ok=%v)", rep.Errors, rep.OK)
+	}
+	// valid values accepted
+	for _, p := range []string{"assignment", "permission", ""} {
+		rep, err := Validate(context.Background(), mk(p), ValidateOptions{})
+		if err != nil {
+			t.Fatalf("validate(%q): %v", p, err)
+		}
+		if hasField(rep.Errors, "purpose") {
+			t.Errorf("purpose %q should be accepted, got %+v", p, rep.Errors)
+		}
+	}
+}
+
+func hasField(errs []Issue, field string) bool {
+	for _, is := range errs {
+		if is.Field == field {
+			return true
+		}
+	}
+	return false
+}

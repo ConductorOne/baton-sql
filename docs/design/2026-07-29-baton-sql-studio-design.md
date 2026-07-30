@@ -128,9 +128,11 @@ CEL out of hand-writing it, while (3) honestly admits CEL is sometimes required.
   `employee_ids[]`, `manager_id`, `manager_email`, and arbitrary `profile.<key>`.
 - **Group / role / app trait:** `profile.<key>` bag (+ `help_url` for app).
 - **Entitlement:** `id`, `display_name`, `description`, `slug`, `purpose`
-  (assignment/permission), `grantable_to`, `immutable`.
-- **Grant:** `principal_id`, `principal_type`, `entitlement`, `resource_id`,
-  `skip_if`.
+  (one of `assignment`/`permission`), `grantable_to` (a list of resource-type
+  IDs this entitlement can be granted to), `immutable`.
+- **Grant:** `principal_id`, `principal_type`, `entitlement`, `skip_if`.
+  (The grant is already scoped to its resource type — there is no `resource_id`
+  grant mapping.)
 
 ## 5. The wizard flow (v0.0.1)
 

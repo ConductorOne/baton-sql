@@ -43,16 +43,20 @@ type Transform struct {
 }
 
 type EntitlementsSpec struct {
-	Mode   string              `json:"mode"` // "static" | "query" | "none"
-	Static []StaticEntitlement `json:"static,omitempty"`
-	Query  string              `json:"query,omitempty"`
-	Fields []FieldMapping      `json:"fields,omitempty"` // for query mode
+	Mode        string              `json:"mode"` // "static" | "query" | "none"
+	Static      []StaticEntitlement `json:"static,omitempty"`
+	Query       string              `json:"query,omitempty"`
+	Fields      []FieldMapping      `json:"fields,omitempty"`       // for query mode
+	GrantableTo []string            `json:"grantable_to,omitempty"` // resource-type IDs this entitlement is grantable to (dynamic mode)
 }
 
 type StaticEntitlement struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name"`
-	Purpose     string `json:"purpose,omitempty"`
+	ID          string   `json:"id"`
+	DisplayName string   `json:"display_name"`
+	Description string   `json:"description,omitempty"`
+	Purpose     string   `json:"purpose,omitempty"`
+	GrantableTo []string `json:"grantable_to,omitempty"` // resource-type IDs this entitlement is grantable to
+	Immutable   bool     `json:"immutable,omitempty"`
 }
 
 type GrantSpec struct {

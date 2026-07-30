@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -256,5 +257,178 @@ func TestGenerate_DynamicEntitlementsNoIDOrDisplayName_Errors(t *testing.T) {
 	}
 	if _, err := Generate(spec); err == nil {
 		t.Fatal("expected Generate to error when dynamic entitlements map neither id nor display_name")
+	}
+}
+
+// TestGenerate_StaticGrantableToLiteralList verifies FIX-1/M-4: a static
+// entitlement emits grantable_to as a literal !!seq of resource-type IDs (not a
+// per-row CEL ref that would silently match nothing), plus description and
+// immutable, and that this round-trips through bsql.Parse with GrantableTo
+// populated as the exact []string.
+func TestGenerate_StaticGrantableToLiteralList(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		ResourceTypes: []ResourceTypeSpec{
+			{ID: "users", Name: "Users", Trait: "user",
+				List:         ListSpec{Query: "SELECT id FROM employees", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "roles", Name: "Roles", Trait: "role",
+				List: ListSpec{Query: "SELECT role_id, role_name FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_name"}}},
+				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{
+					ID: "assigned", DisplayName: "Assigned", Purpose: "assignment",
+					Description: "Membership", Immutable: true, GrantableTo: []string{"users"},
+				}}},
+			},
+		},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := bsql.Parse(out)
+	if err != nil {
+		t.Fatalf("parse: %v\n%s", err, out)
+	}
+	se := cfg.ResourceTypes["roles"].StaticEntitlements
+	if len(se) != 1 {
+		t.Fatalf("expected 1 static entitlement, got %d", len(se))
+	}
+	if !reflect.DeepEqual(se[0].GrantableTo, []string{"users"}) {
+		t.Errorf("grantable_to = %#v, want [users]", se[0].GrantableTo)
+	}
+	if se[0].Description != "Membership" {
+		t.Errorf("description = %q, want Membership", se[0].Description)
+	}
+	if !se[0].Immutable {
+		t.Error("immutable not set on parsed static entitlement")
+	}
+	s := string(out)
+	// literal id, not a CEL ref like ".users" or ".column"
+	if !strings.Contains(s, "grantable_to:") || !strings.Contains(s, "- users") {
+		t.Errorf("expected literal grantable_to list with id 'users'; yaml:\n%s", s)
+	}
+	if strings.Contains(s, ".users") {
+		t.Errorf("grantable_to must be a literal id, not a CEL ref; yaml:\n%s", s)
+	}
+}
+
+// TestGenerate_DynamicGrantableToLiteralList verifies FIX-1 for dynamic
+// (query) entitlements: grantable_to comes from EntitlementsSpec.GrantableTo as
+// a literal list, NOT from a query column compiled to a CEL ref.
+func TestGenerate_DynamicGrantableToLiteralList(t *testing.T) {
+	spec := &Spec{
+		AppName: "EBS",
+		ResourceTypes: []ResourceTypeSpec{
+			{ID: "users", Name: "Users", Trait: "user",
+				List:         ListSpec{Query: "SELECT id FROM u", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "menu", Name: "Menu", Trait: "role",
+				List: ListSpec{Query: "SELECT menu_id, menu_name FROM menus", Fields: []FieldMapping{
+					{Field: "id", Column: "menu_id"}, {Field: "display_name", Column: "menu_name"},
+				}},
+				Entitlements: EntitlementsSpec{
+					Mode:        "query",
+					Query:       "SELECT function_id, function_name FROM functions WHERE menu_id = ?<menu_id>",
+					GrantableTo: []string{"users"},
+					Fields: []FieldMapping{
+						{Field: "id", Column: "function_id"},
+						{Field: "display_name", Column: "function_name"},
+					},
+				},
+			},
+		},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := bsql.Parse(out)
+	if err != nil {
+		t.Fatalf("parse: %v\n%s", err, out)
+	}
+	m := cfg.ResourceTypes["menu"].Entitlements.Map
+	if len(m) != 1 {
+		t.Fatalf("expected 1 entitlement mapping, got %d", len(m))
+	}
+	if !reflect.DeepEqual(m[0].GrantableTo, []string{"users"}) {
+		t.Errorf("dynamic grantable_to = %#v, want [users]", m[0].GrantableTo)
+	}
+	s := string(out)
+	if strings.Contains(s, ".users") {
+		t.Errorf("dynamic grantable_to must be literal id, not CEL ref; yaml:\n%s", s)
+	}
+}
+
+// TestGenerate_GrantResourceIDNotEmitted verifies FIX-2: even when a spec maps
+// a resource_id grant field, Generate must NOT emit it (bsql's GrantMapping has
+// no resource_id key, so emitting it is a silent no-op).
+func TestGenerate_GrantResourceIDNotEmitted(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		ResourceTypes: []ResourceTypeSpec{
+			{ID: "users", Name: "Users", Trait: "user",
+				List:         ListSpec{Query: "SELECT id FROM employees", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "roles", Name: "Roles", Trait: "role",
+				List:         ListSpec{Query: "SELECT role_id, role_name FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_name"}}},
+				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned", Purpose: "assignment"}}},
+				Grants: []GrantSpec{{
+					Query:       "SELECT user_id, r FROM user_roles WHERE role_id = ?<role_id>",
+					ResourceVar: "role_id", PrincipalType: "users", Entitlement: "assigned",
+					Fields: []FieldMapping{{Field: "principal_id", Column: "user_id"}, {Field: "resource_id", Column: "r"}},
+				}},
+			},
+		},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bsql.Parse(out); err != nil {
+		t.Fatalf("parse: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "resource_id") {
+		t.Errorf("resource_id must never be emitted on a grant; yaml:\n%s", out)
+	}
+}
+
+// TestGenerate_SkipFlagOnEmptyMode verifies FIX-4: a resource type with an
+// empty entitlements Mode ("") and no grants gets skip_entitlements_and_grants:
+// true, keyed on real emptiness rather than the Mode=="none" sentinel.
+func TestGenerate_SkipFlagOnEmptyMode(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "users", Name: "Users", Trait: "user",
+			List:         ListSpec{Query: "SELECT id FROM employees", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+			Entitlements: EntitlementsSpec{Mode: ""},
+		}},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := bsql.Parse(out)
+	if err != nil {
+		t.Fatalf("parse: %v\n%s", err, out)
+	}
+	if !cfg.ResourceTypes["users"].SkipEntitlementsAndGrants {
+		t.Errorf("expected skip_entitlements_and_grants for empty-mode type; yaml:\n%s", out)
+	}
+}
+
+// TestGenerate_UnknownModeErrors verifies FIX-4: an unrecognized entitlements
+// mode must be an error, not silently treated as "none".
+func TestGenerate_UnknownModeErrors(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "users", Name: "Users", Trait: "user",
+			List:         ListSpec{Query: "SELECT id FROM employees", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+			Entitlements: EntitlementsSpec{Mode: "bogus"},
+		}},
+	}
+	if _, err := Generate(spec); err == nil {
+		t.Fatal("expected Generate to error on unknown entitlements mode")
 	}
 }
