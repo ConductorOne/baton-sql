@@ -53,6 +53,7 @@ func New() *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connect", s.handleConnect)
+	mux.HandleFunc("/api/run", s.handleRun)
 	return mux
 }
 
