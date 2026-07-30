@@ -2,10 +2,11 @@ package server
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/conductorone/baton-sql/pkg/database"
@@ -20,16 +21,15 @@ const maxRows = 100
 const queryTimeout = 30 * time.Second
 
 // tokenRegex matches bsql resource-var tokens (?<name> or ?<name|ident>).
-// This task only needs to detect their presence; Task 3 adds substitution
-// and mirrors this same pattern (bsql's queryOptRegex).
+// It mirrors bsql's queryOptRegex (pkg/bsql/query.go); the optional |ident
+// group is captured but ignored here (see substituteTokens).
 var tokenRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)(?:\|[a-zA-Z0-9_]+)?\>`)
 
 // runRequest is the body of POST /api/run.
 type runRequest struct {
 	Query string `json:"query"`
-	// Vars supplies sample values for ?<var> tokens in Query. Unused by this
-	// task: a query containing a token is rejected with a clear error so
-	// Task 3 has a seam to implement substitution.
+	// Vars supplies sample values for ?<var> tokens in Query, keyed by
+	// token name (e.g. "rid" for "?<rid>").
 	Vars map[string]string `json:"vars,omitempty"`
 }
 
@@ -55,14 +55,48 @@ func encodeValue(v any) any {
 	return v
 }
 
-// setSessionForTest injects a session directly, bypassing /api/connect, so
-// handlers can be tested against an in-memory database. Test-only.
-func (s *Server) setSessionForTest(db *sql.DB, engine database.DbEngine) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.db = db
-	s.engine = engine
-	s.connected = true
+// substituteTokens replaces each bsql-style ?<name> (or ?<name|ident>) token
+// in query with the target engine's positional placeholder, in the order the
+// tokens appear. For each token whose name is present in vars, the sample
+// value is appended to args and the token is replaced with the placeholder;
+// for each token whose name is absent from vars, the name is collected into
+// missing (and the token is left unrewritten) so the caller can reject the
+// query before execution rather than run it with a dangling token.
+func substituteTokens(query string, vars map[string]string, engine database.DbEngine) (rewritten string, args []any, missing []string) {
+	seenMissing := make(map[string]bool)
+	rewritten = tokenRegex.ReplaceAllStringFunc(query, func(tok string) string {
+		m := tokenRegex.FindStringSubmatch(tok)
+		name := m[1]
+		val, ok := vars[name]
+		if !ok {
+			if !seenMissing[name] {
+				missing = append(missing, name)
+				seenMissing[name] = true
+			}
+			return tok
+		}
+		args = append(args, val)
+		return placeholderFor(engine, len(args))
+	})
+	return rewritten, args, missing
+}
+
+// placeholderFor returns the nth (1-based) positional placeholder for engine,
+// mirroring bsql's getNextPlaceholder (pkg/bsql/query.go). Engines without an
+// explicit case (e.g. HDB, Unknown) fall back to "?".
+func placeholderFor(engine database.DbEngine, n int) string {
+	switch engine {
+	case database.PostgreSQL:
+		return fmt.Sprintf("$%d", n)
+	case database.MSSQL:
+		return fmt.Sprintf("@p%d", n)
+	case database.Oracle:
+		return fmt.Sprintf(":%d", n)
+	case database.MySQL, database.SQLite, database.Vertica:
+		return "?"
+	default:
+		return "?"
+	}
 }
 
 // handleRun implements POST /api/run: it executes the caller's single query
@@ -82,6 +116,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	db := s.db
+	engine := s.engine
 	connected := s.connected
 	s.mu.Unlock()
 
@@ -90,15 +125,22 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if tokenRegex.MatchString(req.Query) {
-		writeJSON(w, http.StatusOK, runResponse{Error: "query has ?<var> tokens; provide sample vars"})
-		return
+	query := req.Query
+	var args []any
+	if tokenRegex.MatchString(query) {
+		rewritten, substArgs, missing := substituteTokens(query, req.Vars, engine)
+		if len(missing) > 0 {
+			writeJSON(w, http.StatusOK, runResponse{Error: "missing sample values for: " + strings.Join(missing, ", ")})
+			return
+		}
+		query = rewritten
+		args = substArgs
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 
-	rows, err := db.QueryContext(ctx, req.Query)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		writeJSON(w, http.StatusOK, runResponse{Error: err.Error()})
 		return

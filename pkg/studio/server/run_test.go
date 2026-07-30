@@ -101,17 +101,80 @@ func TestRun_Truncated(t *testing.T) {
 	}
 }
 
-func TestRun_TokenPresent(t *testing.T) {
+func TestRun_TokenSubstituted(t *testing.T) {
+	s := New()
+	db := seedDB(t, 3)
+	s.setSessionForTest(db, database.SQLite)
+
+	resp := doRun(t, s, `{"query":"SELECT id FROM t WHERE id = ?<rid>","vars":{"rid":"2"}}`)
+	if resp.Error != "" {
+		t.Fatalf("unexpected error: %s", resp.Error)
+	}
+	if resp.RowCount != 1 {
+		t.Fatalf("expected row_count 1, got %d", resp.RowCount)
+	}
+	if len(resp.Rows) != 1 || len(resp.Rows[0]) != 1 {
+		t.Fatalf("unexpected rows: %+v", resp.Rows)
+	}
+	if id, ok := resp.Rows[0][0].(float64); !ok || id != 2 {
+		t.Fatalf("expected matched row id==2, got %+v (%T)", resp.Rows[0][0], resp.Rows[0][0])
+	}
+}
+
+func TestRun_TokenMissingVar(t *testing.T) {
 	s := New()
 	db := seedDB(t, 3)
 	s.setSessionForTest(db, database.SQLite)
 
 	resp := doRun(t, s, `{"query":"SELECT id FROM t WHERE id = ?<rid>"}`)
 	if resp.Error == "" {
-		t.Fatalf("expected error for query with ?<var> token, got %+v", resp)
+		t.Fatalf("expected error for query with unresolved ?<var> token, got %+v", resp)
 	}
-	if !strings.Contains(resp.Error, "?<var>") {
-		t.Fatalf("expected error to mention ?<var> tokens, got %q", resp.Error)
+	if !strings.Contains(resp.Error, "rid") {
+		t.Fatalf("expected error to name the missing var 'rid', got %q", resp.Error)
+	}
+}
+
+func TestSubstituteTokens_SQLite(t *testing.T) {
+	rewritten, args, missing := substituteTokens("SELECT id FROM t WHERE id = ?<rid>", map[string]string{"rid": "2"}, database.SQLite)
+	if len(missing) != 0 {
+		t.Fatalf("expected no missing vars, got %+v", missing)
+	}
+	if rewritten != "SELECT id FROM t WHERE id = ?" {
+		t.Fatalf("unexpected rewritten query: %q", rewritten)
+	}
+	if len(args) != 1 || args[0] != "2" {
+		t.Fatalf("unexpected args: %+v", args)
+	}
+}
+
+func TestSubstituteTokens_MissingVar(t *testing.T) {
+	rewritten, args, missing := substituteTokens("SELECT id FROM t WHERE id = ?<rid>", map[string]string{}, database.SQLite)
+	if len(args) != 0 {
+		t.Fatalf("expected no args, got %+v", args)
+	}
+	if len(missing) != 1 || missing[0] != "rid" {
+		t.Fatalf("expected missing==[rid], got %+v", missing)
+	}
+	if rewritten != "SELECT id FROM t WHERE id = ?<rid>" {
+		t.Fatalf("expected query left unrewritten when var missing, got %q", rewritten)
+	}
+}
+
+func TestSubstituteTokens_Postgres(t *testing.T) {
+	rewritten, args, missing := substituteTokens(
+		"SELECT * FROM t WHERE a = ?<a> AND b = ?<b>",
+		map[string]string{"a": "1", "b": "2"},
+		database.PostgreSQL,
+	)
+	if len(missing) != 0 {
+		t.Fatalf("expected no missing vars, got %+v", missing)
+	}
+	if rewritten != "SELECT * FROM t WHERE a = $1 AND b = $2" {
+		t.Fatalf("unexpected rewritten query: %q", rewritten)
+	}
+	if len(args) != 2 || args[0] != "1" || args[1] != "2" {
+		t.Fatalf("unexpected args: %+v", args)
 	}
 }
 
