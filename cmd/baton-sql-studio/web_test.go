@@ -78,6 +78,10 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"data-yaml",
 		"Download",
 		"data-download-yaml",
+		// Results search — client-side filter over the last run's rows.
+		"data-results-search",
+		"Search results…",
+		"data-results-search-count",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {

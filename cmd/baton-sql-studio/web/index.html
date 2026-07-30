@@ -833,6 +833,27 @@
   .mapping-table tbody tr:last-child td { border-bottom: none; }
   .results-table td { color: var(--ink); font-family: var(--font-mono); }
 
+  /* Client-side results search (above the results table): input + a
+     "showing X of Y rows" count, wrapping on narrow panels rather than
+     forcing the table itself to overflow horizontally. */
+  .results-search-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem 0.9rem;
+    margin-bottom: 0.7rem;
+  }
+  .results-search-row .results-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 22rem;
+  }
+  .results-search-count {
+    color: var(--ink-muted);
+    font-size: 0.8rem;
+    white-space: normal;
+  }
+
   .mapping-heading {
     font-size: 0.92rem;
     font-weight: 650;
@@ -1297,6 +1318,13 @@
     // the query text AT THE TIME OF THE RUN so a later edit can be detected
     // as "stale" without a second round-trip.
     lastRun: {},
+
+    // resultsSearch[rtId + "/" + tab] = the current results-search text for
+    // that panel's client-side row filter (renderResultsPanel). Keyed the
+    // same way as lastRun so each tab/resource-type keeps its own filter and
+    // switching between them never leaks one panel's search into another.
+    // runQuery() resets the entry for its key on every fresh run.
+    resultsSearch: {},
 
     // extraProfileFields[rtId + "/" + tab] = ["profile.department", ...] —
     // user-added "profile.<key>" mapping rows. Kept in ui (not state)
@@ -1772,6 +1800,21 @@
 
   function getLastRun(rtId, tab) { return ui.lastRun[mapKey(rtId, tab)] || null; }
 
+  // getResultsSearch()/setResultsSearch() read/write the current results
+  // panel's search text, namespaced the same way as getLastRun().
+  function getResultsSearch(rtId, tab) { return ui.resultsSearch[mapKey(rtId, tab)] || ""; }
+  function setResultsSearch(rtId, tab, value) { ui.resultsSearch[mapKey(rtId, tab)] = value; }
+
+  // resultCellText() renders a single cell value to display/searchable text
+  // exactly the way renderResultsPanel's table body does (null/undefined as
+  // blank, objects as their JSON, everything else via String()) — shared so
+  // the search filter matches precisely what's on screen.
+  function resultCellText(cell) {
+    if (cell === null || cell === undefined) return "";
+    if (typeof cell === "object") return JSON.stringify(cell);
+    return String(cell);
+  }
+
   // ensureGrant() lazily initializes state.resource_types[i].grants[0] —
   // v1 authors exactly ONE grant per resource type (per the brief), so
   // every Grants-tab accessor below reads/writes grants[0] specifically,
@@ -2184,7 +2227,12 @@
 
   // renderResultsPanel() shows the last run's columns+rows as a table that
   // scrolls inside its own container (never the page body), or the
-  // appropriate empty/error state when there isn't one yet.
+  // appropriate empty/error state when there isn't one yet. When there are
+  // rows to show, it also renders a client-side search box (never
+  // re-queries the server) that filters rows by case-insensitive substring
+  // match across every cell, plus a "showing X of Y rows" count. The search
+  // input is built once and only its result body is re-rendered on input,
+  // so typing never loses focus/cursor position.
   function renderResultsPanel(container, rt, tab) {
     container.innerHTML = "";
     var lr = getLastRun(rt.id, tab);
@@ -2217,38 +2265,85 @@
       return;
     }
 
-    var scroll = document.createElement("div");
-    scroll.className = "table-scroll results-scroll";
-    var table = document.createElement("table");
-    table.className = "results-table";
-    var thead = document.createElement("thead");
-    var headRow = document.createElement("tr");
-    lr.columns.forEach(function (c) {
-      var th = document.createElement("th");
-      th.textContent = c;
-      headRow.appendChild(th);
-    });
-    thead.appendChild(headRow);
-    table.appendChild(thead);
-    var tbody = document.createElement("tbody");
-    lr.rows.forEach(function (row) {
-      var tr = document.createElement("tr");
-      row.forEach(function (cell) {
-        var td = document.createElement("td");
-        if (cell === null || cell === undefined) {
-          td.textContent = "";
-        } else if (typeof cell === "object") {
-          td.textContent = JSON.stringify(cell);
-        } else {
-          td.textContent = String(cell);
-        }
-        tr.appendChild(td);
+    var searchRow = document.createElement("div");
+    searchRow.className = "results-search-row";
+    var searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.className = "control results-search-input";
+    searchInput.placeholder = "Search results…";
+    searchInput.setAttribute("data-results-search", "");
+    searchInput.value = getResultsSearch(rt.id, tab);
+    var countEl = document.createElement("span");
+    countEl.className = "results-search-count";
+    countEl.setAttribute("data-results-search-count", "");
+    searchRow.appendChild(searchInput);
+    searchRow.appendChild(countEl);
+    container.appendChild(searchRow);
+
+    var body = document.createElement("div");
+    container.appendChild(body);
+
+    // renderBody() does the filtering + (re)render of everything below the
+    // search box: the count line, the table, or the no-match message. Kept
+    // separate from the search <input> itself so re-rendering on every
+    // keystroke never recreates (and so never steals focus from) the input.
+    function renderBody() {
+      var term = getResultsSearch(rt.id, tab);
+      var needle = term.toLowerCase();
+      var filtered = needle
+        ? lr.rows.filter(function (row) {
+            return row.some(function (cell) { return resultCellText(cell).toLowerCase().indexOf(needle) !== -1; });
+          })
+        : lr.rows;
+
+      body.innerHTML = "";
+
+      var countText = "Showing " + filtered.length + " of " + lr.rows.length + (lr.rows.length === 1 ? " row" : " rows");
+      if (lr.truncated) countText += " · search covers only the first " + lr.rows.length + " fetched rows (results were truncated)";
+      countEl.textContent = countText;
+
+      if (!filtered.length) {
+        var noMatch = document.createElement("p");
+        noMatch.className = "hint-block";
+        noMatch.textContent = "No rows match '" + term + "'.";
+        body.appendChild(noMatch);
+        return;
+      }
+
+      var scroll = document.createElement("div");
+      scroll.className = "table-scroll results-scroll";
+      var table = document.createElement("table");
+      table.className = "results-table";
+      var thead = document.createElement("thead");
+      var headRow = document.createElement("tr");
+      lr.columns.forEach(function (c) {
+        var th = document.createElement("th");
+        th.textContent = c;
+        headRow.appendChild(th);
       });
-      tbody.appendChild(tr);
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      var tbody = document.createElement("tbody");
+      filtered.forEach(function (row) {
+        var tr = document.createElement("tr");
+        row.forEach(function (cell) {
+          var td = document.createElement("td");
+          td.textContent = resultCellText(cell);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      scroll.appendChild(table);
+      body.appendChild(scroll);
+    }
+
+    searchInput.addEventListener("input", function (evt) {
+      setResultsSearch(rt.id, tab, evt.target.value);
+      renderBody();
     });
-    table.appendChild(tbody);
-    scroll.appendChild(table);
-    container.appendChild(scroll);
+
+    renderBody();
   }
 
   // RUN_BTN_IDS maps a tab key to the id of its own Run button, so runQuery
@@ -2267,6 +2362,7 @@
     if (!rt) return;
     var query = queryForTab(rt, tab);
     var key = mapKey(rtId, tab);
+    ui.resultsSearch[key] = ""; // a fresh run starts with the filter cleared
 
     var runBtn = document.getElementById(RUN_BTN_IDS[tab] || "");
     if (runBtn) runBtn.disabled = true;
@@ -3634,6 +3730,7 @@
     ui.selectedRT = null;
     ui.activeTab = "list";
     ui.lastRun = {};
+    ui.resultsSearch = {};
     ui.extraProfileFields = {};
     ui.grantSamples = {};
     ui.lastValidate = null;
@@ -3755,6 +3852,12 @@
     runQuery: runQuery,
     getLastRun: getLastRun,
     mapKey: mapKey,
+    // Results search (client-side row filter over ui.lastRun) — exposed so a
+    // DB-less Playwright pass can inject a fake last-run, read/set the
+    // filter text directly, and re-render the results panel to verify it.
+    getResultsSearch: getResultsSearch,
+    setResultsSearch: setResultsSearch,
+    renderResultsPanel: renderResultsPanel,
     previewField: previewField,
     renderMappingTable: renderMappingTable,
     fieldDefsForTrait: fieldDefsForTrait,
