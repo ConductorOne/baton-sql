@@ -103,6 +103,25 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"data-import-yaml-submit",
 		"data-import-yaml-error",
 		"data-import-yaml-note",
+		// Schema browser — a collapsible schema/tables/columns tree over
+		// GET /api/schema + GET /api/schema/table, mounted once per
+		// workspace and shared by the List/Entitlements/Grants tabs, with
+		// click-to-insert into whichever query editor last had focus and a
+		// per-table "starter query" button.
+		"data-schema-browser",
+		"/api/schema",
+		"/api/schema/table",
+		"Load schema",
+		"Schema browser",
+		"data-schema-browser-toggle",
+		"data-schema-tree",
+		"data-schema-node",
+		"data-schema-table",
+		"data-schema-column",
+		"data-schema-insert-table",
+		"data-schema-insert-column",
+		"data-schema-starter-query",
+		"data-cant-select-badge",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {

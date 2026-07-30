@@ -745,6 +745,99 @@
   .tab-body .placeholder-copy { max-width: 60ch; }
 
   /* ---------------------------------------------------------------------
+     Schema browser — a collapsible schema → tables → columns tree over the
+     connected database's catalog, mounted once per workspace (shared by
+     the List/Entitlements/Grants tabs below, not rebuilt per tab).
+     ------------------------------------------------------------------- */
+  .schema-browser {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    margin-bottom: 1.3rem;
+  }
+  .schema-browser-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.6rem 0.85rem;
+    border: none;
+    background: transparent;
+    color: var(--ink);
+    font-weight: 600;
+    font-size: 0.86rem;
+    text-align: left;
+    border-radius: 10px;
+  }
+  .schema-browser-toggle:hover { background: rgba(var(--accent-rgb), 0.08); }
+  .schema-browser-caret { color: var(--ink-muted); width: 1em; flex-shrink: 0; text-align: center; }
+  .schema-browser-title { flex: 0 0 auto; }
+  .schema-browser-count { color: var(--ink-muted); font-weight: 500; font-size: 0.78rem; }
+  .schema-browser-body {
+    border-top: 1px solid var(--border);
+    padding: 0.75rem 0.85rem 0.9rem;
+  }
+  .schema-tree-scroll {
+    max-height: 16rem;
+    overflow-y: auto;
+    overflow-x: auto;
+  }
+  .schema-tree, .table-tree, .column-tree { list-style: none; margin: 0; padding: 0; }
+  .table-tree { padding-left: 1.3rem; margin-top: 0.3rem; }
+  .column-tree { padding-left: 1.3rem; margin-top: 0.3rem; }
+  .schema-node, .table-node { margin-bottom: 0.15rem; }
+  .column-node {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
+    flex-wrap: wrap;
+  }
+  .tree-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem 0.15rem;
+    border-radius: 6px;
+    flex-wrap: wrap;
+  }
+  .tree-row:hover { background: rgba(var(--accent-rgb), 0.08); }
+  .tree-toggle {
+    border: none;
+    background: transparent;
+    color: var(--ink-muted);
+    width: 1.1rem;
+    height: 1.1rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    border-radius: 4px;
+  }
+  .tree-toggle:hover { color: var(--ink); }
+  .tree-name-btn {
+    border: none;
+    background: transparent;
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 0.05rem 0.25rem;
+    border-radius: 4px;
+    text-align: left;
+  }
+  .tree-name-btn:hover { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
+  .column-name-btn { font-weight: 500; }
+  .column-type { color: var(--ink-muted); font-size: 0.76rem; white-space: nowrap; }
+  .schema-badge-no-select { background: rgba(var(--crit-rgb), 0.14); color: var(--crit); }
+  .tree-count { color: var(--ink-muted); font-size: 0.76rem; }
+  .schema-truncated-note { color: var(--ink-muted); font-size: 0.72rem; margin: 0.2rem 0 0.35rem; }
+  .table-detail { padding-left: 1.5rem; margin-top: 0.15rem; }
+  .table-detail-actions { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem; flex-wrap: wrap; }
+  .table-detail-actions .btn { padding: 0.3rem 0.65rem; font-size: 0.76rem; }
+
+  /* ---------------------------------------------------------------------
      List tab (Task 3) — query editor, results panel, column mapping.
      ------------------------------------------------------------------- */
   .list-tab {
@@ -1306,6 +1399,8 @@
             <button type="button" class="tab" role="tab" id="tab-grants" data-tab="grants" aria-selected="false">Grants</button>
           </div>
 
+          <div class="schema-browser" id="schema-browser" data-schema-browser></div>
+
           <div class="tab-body" id="tab-body"></div>
         </section>
 
@@ -1454,6 +1549,29 @@
     // type purely so re-running after a tweak doesn't start from a blank
     // prompt. Never serialized as part of the Spec.
     grantSamples: {},
+
+    // schemaBrowser — the schema browser panel's state: the fetched catalog
+    // (GET /api/schema, plus per-table GET /api/schema/table results cached
+    // as they're expanded), which tree nodes are expanded, and which query
+    // editor last had focus (for click-to-insert — see renderSchemaBrowser()
+    // and insertIntoEditor(), below). Mounted once per workspace by
+    // renderWorkspace() and shared across the List/Entitlements/Grants tabs:
+    // one catalog for the connected database, not refetched per tab. Reset
+    // by resetSchemaBrowser() on every connect/reconnect/disconnect so a
+    // stale catalog from a previous database is never shown.
+    schemaBrowser: {
+      open: false,             // whether the panel's own disclosure is expanded
+      loading: false,          // GET /api/schema in flight
+      loaded: false,           // GET /api/schema has completed at least once
+      error: null,
+      engine: null,
+      schemas: [],             // [{name, tables:[{name,type}], truncated}]
+      truncated: false,        // whether the schema LIST ITSELF was truncated
+      expandedSchemas: {},     // schemaName -> bool
+      expandedTables: {},      // "schema table" -> bool
+      tableCache: {},          // "schema table" -> {loading, loaded, error, columns, type, canSelect}
+      lastFocusedTab: null     // "list" | "entitlements" | "grants" | null
+    },
 
     // lastValidate = {ok, errors} — the most recent /api/validate Report
     // (Task 6), or null before the first run. Drives the Review panel's
@@ -1880,6 +1998,11 @@
       document.getElementById("tab-" + tab).setAttribute("aria-selected", ui.activeTab === tab ? "true" : "false");
     });
 
+    // Mounted once per workspace, shared across all three tabs below (one
+    // catalog, three editors) — see the "Schema browser" section for why
+    // this is a targeted re-render rather than part of render()/tab-body.
+    renderSchemaBrowser();
+
     if (ui.activeTab === "list") {
       renderListTab(rt);
       return;
@@ -1902,6 +2025,487 @@
     renderDeclarePanel();
     renderWorkspace();
     renderReviewPanel();
+  }
+
+  // -----------------------------------------------------------------------
+  // Schema browser — a collapsible schema → tables (lazy) → columns (lazy)
+  // tree over the connected database's catalog (GET /api/schema, GET
+  // /api/schema/table), so a user building a query can see what the
+  // connected account can actually reach instead of guessing table/column
+  // names. Mounted once per workspace by renderWorkspace() and shared
+  // across the List/Entitlements/Grants tabs (one fetched catalog, three
+  // query editors) rather than re-fetched per tab.
+  //
+  // Clicking a table or column name inserts its identifier into whichever
+  // query editor last had focus (ui.schemaBrowser.lastFocusedTab, set by a
+  // "focus" listener each editor registers) — necessary because clicking
+  // anywhere in the tree blurs the textarea before the click handler runs,
+  // so the DOM's own document.activeElement is already wrong by the time
+  // insertIntoEditor() looks. Every load*/toggle* handler below re-renders
+  // via renderSchemaBrowser() directly, NEVER the full render()/
+  // renderWorkspace() — those tear down and rebuild #tab-body, which would
+  // lose the currently-focused editor's cursor position (or focus itself)
+  // on every tree click.
+  // -----------------------------------------------------------------------
+
+  // schemaTableKey() namespaces ui.schemaBrowser.expandedTables/tableCache by
+  // schema+table, since table names aren't unique across schemas.
+  function schemaTableKey(schemaName, tableName) { return schemaName + "\u0000" + tableName; }
+
+  // resetSchemaBrowser() clears every fetched/expanded/cached bit of schema
+  // browser state. Called on every fresh connect, successful "Edit
+  // connection", and Disconnect (same reasoning as handleDisconnect()'s
+  // reset of ui.lastRun/ui.resultsSearch/etc.) so a catalog fetched from a
+  // PREVIOUS database connection is never shown against a new one.
+  function resetSchemaBrowser() {
+    ui.schemaBrowser = {
+      open: false,
+      loading: false,
+      loaded: false,
+      error: null,
+      engine: null,
+      schemas: [],
+      truncated: false,
+      expandedSchemas: {},
+      expandedTables: {},
+      tableCache: {},
+      lastFocusedTab: null
+    };
+  }
+
+  // toggleSchemaBrowser() opens/closes the panel's own disclosure; the
+  // first open (per connection) triggers the root GET /api/schema fetch —
+  // every later open/close just toggles ui.schemaBrowser.open, reusing
+  // whatever was already fetched.
+  function toggleSchemaBrowser() {
+    ui.schemaBrowser.open = !ui.schemaBrowser.open;
+    if (ui.schemaBrowser.open && !ui.schemaBrowser.loaded && !ui.schemaBrowser.loading) {
+      loadSchemas();
+    } else {
+      renderSchemaBrowser();
+    }
+  }
+
+  // loadSchemas() fetches every schema and the tables/views directly in it,
+  // in one round trip — schemaResponse already nests tables per schema (see
+  // pkg/studio/server/schema.go's handleSchema), so expanding an individual
+  // schema node in the tree below is a pure UI toggle, never a second
+  // fetch. Engines schema.go has no catalog SQL for (oracle/hdb/unknown)
+  // come back as {error:"schema discovery is not yet supported for ..."}
+  // (HTTP 200, per the server's degrade-gracefully convention), which is
+  // shown as-is rather than crashing.
+  async function loadSchemas() {
+    ui.schemaBrowser.loading = true;
+    renderSchemaBrowser();
+    var res = await api("/api/schema");
+    ui.schemaBrowser.loading = false;
+    ui.schemaBrowser.loaded = true;
+    if (res && res.error) {
+      ui.schemaBrowser.error = res.error;
+      ui.schemaBrowser.schemas = [];
+      ui.schemaBrowser.truncated = false;
+    } else {
+      ui.schemaBrowser.error = null;
+      ui.schemaBrowser.engine = (res && res.engine) || null;
+      ui.schemaBrowser.schemas = (res && res.schemas) || [];
+      ui.schemaBrowser.truncated = !!(res && res.truncated);
+    }
+    renderSchemaBrowser();
+  }
+
+  function toggleSchemaNode(schemaName) {
+    ui.schemaBrowser.expandedSchemas[schemaName] = !ui.schemaBrowser.expandedSchemas[schemaName];
+    renderSchemaBrowser();
+  }
+
+  // toggleTableNode() expands/collapses one table's column detail, fetching
+  // its columns (GET /api/schema/table) only the first time it's opened —
+  // ui.schemaBrowser.tableCache persists the result (keyed by
+  // schemaTableKey) so collapsing and re-expanding the same table never
+  // refetches.
+  function toggleTableNode(schemaName, tableName) {
+    var key = schemaTableKey(schemaName, tableName);
+    var wasOpen = !!ui.schemaBrowser.expandedTables[key];
+    ui.schemaBrowser.expandedTables[key] = !wasOpen;
+    if (!wasOpen && !ui.schemaBrowser.tableCache[key]) {
+      loadTableColumns(schemaName, tableName);
+    } else {
+      renderSchemaBrowser();
+    }
+  }
+
+  async function loadTableColumns(schemaName, tableName) {
+    var key = schemaTableKey(schemaName, tableName);
+    ui.schemaBrowser.tableCache[key] = { loading: true, loaded: false, error: null, columns: [], type: "", canSelect: null };
+    renderSchemaBrowser();
+    var res = await api("/api/schema/table?schema=" + encodeURIComponent(schemaName) + "&table=" + encodeURIComponent(tableName));
+    var entry = { loading: false, loaded: true, error: null, columns: [], type: "", canSelect: null };
+    if (res && res.error) {
+      entry.error = res.error;
+    } else {
+      entry.columns = (res && res.columns) || [];
+      entry.type = (res && res.type) || "";
+      entry.canSelect = (res && typeof res.can_select === "boolean") ? res.can_select : null;
+    }
+    ui.schemaBrowser.tableCache[key] = entry;
+    renderSchemaBrowser();
+  }
+
+  // activeQueryEditor() resolves which <textarea> click-to-insert should
+  // target: the query editor for ui.schemaBrowser.lastFocusedTab if it's
+  // still mounted (it won't be after switching to a different tab, since
+  // renderWorkspace() rebuilds #tab-body per tab), else the CURRENT tab's
+  // own editor (per the brief: "if no editor was focused, insert into the
+  // current tab's query editor"). Returns null if neither exists — e.g.
+  // Entitlements in "static" mode has no query editor in the DOM at all.
+  function activeQueryEditor() {
+    var tab = ui.schemaBrowser.lastFocusedTab;
+    if (tab) {
+      var el = document.getElementById(tab + "-query-editor");
+      if (el) return el;
+    }
+    return document.getElementById(ui.activeTab + "-query-editor");
+  }
+
+  // insertIntoEditor() inserts `text` at the target editor's cursor (or
+  // replacing its current selection) via setRangeText, then dispatches a
+  // synthetic "input" event — setRangeText does NOT fire one on its own —
+  // so the editor's existing "input" listener (which writes
+  // rt.list.query / rt.entitlements.query / rt.grants[0].query and
+  // refreshes the status pill + rail dot) runs exactly as if the user had
+  // typed it. No-ops if no editor is available to insert into.
+  function insertIntoEditor(text) {
+    var el = activeQueryEditor();
+    if (!el) return;
+    el.focus();
+    var start = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
+    var end = typeof el.selectionEnd === "number" ? el.selectionEnd : el.value.length;
+    el.setRangeText(text, start, end, "end");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // applyStarterQuery() replaces the CURRENT tab's query editor value
+  // outright (never a targeted cursor insert) with a starter SELECT built
+  // from a table's already-fetched columns. Only sets the text — matches
+  // the explicit-Run convention every other query editor already follows —
+  // and no-ops if the current tab has no query editor mounted.
+  function applyStarterQuery(schemaName, tableName, entry) {
+    var el = document.getElementById(ui.activeTab + "-query-editor");
+    if (!el) return;
+    var columnNames = (entry && entry.columns && entry.columns.length)
+      ? entry.columns.map(function (c) { return c.name; })
+      : ["*"];
+    el.value = "SELECT " + columnNames.join(", ") + " FROM " + schemaName + "." + tableName + " LIMIT 50";
+    el.focus();
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // buildColumnNode() builds one column's <li>: its name (click-to-insert)
+  // plus type/nullability, matching the schemaTableResponse.columns shape
+  // exactly (name/type/nullable — no key/FK info in this version, per
+  // pkg/studio/server/schema.go's columnInfo doc comment).
+  function buildColumnNode(schemaName, tableName, col) {
+    var li = document.createElement("li");
+    li.className = "column-node";
+    li.setAttribute("data-schema-column", schemaName + "." + tableName + "." + col.name);
+
+    var nameBtn = document.createElement("button");
+    nameBtn.type = "button";
+    nameBtn.className = "tree-name-btn column-name-btn";
+    nameBtn.setAttribute("data-schema-insert-column", col.name);
+    nameBtn.title = "Insert " + col.name + " into the focused query editor";
+    nameBtn.textContent = col.name;
+    nameBtn.addEventListener("click", function () { insertIntoEditor(col.name); });
+    li.appendChild(nameBtn);
+
+    var typeEl = document.createElement("span");
+    typeEl.className = "column-type";
+    typeEl.textContent = col.type + (col.nullable ? ", nullable" : ", not null");
+    li.appendChild(typeEl);
+
+    return li;
+  }
+
+  // buildTableDetail() builds one table's expanded detail: a loading state,
+  // the table's error (if GET /api/schema/table itself failed), or the
+  // "Starter query" button + can't-SELECT badge + column list. The starter
+  // button and can't-SELECT badge only appear once columns have actually
+  // loaded (entry.loaded && !entry.error) — can_select is a *bool server-
+  // side specifically so "unknown" (the privilege check itself failed) is
+  // distinguishable from a confirmed false, so this only renders the badge
+  // when canSelect === false, never for null/unknown.
+  function buildTableDetail(schemaName, tableName) {
+    var key = schemaTableKey(schemaName, tableName);
+    var entry = ui.schemaBrowser.tableCache[key];
+    var wrap = document.createElement("div");
+    wrap.className = "table-detail";
+
+    if (!entry || entry.loading) {
+      var loadingEl = document.createElement("p");
+      loadingEl.className = "hint-block";
+      loadingEl.textContent = "Loading columns…";
+      wrap.appendChild(loadingEl);
+      return wrap;
+    }
+    if (entry.error) {
+      var errEl = document.createElement("div");
+      errEl.className = "inline-error visible";
+      errEl.textContent = entry.error;
+      wrap.appendChild(errEl);
+      return wrap;
+    }
+
+    var actionsRow = document.createElement("div");
+    actionsRow.className = "table-detail-actions";
+    var starterBtn = document.createElement("button");
+    starterBtn.type = "button";
+    starterBtn.className = "btn btn-ghost";
+    starterBtn.setAttribute("data-schema-starter-query", "");
+    starterBtn.textContent = "Starter query";
+    starterBtn.title = "Fill the " + TAB_LABELS[ui.activeTab] + " tab's query editor with a starter SELECT for this table";
+    starterBtn.addEventListener("click", function (evt) {
+      evt.stopPropagation();
+      applyStarterQuery(schemaName, tableName, entry);
+    });
+    actionsRow.appendChild(starterBtn);
+    if (entry.canSelect === false) {
+      var badge = document.createElement("span");
+      badge.className = "badge schema-badge-no-select";
+      badge.setAttribute("data-cant-select-badge", "");
+      badge.textContent = "can’t SELECT";
+      actionsRow.appendChild(badge);
+    }
+    wrap.appendChild(actionsRow);
+
+    if (!entry.columns.length) {
+      var noneEl = document.createElement("p");
+      noneEl.className = "hint-block";
+      noneEl.textContent = "No columns found.";
+      wrap.appendChild(noneEl);
+      return wrap;
+    }
+
+    var ul = document.createElement("ul");
+    ul.className = "column-tree";
+    entry.columns.forEach(function (col) { ul.appendChild(buildColumnNode(schemaName, tableName, col)); });
+    wrap.appendChild(ul);
+    return wrap;
+  }
+
+  // buildTableNode() builds one table's collapsed row (toggle + name +
+  // view/can't-SELECT badges) and, once expanded, its detail underneath.
+  // The name is a separate click target from the toggle: clicking the
+  // toggle expands/collapses (fetching columns); clicking the NAME inserts
+  // "schema.table" into the focused editor — the two are independent
+  // affordances on the same row, per the brief.
+  function buildTableNode(schemaName, table) {
+    var li = document.createElement("li");
+    li.className = "table-node";
+    li.setAttribute("data-schema-table", schemaName + "." + table.name);
+
+    var key = schemaTableKey(schemaName, table.name);
+    var expanded = !!ui.schemaBrowser.expandedTables[key];
+    var entry = ui.schemaBrowser.tableCache[key];
+
+    var row = document.createElement("div");
+    row.className = "tree-row table-row";
+
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "tree-toggle";
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggle.setAttribute("aria-label", (expanded ? "Collapse " : "Expand ") + table.name);
+    toggle.textContent = expanded ? "▾" : "▸";
+    toggle.addEventListener("click", function () { toggleTableNode(schemaName, table.name); });
+    row.appendChild(toggle);
+
+    var nameBtn = document.createElement("button");
+    nameBtn.type = "button";
+    nameBtn.className = "tree-name-btn table-name-btn";
+    nameBtn.setAttribute("data-schema-insert-table", schemaName + "." + table.name);
+    nameBtn.title = "Insert " + schemaName + "." + table.name + " into the focused query editor";
+    nameBtn.textContent = table.name;
+    nameBtn.addEventListener("click", function () { insertIntoEditor(schemaName + "." + table.name); });
+    row.appendChild(nameBtn);
+
+    if (table.type === "view") {
+      var viewBadge = document.createElement("span");
+      viewBadge.className = "badge trait-none";
+      viewBadge.textContent = "view";
+      row.appendChild(viewBadge);
+    }
+    // Once columns have loaded (from a previous expand — this shows even
+    // while collapsed again, thanks to tableCache), surface a confirmed
+    // can't-SELECT here too, not just inside the detail below.
+    if (entry && entry.loaded && !entry.error && entry.canSelect === false) {
+      var noSelectBadge = document.createElement("span");
+      noSelectBadge.className = "badge schema-badge-no-select";
+      noSelectBadge.setAttribute("data-cant-select-badge", "");
+      noSelectBadge.textContent = "can’t SELECT";
+      row.appendChild(noSelectBadge);
+    }
+
+    li.appendChild(row);
+    if (expanded) li.appendChild(buildTableDetail(schemaName, table.name));
+    return li;
+  }
+
+  // buildSchemaNode() builds one schema's collapsed row (toggle + name +
+  // table count) and, once expanded, its tables underneath — tables come
+  // straight from the schema's own payload (already returned by the root
+  // GET /api/schema fetch), so expanding a schema is a pure UI toggle, no
+  // additional round trip.
+  function buildSchemaNode(schema) {
+    var li = document.createElement("li");
+    li.className = "schema-node";
+    li.setAttribute("data-schema-node", schema.name);
+
+    var expanded = !!ui.schemaBrowser.expandedSchemas[schema.name];
+    var tables = schema.tables || [];
+
+    var row = document.createElement("div");
+    row.className = "tree-row schema-row";
+
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "tree-toggle";
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    toggle.setAttribute("aria-label", (expanded ? "Collapse " : "Expand ") + schema.name);
+    toggle.textContent = expanded ? "▾" : "▸";
+    toggle.addEventListener("click", function () { toggleSchemaNode(schema.name); });
+    row.appendChild(toggle);
+
+    var nameBtn = document.createElement("button");
+    nameBtn.type = "button";
+    nameBtn.className = "tree-name-btn schema-name-btn";
+    nameBtn.textContent = schema.name;
+    nameBtn.addEventListener("click", function () { toggleSchemaNode(schema.name); });
+    row.appendChild(nameBtn);
+
+    var countEl = document.createElement("span");
+    countEl.className = "tree-count";
+    countEl.textContent = tables.length + (tables.length === 1 ? " table" : " tables");
+    row.appendChild(countEl);
+
+    li.appendChild(row);
+
+    if (expanded) {
+      if (!tables.length) {
+        var noneEl = document.createElement("p");
+        noneEl.className = "hint-block";
+        noneEl.textContent = "No tables in this schema.";
+        li.appendChild(noneEl);
+      } else {
+        if (schema.truncated) {
+          var tNote = document.createElement("p");
+          tNote.className = "hint schema-truncated-note";
+          tNote.textContent = "(showing first " + tables.length + " tables)";
+          li.appendChild(tNote);
+        }
+        var ul = document.createElement("ul");
+        ul.className = "table-tree";
+        tables.forEach(function (table) { ul.appendChild(buildTableNode(schema.name, table)); });
+        li.appendChild(ul);
+      }
+    }
+
+    return li;
+  }
+
+  // renderSchemaBrowser() is the schema browser's single render entry
+  // point: called once per renderWorkspace() (so its "hidden while
+  // disconnected" gate always reflects the current ui.connected, regardless
+  // of which tab is active), and directly by every load*/toggle* handler
+  // above once their async fetch resolves. It never goes through the full
+  // render()/renderWorkspace() — see the section header comment for why.
+  function renderSchemaBrowser() {
+    var container = document.getElementById("schema-browser");
+    if (!container) return;
+
+    if (!ui.connected) {
+      container.style.display = "none";
+      container.innerHTML = "";
+      return;
+    }
+    container.style.display = "";
+    container.innerHTML = "";
+
+    var sb = ui.schemaBrowser;
+
+    var header = document.createElement("button");
+    header.type = "button";
+    header.className = "schema-browser-toggle";
+    header.setAttribute("data-schema-browser-toggle", "");
+    header.setAttribute("aria-expanded", sb.open ? "true" : "false");
+    header.addEventListener("click", toggleSchemaBrowser);
+
+    var caret = document.createElement("span");
+    caret.className = "schema-browser-caret";
+    caret.setAttribute("aria-hidden", "true");
+    caret.textContent = sb.open ? "▾" : "▸";
+    header.appendChild(caret);
+
+    var titleEl = document.createElement("span");
+    titleEl.className = "schema-browser-title";
+    titleEl.textContent = sb.loaded ? "Schema browser" : "Load schema";
+    header.appendChild(titleEl);
+
+    if (sb.loaded && !sb.error) {
+      var countEl = document.createElement("span");
+      countEl.className = "schema-browser-count";
+      countEl.textContent = sb.schemas.length + (sb.schemas.length === 1 ? " schema" : " schemas") +
+        (sb.engine ? " · " + sb.engine : "");
+      header.appendChild(countEl);
+    }
+    container.appendChild(header);
+
+    if (!sb.open) return;
+
+    var body = document.createElement("div");
+    body.className = "schema-browser-body";
+    body.setAttribute("data-schema-browser-body", "");
+    container.appendChild(body);
+
+    if (sb.loading) {
+      var loadingEl = document.createElement("p");
+      loadingEl.className = "hint-block";
+      loadingEl.textContent = "Loading schema…";
+      body.appendChild(loadingEl);
+      return;
+    }
+    if (sb.error) {
+      var errEl = document.createElement("div");
+      errEl.className = "inline-error visible";
+      errEl.setAttribute("data-schema-browser-error", "");
+      errEl.textContent = sb.error;
+      body.appendChild(errEl);
+      return;
+    }
+    if (!sb.schemas.length) {
+      var emptyEl = document.createElement("p");
+      emptyEl.className = "hint-block";
+      emptyEl.textContent = "No schemas found.";
+      body.appendChild(emptyEl);
+      return;
+    }
+
+    if (sb.truncated) {
+      var truncNote = document.createElement("p");
+      truncNote.className = "hint schema-truncated-note";
+      truncNote.textContent = "(showing first " + sb.schemas.length + " schemas)";
+      body.appendChild(truncNote);
+    }
+
+    var scroll = document.createElement("div");
+    scroll.className = "schema-tree-scroll";
+    body.appendChild(scroll);
+
+    var tree = document.createElement("ul");
+    tree.className = "schema-tree";
+    tree.setAttribute("data-schema-tree", "");
+    scroll.appendChild(tree);
+
+    sb.schemas.forEach(function (schema) { tree.appendChild(buildSchemaNode(schema)); });
   }
 
   // -----------------------------------------------------------------------
@@ -2601,6 +3205,11 @@
       applyRunStatus(statusPill, rt, "list");
       renderRail(); // keeps the card's List dot in sync without touching focus
     });
+    // Schema browser click-to-insert targets whichever editor last had
+    // focus (clicking the tree blurs this textarea before its click
+    // handler runs, so that has to be captured beforehand — see
+    // insertIntoEditor()).
+    qTextarea.addEventListener("focus", function () { ui.schemaBrowser.lastFocusedTab = "list"; });
 
     actions.appendChild(runBtn);
     actions.appendChild(statusPill);
@@ -2866,6 +3475,7 @@
       applyRunStatus(statusPill, rt, "entitlements");
       renderRail();
     });
+    qTextarea.addEventListener("focus", function () { ui.schemaBrowser.lastFocusedTab = "entitlements"; });
 
     actions.appendChild(runBtn);
     actions.appendChild(statusPill);
@@ -3444,6 +4054,7 @@
       renderVarChips();
       renderRail(); // keeps the card's Grants dot in sync without touching focus
     });
+    qTextarea.addEventListener("focus", function () { ui.schemaBrowser.lastFocusedTab = "grants"; });
 
     actions.appendChild(runBtn);
     actions.appendChild(statusPill);
@@ -4074,6 +4685,10 @@
       ui.connected = true;
       ui.engine = res.engine || cfg.scheme;
       ui.restoredSession = false;
+      // A fresh connect OR a successful "Edit connection" may point at a
+      // DIFFERENT database than before — never show a schema catalog
+      // fetched from the previous connection.
+      resetSchemaBrowser();
 
       if (ui.editingConnection) {
         // FIX 1: this was a reconnect/update, not a fresh connect — leave
@@ -4127,6 +4742,7 @@
     ui.grantSamples = {};
     ui.lastValidate = null;
     ui.validating = false;
+    resetSchemaBrowser();
 
     state.resource_types = [];
     state.app_name = "";
@@ -4438,7 +5054,20 @@
     openLoadYAMLDialog: openLoadYAMLDialog,
     closeLoadYAMLDialog: closeLoadYAMLDialog,
     handleLoadYAMLSubmit: handleLoadYAMLSubmit,
-    applyImportedSpec: applyImportedSpec
+    applyImportedSpec: applyImportedSpec,
+    // Schema browser — exposed so a DB-less Playwright pass can inject a
+    // fake ui.schemaBrowser.schemas/tableCache directly (bypassing a live
+    // /api/schema round-trip) and exercise expand/collapse, click-to-insert,
+    // and the starter-query button.
+    renderSchemaBrowser: renderSchemaBrowser,
+    resetSchemaBrowser: resetSchemaBrowser,
+    toggleSchemaBrowser: toggleSchemaBrowser,
+    toggleSchemaNode: toggleSchemaNode,
+    toggleTableNode: toggleTableNode,
+    loadSchemas: loadSchemas,
+    loadTableColumns: loadTableColumns,
+    insertIntoEditor: insertIntoEditor,
+    applyStarterQuery: applyStarterQuery
   };
 })();
 </script>
