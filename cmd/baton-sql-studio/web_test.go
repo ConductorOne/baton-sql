@@ -50,6 +50,18 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"grantable_to",
 		"data-grantable-to",
 		"data-ent-purpose",
+		// Task 5: Grants tab — resource-scoped binding, principal_type,
+		// entitlement picker, and the principal_id/skip_if mapping widget.
+		"Grants",
+		"Who-has-what query",
+		"data-grants-query",
+		"data-grant-resource-var",
+		"data-grant-var-chips",
+		"resource.ID",
+		"data-grant-principal-type",
+		"principal_type",
+		"data-grant-entitlement",
+		"data-grants-tab",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {

@@ -916,6 +916,27 @@
     gap: 0.35rem;
   }
 
+  /* ---------------------------------------------------------------------
+     Grants tab (Task 5) — resource-var binding row + detected-token chips,
+     and the principal_type/entitlement pickers. Reuses .list-tab (vertical
+     stack), .chip, .control, .hint/.hint-block, .field-label from earlier
+     tasks; only new here is the bind-row layout and the selected-chip state.
+     ------------------------------------------------------------------- */
+  .grant-bind-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .grant-bind-row .control { max-width: 14rem; }
+  .grant-var-chip[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.14);
+    color: var(--accent);
+  }
+  .grant-field { max-width: 26rem; }
+  .grant-entitlement-custom { margin-top: 0.5rem; }
+
   /* Responsive: collapse the rail to a horizontal strip; wrap, never
      scroll the page horizontally. */
   @media (max-width: 760px) {
@@ -1138,7 +1159,13 @@
     // because it's presentational: a row for an as-yet-unmapped profile key
     // has no state.resource_types[].list.fields entry until a column or
     // transform is actually set on it (see upsertFieldMapping).
-    extraProfileFields: {}
+    extraProfileFields: {},
+
+    // grantSamples[rtId] = the last sample value typed into the Grants tab's
+    // "sample value for ?<var>" prompt (Task 5) — remembered per resource
+    // type purely so re-running after a tweak doesn't start from a blank
+    // prompt. Never serialized as part of the Spec.
+    grantSamples: {}
   };
 
   var STEPS = [
@@ -1206,6 +1233,19 @@
     { field: "description", label: "Description" },
     { field: "purpose", label: "Purpose", hint: "(assignment or permission)" },
     { field: "slug", label: "Slug", hint: "(optional — auto-derived from display_name/id if left unmapped)" }
+  ];
+
+  // GRANT_FIELD_DEFS — the mapping widget's field vocabulary for the Grants
+  // tab (Task 5). Matches pkg/studio/generate.go's grant-field switch
+  // exactly (generate.go: `case "principal_id", "skip_if":`) — deliberately
+  // does NOT include "resource_id": the engine's switch dropped it, so a
+  // mapping there would be silently discarded at /api/generate time.
+  // "profile.*" isn't a supported grant field either (grants have no
+  // profile), so callers pass allowProfileFields:false to
+  // renderMappingTable for this tab, same as Entitlements' query mode.
+  var GRANT_FIELD_DEFS = [
+    { field: "principal_id", label: "Principal ID", required: true },
+    { field: "skip_if", label: "Skip if", hint: "(optional CEL — skip this row when it evaluates true)" }
   ];
 
   // fieldDefsForTrait() returns the canonical field defs for a resource
@@ -1337,7 +1377,17 @@
       if (ent.mode === "query") return (ent.query && ent.query.trim().length > 0) ? "draft" : "empty";
       return "empty";
     }
-    if (tab === "grants") return (rt.grants && rt.grants.length > 0) ? "draft" : "empty";
+    if (tab === "grants") {
+      // Reads grants[0] directly (never via ensureGrant/fieldsFor) so
+      // rendering the rail never has the side effect of creating a grant
+      // record for a resource type whose Grants tab was never opened.
+      var g0 = rt.grants && rt.grants[0];
+      if (!g0 || !g0.query) return "empty";
+      var gStatus = runStatusLabel(rt, "grants");
+      if (gStatus.state === "error") return "error";
+      if (gStatus.state === "proven") return "ok";
+      return "draft"; // unproven or stale, but a query is authored
+    }
     return "empty";
   }
 
@@ -1492,16 +1542,10 @@
       renderEntitlementsTab(rt);
       return;
     }
-
-    var messages = {
-      grants: "Grants — coming in a later step. You'll define who has which entitlement, scoped to a resource of this type."
-    };
-    var body = document.getElementById("tab-body");
-    body.innerHTML = "";
-    var p = document.createElement("p");
-    p.className = "placeholder-copy";
-    p.textContent = messages[ui.activeTab] || "";
-    body.appendChild(p);
+    if (ui.activeTab === "grants") {
+      renderGrantsTab(rt);
+      return;
+    }
   }
 
   function render() {
@@ -1527,16 +1571,64 @@
 
   function getLastRun(rtId, tab) { return ui.lastRun[mapKey(rtId, tab)] || null; }
 
+  // ensureGrant() lazily initializes state.resource_types[i].grants[0] —
+  // v1 authors exactly ONE grant per resource type (per the brief), so
+  // every Grants-tab accessor below reads/writes grants[0] specifically,
+  // never the array as a whole. Matches pkg/studio/spec.go's GrantSpec
+  // shape exactly: query, resource_var, principal_type, entitlement,
+  // fields[]. The one time this creates the record (isNew), it also
+  // defaults principal_type to "users" when that resource type is already
+  // declared (brief: "default to users if present") — a later render never
+  // re-applies that default, so clearing the dropdown deliberately sticks.
+  function ensureGrant(rt) {
+    if (!rt.grants) rt.grants = [];
+    var isNew = !rt.grants[0];
+    if (isNew) {
+      rt.grants[0] = { query: "", resource_var: "", principal_type: "", entitlement: "", fields: [] };
+    }
+    var g = rt.grants[0];
+    if (!g.fields) g.fields = [];
+    if (isNew && !g.principal_type) {
+      var hasUsers = state.resource_types.some(function (r) { return r.id === "users"; });
+      if (hasUsers) g.principal_type = "users";
+    }
+    return g;
+  }
+
+  // GRANT_VAR_TOKEN_RE mirrors pkg/studio/server/run.go's tokenRegex exactly
+  // (`\?<([a-zA-Z0-9_]+)(?:\|[a-zA-Z0-9_]+)?>`, itself mirroring
+  // pkg/bsql/query.go's placeholder syntax) so the resource-binding control
+  // detects the SAME `?<name>` tokens the server will require a sample
+  // value for — a looser/stricter regex here would offer tokens the server
+  // doesn't recognize, or miss ones it does.
+  var GRANT_VAR_TOKEN_RE = /\?<([a-zA-Z0-9_]+)(?:\|[a-zA-Z0-9_]+)?>/g;
+
+  function extractVarTokens(query) {
+    var re = new RegExp(GRANT_VAR_TOKEN_RE.source, "g");
+    var out = [];
+    var seen = {};
+    var m;
+    while ((m = re.exec(String(query || ""))) !== null) {
+      if (!seen[m[1]]) {
+        seen[m[1]] = true;
+        out.push(m[1]);
+      }
+    }
+    return out;
+  }
+
   // queryForTab()/fieldsFor() are the only two places that know where a
   // given tab's query text / field-mapping array live on a resource type.
   // "list" is fully wired today; "entitlements" is wired far enough (query
   // mode's own query + fields) for Task 4 to reuse runQuery/renderMappingTable
-  // without re-deriving this. "grants" isn't handled here since each grant is
-  // its own query with its own fields array (a list, not a single slot) —
-  // Task 5 will need its own accessor rather than extending this one.
+  // without re-deriving this. "grants" (Task 5) points at grants[0] via
+  // ensureGrant() — v1 authors exactly one grant per resource type, so
+  // unlike list/entitlements this lazily creates that single record on
+  // first access rather than assuming it already exists.
   function queryForTab(rt, tab) {
     if (tab === "list") return (rt.list && rt.list.query) || "";
     if (tab === "entitlements") return (rt.entitlements && rt.entitlements.query) || "";
+    if (tab === "grants") return (rt.grants && rt.grants[0] && rt.grants[0].query) || "";
     return "";
   }
 
@@ -1546,6 +1638,7 @@
       if (!rt.entitlements.fields) rt.entitlements.fields = [];
       return rt.entitlements.fields;
     }
+    if (tab === "grants") return ensureGrant(rt).fields;
     return [];
   }
 
@@ -1951,21 +2044,29 @@
     container.appendChild(scroll);
   }
 
-  // runQuery() POSTs the tab's current query to /api/run, records the
-  // result (or error) in ui.lastRun, and — only if the user hasn't
-  // navigated away from this rt/tab while the request was in flight —
-  // re-renders the workspace and rail so the results panel, mapping
-  // dropdowns, and dot state all pick up the new run.
-  async function runQuery(rtId, tab) {
+  // RUN_BTN_IDS maps a tab key to the id of its own Run button, so runQuery
+  // can disable/re-enable the right one mid-request without every tab
+  // needing to duplicate that bookkeeping.
+  var RUN_BTN_IDS = { list: "list-run-btn", entitlements: "entitlements-run-btn", grants: "grants-run-btn" };
+
+  // runQuery() POSTs the tab's current query (optionally with sample `vars`
+  // for any ?<name> tokens — Task 5's Grants tab is the first caller that
+  // passes these) to /api/run, records the result (or error) in ui.lastRun,
+  // and — only if the user hasn't navigated away from this rt/tab while the
+  // request was in flight — re-renders the workspace and rail so the
+  // results panel, mapping dropdowns, and dot state all pick up the new run.
+  async function runQuery(rtId, tab, vars) {
     var rt = state.resource_types.find(function (r) { return r.id === rtId; });
     if (!rt) return;
     var query = queryForTab(rt, tab);
     var key = mapKey(rtId, tab);
 
-    var runBtn = document.getElementById("list-run-btn");
-    if (runBtn && tab === "list") runBtn.disabled = true;
+    var runBtn = document.getElementById(RUN_BTN_IDS[tab] || "");
+    if (runBtn) runBtn.disabled = true;
 
-    var res = await api("/api/run", { query: query });
+    var body = { query: query };
+    if (vars && Object.keys(vars).length > 0) body.vars = vars;
+    var res = await api("/api/run", body);
 
     if (res && res.error) {
       ui.lastRun[key] = { query: query, error: res.error, columns: [], rows: [], rowCount: 0, truncated: false };
@@ -1979,9 +2080,37 @@
       };
     }
 
-    if (runBtn && tab === "list") runBtn.disabled = false;
+    if (runBtn) runBtn.disabled = false;
     if (ui.selectedRT === rtId && ui.activeTab === tab) renderWorkspace();
     renderRail();
+  }
+
+  // runGrantQuery() is the Grants tab's own Run handler (Task 5): the
+  // who-has-what query is bound to the CURRENT resource via a ?<var> token
+  // (vars: {<resource_var>: "resource.ID"} once compiled — see
+  // generate.go), and /api/run has no resource to bind at author time, so
+  // it requires a caller-supplied sample value for that token
+  // (pkg/studio/server/run.go rejects the request otherwise, listing
+  // exactly which tokens are missing). This prompts for one, remembers it
+  // per resource type so re-running after a tweak doesn't start blank, and
+  // only then delegates to runQuery. A query with no resource_var set (or
+  // no ?<...> token at all) just runs unparameterized, same as List/Entitlements.
+  function runGrantQuery(rtId) {
+    var rt = state.resource_types.find(function (r) { return r.id === rtId; });
+    if (!rt) return;
+    var g = ensureGrant(rt);
+    var resourceVar = (g.resource_var || "").trim();
+    if (!resourceVar) {
+      runQuery(rtId, "grants");
+      return;
+    }
+    var lastSample = ui.grantSamples[rtId] || "";
+    var sample = window.prompt("Sample value for ?<" + resourceVar + ">  (used only for this test run — not saved to the config):", lastSample);
+    if (sample === null) return; // user cancelled
+    ui.grantSamples[rtId] = sample;
+    var vars = {};
+    vars[resourceVar] = sample;
+    runQuery(rtId, "grants", vars);
   }
 
   // renderListTab() builds the List tab's whole body: query editor + Run,
@@ -2420,6 +2549,304 @@
   }
 
   // -----------------------------------------------------------------------
+  // Grants tab (Task 5) — resource-scoped: a who-has-what query bound to
+  // the CURRENT resource via a ?<var> token (resource_var), a principal_type
+  // + entitlement this grant targets, and the principal_id/skip_if mapping
+  // widget. v1 authors exactly ONE grant per resource type (grants[0] via
+  // ensureGrant()). Reuses runQuery/renderResultsPanel/renderMappingTable
+  // exactly as List/Entitlements do, since queryForTab/fieldsFor (above)
+  // now understand the "grants" tab key.
+  // -----------------------------------------------------------------------
+
+  // renderEntitlementPicker() fills `container` with the control for
+  // grants[0].entitlement — the entitlement id/slug this grant targets.
+  // When the type has a static entitlements list, offers those ids in a
+  // <select> (plus a "Custom…" escape hatch, since a grant may still target
+  // an id that isn't in that list, e.g. one added afterward); otherwise
+  // (query mode, or no entitlements defined yet) falls back to a plain text
+  // input, since query-derived entitlement ids/slugs aren't known statically
+  // at author time.
+  function renderEntitlementPicker(container, rt, g) {
+    container.innerHTML = "";
+    var label = document.createElement("label");
+    label.className = "field-label";
+    label.setAttribute("for", "grant-entitlement");
+    label.textContent = "Entitlement";
+    container.appendChild(label);
+
+    var ent = rt.entitlements || {};
+    var staticRows = (ent.mode === "static" && ent.static) ? ent.static.filter(function (e) { return e.id; }) : [];
+
+    if (staticRows.length > 0) {
+      var select = document.createElement("select");
+      select.className = "control grant-field";
+      select.id = "grant-entitlement";
+      select.setAttribute("data-grant-entitlement", "");
+      var blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "— select —";
+      select.appendChild(blank);
+      staticRows.forEach(function (e) {
+        var o = document.createElement("option");
+        o.value = e.id;
+        o.textContent = e.display_name ? (e.display_name + " (" + e.id + ")") : e.id;
+        select.appendChild(o);
+      });
+      var customOpt = document.createElement("option");
+      customOpt.value = "__custom__";
+      customOpt.textContent = "Custom…";
+      select.appendChild(customOpt);
+
+      var isKnown = staticRows.some(function (e) { return e.id === g.entitlement; });
+      var usingCustom = !!g.entitlement && !isKnown;
+      select.value = usingCustom ? "__custom__" : (g.entitlement || "");
+
+      var customInput = document.createElement("input");
+      customInput.className = "control grant-field grant-entitlement-custom";
+      customInput.type = "text";
+      customInput.placeholder = "entitlement id/slug";
+      customInput.setAttribute("data-grant-entitlement-custom", "");
+      customInput.value = usingCustom ? g.entitlement : "";
+      customInput.style.display = usingCustom ? "" : "none";
+
+      select.addEventListener("change", function () {
+        if (select.value === "__custom__") {
+          customInput.style.display = "";
+          customInput.focus();
+          g.entitlement = customInput.value.trim();
+        } else {
+          customInput.style.display = "none";
+          g.entitlement = select.value;
+        }
+        renderRail();
+      });
+      customInput.addEventListener("input", function (evt) {
+        g.entitlement = evt.target.value.trim();
+        renderRail();
+      });
+
+      container.appendChild(select);
+      container.appendChild(customInput);
+    } else {
+      var input = document.createElement("input");
+      input.className = "control grant-field";
+      input.type = "text";
+      input.id = "grant-entitlement";
+      input.placeholder = "entitlement id/slug this grant targets";
+      input.setAttribute("data-grant-entitlement", "");
+      input.value = g.entitlement || "";
+      input.addEventListener("input", function (evt) {
+        g.entitlement = evt.target.value.trim();
+        renderRail();
+      });
+      container.appendChild(input);
+
+      var hint = document.createElement("p");
+      hint.className = "hint-block";
+      hint.textContent = ent.mode === "query"
+        ? "Entitlements are query-derived for this type — enter the id/slug value this grant targets (the mapped id, or the auto-derived slug)."
+        : "No static entitlements defined yet for " + rt.name + " — enter the id/slug this grant targets, or define entitlements first.";
+      container.appendChild(hint);
+    }
+  }
+
+  // renderGrantsTab() is the Grants tab's entry point (called from
+  // renderWorkspace()): the who-has-what query + Run, the resource-binding
+  // control (detected ?<var> tokens as clickable chips, or type one in
+  // directly — either writes grants[0].resource_var), the principal_id /
+  // skip_if mapping widget, the principal_type dropdown (sourced from
+  // currently-declared resource-type ids), and the entitlement picker.
+  function renderGrantsTab(rt) {
+    var g = ensureGrant(rt);
+
+    var body = document.getElementById("tab-body");
+    body.innerHTML = "";
+
+    var wrap = document.createElement("div");
+    wrap.className = "list-tab";
+    wrap.setAttribute("data-grants-tab", "");
+
+    // --- Query editor + Run --------------------------------------------
+    var querySection = document.createElement("div");
+    var qLabel = document.createElement("label");
+    qLabel.className = "field-label";
+    qLabel.setAttribute("for", "grants-query-editor");
+    qLabel.textContent = "Who-has-what query";
+    var qTextarea = document.createElement("textarea");
+    qTextarea.className = "control mono query-editor";
+    qTextarea.id = "grants-query-editor";
+    qTextarea.setAttribute("data-grants-query", "");
+    qTextarea.placeholder = "SELECT user_id FROM user_roles WHERE role_id = ?<" + (g.resource_var || "role_id") + ">";
+    qTextarea.value = g.query || "";
+
+    var actions = document.createElement("div");
+    actions.className = "query-actions";
+    var runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.className = "btn btn-primary";
+    runBtn.id = "grants-run-btn";
+    runBtn.textContent = "Run";
+    runBtn.addEventListener("click", function () { runGrantQuery(rt.id); });
+
+    var statusPill = document.createElement("span");
+    statusPill.className = "status-pill";
+    var statusDot = document.createElement("span");
+    statusDot.className = "dot";
+    var statusText = document.createElement("span");
+    statusText.className = "status-text";
+    statusPill.appendChild(statusDot);
+    statusPill.appendChild(statusText);
+    applyRunStatus(statusPill, rt, "grants");
+
+    qTextarea.addEventListener("input", function (evt) {
+      g.query = evt.target.value;
+      applyRunStatus(statusPill, rt, "grants");
+      renderVarChips();
+      renderRail(); // keeps the card's Grants dot in sync without touching focus
+    });
+
+    actions.appendChild(runBtn);
+    actions.appendChild(statusPill);
+    querySection.appendChild(qLabel);
+    querySection.appendChild(qTextarea);
+    querySection.appendChild(actions);
+    wrap.appendChild(querySection);
+
+    // --- Resource binding -------------------------------------------------
+    var bindSection = document.createElement("div");
+    var bindLabel = document.createElement("label");
+    bindLabel.className = "field-label";
+    bindLabel.setAttribute("for", "grant-resource-var");
+    bindLabel.textContent = "Resource binding";
+    bindSection.appendChild(bindLabel);
+
+    var bindRow = document.createElement("div");
+    bindRow.className = "grant-bind-row";
+    var varInput = document.createElement("input");
+    varInput.className = "control";
+    varInput.type = "text";
+    varInput.id = "grant-resource-var";
+    varInput.placeholder = "e.g. role_id";
+    varInput.value = g.resource_var || "";
+    varInput.setAttribute("data-grant-resource-var", "");
+    var bindHint = document.createElement("span");
+    bindHint.className = "hint";
+    bindHint.setAttribute("data-grant-bind-hint", "");
+    bindRow.appendChild(varInput);
+    bindRow.appendChild(bindHint);
+    bindSection.appendChild(bindRow);
+
+    var chipsRow = document.createElement("div");
+    chipsRow.className = "chip-row";
+    chipsRow.setAttribute("data-grant-var-chips", "");
+    bindSection.appendChild(chipsRow);
+    wrap.appendChild(bindSection);
+
+    function updateBindHint() {
+      // "bound to resource.ID" mirrors exactly what generate.go emits:
+      // `vars: {<resource_var>: "resource.ID"}` on the compiled grant query.
+      bindHint.textContent = g.resource_var
+        ? "?<" + g.resource_var + "> is bound to resource.ID"
+        : "Pick a ?<var> below, or type one — it will be bound to resource.ID.";
+    }
+
+    function renderVarChips() {
+      chipsRow.innerHTML = "";
+      var tokens = extractVarTokens(g.query);
+      if (tokens.length === 0) {
+        var none = document.createElement("span");
+        none.className = "hint-block";
+        none.textContent = "No ?<var> tokens detected in the query yet.";
+        chipsRow.appendChild(none);
+        return;
+      }
+      tokens.forEach(function (tok) {
+        var chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip grant-var-chip";
+        chip.setAttribute("data-grant-var-chip", tok);
+        chip.setAttribute("aria-pressed", g.resource_var === tok ? "true" : "false");
+        chip.textContent = "?<" + tok + ">";
+        chip.addEventListener("click", function () {
+          g.resource_var = tok;
+          varInput.value = tok;
+          updateBindHint();
+          renderVarChips();
+          renderRail();
+        });
+        chipsRow.appendChild(chip);
+      });
+    }
+
+    varInput.addEventListener("input", function (evt) {
+      g.resource_var = evt.target.value.trim();
+      updateBindHint();
+      renderVarChips();
+      renderRail();
+    });
+
+    updateBindHint();
+    renderVarChips();
+
+    // --- Results ------------------------------------------------------
+    var resultsSection = document.createElement("div");
+    wrap.appendChild(resultsSection);
+    renderResultsPanel(resultsSection, rt, "grants");
+
+    // --- principal_id / skip_if mapping --------------------------------
+    var mappingSection = document.createElement("div");
+    wrap.appendChild(mappingSection);
+    renderMappingTable(mappingSection, {
+      rtId: rt.id,
+      tab: "grants",
+      fieldDefs: GRANT_FIELD_DEFS,
+      query: g.query,
+      allowProfileFields: false
+    });
+
+    // --- principal_type --------------------------------------------------
+    var ptSection = document.createElement("div");
+    var ptLabel = document.createElement("label");
+    ptLabel.className = "field-label";
+    ptLabel.setAttribute("for", "grant-principal-type");
+    ptLabel.textContent = "Principal type";
+    ptSection.appendChild(ptLabel);
+    var ptSelect = document.createElement("select");
+    ptSelect.className = "control grant-field";
+    ptSelect.id = "grant-principal-type";
+    ptSelect.setAttribute("data-grant-principal-type", "");
+    var ptBlank = document.createElement("option");
+    ptBlank.value = "";
+    ptBlank.textContent = "— select —";
+    ptSelect.appendChild(ptBlank);
+    state.resource_types.forEach(function (candidate) {
+      var o = document.createElement("option");
+      o.value = candidate.id;
+      o.textContent = candidate.name + " (" + candidate.id + ")";
+      ptSelect.appendChild(o);
+    });
+    ptSelect.value = g.principal_type || "";
+    ptSelect.addEventListener("change", function (evt) {
+      g.principal_type = evt.target.value;
+      renderRail();
+    });
+    ptSection.appendChild(ptSelect);
+    var ptHint = document.createElement("p");
+    ptHint.className = "hint";
+    ptHint.textContent = "The resource-type id of who receives this grant (usually Users).";
+    ptSection.appendChild(ptHint);
+    wrap.appendChild(ptSection);
+
+    // --- entitlement -------------------------------------------------
+    var entSection = document.createElement("div");
+    entSection.setAttribute("data-grant-entitlement-picker", "");
+    renderEntitlementPicker(entSection, rt, g);
+    wrap.appendChild(entSection);
+
+    body.appendChild(wrap);
+  }
+
+  // -----------------------------------------------------------------------
   // Resource-type declaration — state.resource_types is the single source
   // of truth; every mutator below re-renders the rail so cards stay in
   // sync, and callers may render() again for anything else that changed.
@@ -2721,7 +3148,15 @@
     renderEntitlementsTab: renderEntitlementsTab,
     setEntitlementsMode: setEntitlementsMode,
     renderGrantableToMultiselect: renderGrantableToMultiselect,
-    ENTITLEMENT_FIELD_DEFS: ENTITLEMENT_FIELD_DEFS
+    ENTITLEMENT_FIELD_DEFS: ENTITLEMENT_FIELD_DEFS,
+    // Task 5 (Grants tab) — exposed so a DB-less Playwright pass can inject
+    // a fake last-run for the "grants" tab key and exercise the
+    // resource-var binding + principal_type/entitlement pickers directly.
+    renderGrantsTab: renderGrantsTab,
+    ensureGrant: ensureGrant,
+    extractVarTokens: extractVarTokens,
+    runGrantQuery: runGrantQuery,
+    GRANT_FIELD_DEFS: GRANT_FIELD_DEFS
   };
 })();
 </script>
