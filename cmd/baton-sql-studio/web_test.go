@@ -24,6 +24,11 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"/api/connect",
 		"/api/status",
 		"/api/disconnect",
+		// FIX 1: non-destructive "Edit connection" (updates the DB connection
+		// without clearing state.resource_types, unlike Disconnect).
+		"Edit connection",
+		`id="topbar-edit-connect-btn"`,
+		`id="edit-connect-cancel-btn"`,
 		// Task 2: resource-type declaration + card rail + workspace tab shell.
 		"Declare resource types",
 		"What do people get access to?",

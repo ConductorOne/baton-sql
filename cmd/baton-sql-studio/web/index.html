@@ -876,6 +876,13 @@
     margin-top: 0.9rem;
     max-width: 26rem;
   }
+  /* Without these, the input's `width: 100%` (from .control) greedily
+     claims the row's width and squeezes the button until its label wraps
+     onto two lines — inflating the whole control well past the height of a
+     single mapping-table field row. Letting the input shrink/grow and
+     pinning the button to its content width keeps this one row tall. */
+  .add-profile-field .control { flex: 1 1 auto; min-width: 0; }
+  .add-profile-field .btn { flex: 0 0 auto; white-space: nowrap; }
 
   .hint-block {
     color: var(--ink-muted);
@@ -1052,6 +1059,7 @@
           <span id="topbar-status-text">Not connected</span>
         </span>
         <button type="button" class="btn btn-ghost" id="topbar-review-btn" style="display:none" title="Review and validate the configuration">Validate</button>
+        <button type="button" class="btn btn-ghost" id="topbar-edit-connect-btn" style="display:none" title="Change the database connection without losing your resource types">Edit connection</button>
         <button type="button" class="btn btn-danger-ghost" id="topbar-disconnect-btn" style="display:none">Disconnect</button>
         <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle color theme" title="Toggle color theme">&#9788;</button>
       </div>
@@ -1124,6 +1132,7 @@
                 <span id="test-connection-spinner" class="spinner" style="display:none" aria-hidden="true"></span>
                 <span id="test-connection-label">Test connection</span>
               </button>
+              <button type="button" class="btn btn-ghost" id="edit-connect-cancel-btn" style="display:none">Cancel</button>
             </div>
           </form>
 
@@ -1272,6 +1281,14 @@
     restoredSession: false,
     selectedRT: null,      // id of the resource type whose workspace is open, or null
     activeTab: "list",     // "list" | "entitlements" | "grants" — tab within the workspace
+
+    // editingConnection — true while the user is using "Edit connection" to
+    // update the DB connection WITHOUT the destructive reset Disconnect
+    // does. While true, the Connect panel is shown (overriding ui.step) so
+    // the form can be resubmitted, but ui.step/selectedRT/activeTab are left
+    // untouched so a successful (or cancelled) edit lands the user back
+    // exactly where they were, with state.resource_types intact.
+    editingConnection: false,
 
     // lastRun[rtId + "/" + tab] = {query, columns, rows, rowCount, truncated, error}
     // — the last /api/run result for that resource type's query in that tab,
@@ -1534,7 +1551,11 @@
   // then switches wholesale to one card per declared resource type — per the
   // validated mockup, cards rather than an indented tree.
   function renderRail() {
-    var showCards = ui.step !== "connect";
+    // While editing the connection (FIX 1), fall back to the 3-stage flow
+    // rail (which reflects ui.step, unaffected by the edit) rather than the
+    // resource-type cards — the workspace/declare panels are hidden behind
+    // the Connect panel right now, so a card click would be a dead end.
+    var showCards = ui.step !== "connect" && !ui.editingConnection;
     document.getElementById("rail-flow").style.display = showCards ? "none" : "";
     // #rail-types has a CSS default of display:none (to avoid a flash of
     // cards before first render); "block" must be set explicitly here since
@@ -1605,25 +1626,47 @@
     // The connect panel's own Disconnect button only reaches the user while
     // ui.step === "connect"; once past it, this topbar affordance is the
     // only way back, since the resource-types step replaces that panel.
-    // The Review/Validate button shares the same visibility rule — it only
-    // makes sense once there's a connection (and therefore a Spec worth
-    // reviewing).
-    var showTopbarNav = ui.connected && ui.step !== "connect";
+    // The Review/Validate and Edit-connection buttons share the same
+    // visibility rule — they only make sense once there's a connection (and
+    // therefore a Spec worth reviewing/editing). All three are hidden while
+    // an edit-connection is in progress: the Connect panel is already on
+    // screen then, and Cancel is the way out of it (see
+    // renderConnectPanel()).
+    var showTopbarNav = ui.connected && ui.step !== "connect" && !ui.editingConnection;
     document.getElementById("topbar-disconnect-btn").style.display = showTopbarNav ? "" : "none";
     document.getElementById("topbar-review-btn").style.display = showTopbarNav ? "" : "none";
+    document.getElementById("topbar-edit-connect-btn").style.display = showTopbarNav ? "" : "none";
+  }
+
+  // updateConnectButtonLabel() keeps the submit button's idle/in-flight text
+  // matched to what submitting the form actually does right now: a fresh
+  // "Test connection" attempt, or (FIX 1) an "Edit connection" resubmit that
+  // updates state.connect in place without touching resource_types.
+  function updateConnectButtonLabel() {
+    var label = document.getElementById("test-connection-label");
+    if (ui.connecting) {
+      label.textContent = ui.editingConnection ? "Saving…" : "Testing…";
+    } else {
+      label.textContent = ui.editingConnection ? "Save connection" : "Test connection";
+    }
   }
 
   function renderConnectPanel() {
     var form = document.getElementById("connect-form");
     var fields = form.querySelectorAll(".control");
-    fields.forEach(function (el) { el.disabled = ui.connected; });
+    // Fields are normally locked once connected (nothing left to submit);
+    // editingConnection re-opens them for a non-destructive reconnect.
+    var editable = !ui.connected || ui.editingConnection;
+    fields.forEach(function (el) { el.disabled = !editable; });
 
-    document.getElementById("test-connection-btn").style.display = ui.connected ? "none" : "";
+    document.getElementById("test-connection-btn").style.display = editable ? "" : "none";
+    document.getElementById("edit-connect-cancel-btn").style.display = ui.editingConnection ? "" : "none";
+    updateConnectButtonLabel();
 
     var banner = document.getElementById("connected-banner");
     var restoredNote = document.getElementById("restored-note");
 
-    if (ui.connected) {
+    if (ui.connected && !ui.editingConnection) {
       banner.classList.add("visible");
       document.getElementById("connected-pill-text").textContent = "Connected · " + (ui.engine || "unknown");
       var detail = document.getElementById("connected-detail");
@@ -1646,8 +1689,12 @@
   // / a resource type's workspace / Review & export, driven by ui.step and
   // ui.selectedRT.
   function renderStepPanels() {
-    var showConnect = ui.step === "connect";
-    var showReview = ui.step === "review";
+    // FIX 1: editingConnection forces the Connect panel on screen regardless
+    // of ui.step, so "Edit connection" can reuse it without disturbing
+    // ui.step/selectedRT — the resource-types/review panels stay untouched
+    // underneath and reappear as soon as editing ends.
+    var showConnect = ui.step === "connect" || ui.editingConnection;
+    var showReview = !showConnect && ui.step === "review";
     var showWorkspace = !showConnect && !showReview && !!ui.selectedRT &&
       state.resource_types.some(function (rt) { return rt.id === ui.selectedRT; });
     var showDeclare = !showConnect && !showReview && !showWorkspace;
@@ -3343,8 +3390,11 @@
   }
 
   // addResourceType() pushes a well-formed resource_types[] entry (matching
-  // studio.ResourceTypeSpec exactly) and re-renders the rail. Returns the
-  // new entry, or null if name is blank.
+  // studio.ResourceTypeSpec exactly), then (FIX 4) selects it and opens its
+  // List tab — landing the user directly in the new type's config instead
+  // of leaving them on the declare screen. selectRT() re-renders (rail
+  // included), so no separate render call is needed here. Returns the new
+  // entry, or null if name is blank.
   function addResourceType(name, trait) {
     name = String(name || "").trim();
     if (!name) return null;
@@ -3358,7 +3408,7 @@
       grants: []
     };
     state.resource_types.push(rt);
-    renderRail();
+    selectRT(id);
     return rt;
   }
 
@@ -3477,11 +3527,44 @@
     ui.connecting = isConnecting;
     var btn = document.getElementById("test-connection-btn");
     var spinner = document.getElementById("test-connection-spinner");
-    var label = document.getElementById("test-connection-label");
     btn.disabled = isConnecting;
     spinner.style.display = isConnecting ? "" : "none";
-    label.textContent = isConnecting ? "Testing…" : "Test connection";
+    updateConnectButtonLabel();
     renderTopbarStatus();
+  }
+
+  // fillConnectFormFromState() pre-fills the Connect form's fields from
+  // state.connect for FIX 1's "Edit connection" flow. Password is
+  // deliberately left blank: the server never gives it back to us to
+  // display, so re-entering it (or leaving it blank, same as the original
+  // connect did) is the only option.
+  function fillConnectFormFromState() {
+    var c = state.connect || {};
+    document.getElementById("f-scheme").value = c.scheme || "postgres";
+    document.getElementById("f-host").value = c.host || "";
+    document.getElementById("f-port").value = c.port || "";
+    document.getElementById("f-database").value = c.database || "";
+    document.getElementById("f-user").value = c.user || "";
+    document.getElementById("f-password").value = "";
+  }
+
+  // startEditConnection()/cancelEditConnection() — FIX 1's non-destructive
+  // "Edit connection" affordance. Unlike Disconnect, neither one touches
+  // state.resource_types, ui.step, ui.selectedRT, or ui.activeTab: the
+  // workspace the user was in is simply hidden behind the (now editable)
+  // Connect panel until the edit is cancelled or successfully resubmitted.
+  function startEditConnection() {
+    if (!ui.connected) return;
+    ui.editingConnection = true;
+    clearConnectError();
+    render();
+    fillConnectFormFromState();
+  }
+
+  function cancelEditConnection() {
+    ui.editingConnection = false;
+    clearConnectError();
+    render();
   }
 
   async function handleTestConnection(evt) {
@@ -3503,12 +3586,28 @@
       ui.connected = true;
       ui.engine = res.engine || cfg.scheme;
       ui.restoredSession = false;
+
+      if (ui.editingConnection) {
+        // FIX 1: this was a reconnect/update, not a fresh connect — leave
+        // state.resource_types and ui.step/selectedRT/activeTab exactly as
+        // they were, and just drop back out of edit mode.
+        ui.editingConnection = false;
+        render();
+        return;
+      }
+
+      // FIX 3: ensureDefaults() seeds a Users resource type on a fresh
+      // connect, so land directly in its List tab rather than the "declare
+      // resource types" screen.
       ensureDefaults(cfg);
-      ui.step = "resource-types";
-      render();
+      selectRT(state.resource_types[0].id);
       return;
     }
 
+    // Edge case (FIX 1): an edit-connect attempt that fails leaves
+    // ui.connected/state.connect/state.resource_types exactly as they were
+    // (nothing above has mutated them yet) — the user stays on the edit
+    // form, with the error shown inline, and can retry or Cancel.
     var message = (res && res.error) ? res.error : "Could not connect. Check the details and try again.";
     showConnectError(message);
   }
@@ -3531,6 +3630,7 @@
     ui.engine = null;
     ui.step = "connect";
     ui.restoredSession = false;
+    ui.editingConnection = false;
     ui.selectedRT = null;
     ui.activeTab = "list";
     ui.lastRun = {};
@@ -3577,6 +3677,11 @@
     document.getElementById("connect-form").addEventListener("submit", handleTestConnection);
     document.getElementById("disconnect-btn").addEventListener("click", handleDisconnect);
     document.getElementById("topbar-disconnect-btn").addEventListener("click", handleDisconnect);
+    // FIX 1: non-destructive "Edit connection" — see startEditConnection()/
+    // cancelEditConnection() and handleTestConnection()'s editingConnection
+    // branch.
+    document.getElementById("topbar-edit-connect-btn").addEventListener("click", startEditConnection);
+    document.getElementById("edit-connect-cancel-btn").addEventListener("click", cancelEditConnection);
     document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
     document.getElementById("toggle-password").addEventListener("click", function () {
       var input = document.getElementById("f-password");
@@ -3639,6 +3744,11 @@
     addResourceType: addResourceType,
     selectRT: selectRT,
     selectTab: selectTab,
+    // FIX 1 — exposed so a DB-less Playwright pass can exercise the
+    // non-destructive "Edit connection" flow directly.
+    startEditConnection: startEditConnection,
+    cancelEditConnection: cancelEditConnection,
+    handleTestConnection: handleTestConnection,
     // Task 3 (List tab) — exposed so a DB-less Playwright pass can inject a
     // fake last-run (ui.lastRun[rtId+"/"+tab] = {...}) and exercise the
     // mapping widget, and so Tasks 4-5 can reuse the same functions.
