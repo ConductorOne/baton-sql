@@ -114,7 +114,8 @@ db2i://svc:pass123@ibmi.corp/MYRDB
 ```
 
 For IBM i the database segment is the RDB directory entry name (see `WRKRDBDIRE`), and a
-direct connection over DRDA requires a DB2 Connect license (see the licensing note above).
+direct connection over DRDA requires a customer-supplied DB2 Connect license
+(`db2consv_*.lic`) — see the Redistribution licensing section below.
 
 Query parameters are forwarded as additional DB2 connection keywords
 (e.g. `db2://user:pass@host:50000/DB?Security=SSL` adds `SECURITY=SSL`). Values containing
