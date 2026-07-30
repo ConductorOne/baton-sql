@@ -35,7 +35,7 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 	mp := mapNode()
 	traits := mapNode() // trait fields collected here for user/group/role/app
 	profile := mapNode()
-	hasManager := false
+	managerFields := map[string]string{} // field name ("manager_id"/"manager_email") -> its computed CEL
 	for _, fm := range rt.List.Fields {
 		cel, err := CompileField(fm)
 		if err != nil {
@@ -50,17 +50,23 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 			putScalar(traits, fm.Field, cel)
 		case "manager_id", "manager_email":
 			putScalar(traits, fm.Field, cel)
-			hasManager = true
+			managerFields[fm.Field] = cel
 		default:
 			if key, ok := profileKey(fm.Field); ok { // "profile.department" -> "department"
 				putScalar(profile, key, cel)
 			}
 		}
 	}
-	// Trap #2: manager fields require a non-empty profile.
-	if hasManager && len(profile.Content) == 0 {
-		// Surface manager_id into profile so it is not silently dropped.
-		putScalar(profile, "manager_id", ".manager_id")
+	// Trap #2: manager fields require a non-empty profile. Use the actual computed
+	// CEL (and actual field name) for whichever manager field(s) were mapped —
+	// never a hardcoded ".manager_id", which would be wrong whenever the source
+	// column isn't literally named "manager_id" or only manager_email is mapped.
+	if len(managerFields) > 0 && len(profile.Content) == 0 {
+		for _, name := range []string{"manager_id", "manager_email"} {
+			if cel, ok := managerFields[name]; ok {
+				putScalar(profile, name, cel)
+			}
+		}
 	}
 	if len(profile.Content) > 0 {
 		putNode(traits, "profile", profile)

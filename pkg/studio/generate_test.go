@@ -47,3 +47,81 @@ func TestGenerate_UsersListParsesAndMapsTraits(t *testing.T) {
 		t.Errorf("expected skip_entitlements_and_grants for E&G-less type; yaml:\n%s", s)
 	}
 }
+
+// TestGenerate_ManagerIDFromDifferentColumn_ProfileUsesRealCEL guards against a
+// regression where the manager->profile fallback hardcoded the literal CEL
+// ".manager_id" instead of the actual computed expression for whatever column
+// manager_id was mapped from. Here manager_id comes from column "mgr_id", so the
+// fallback profile entry must reference ".mgr_id", never ".manager_id".
+func TestGenerate_ManagerIDFromDifferentColumn_ProfileUsesRealCEL(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		Connect: ConnectConfig{Scheme: "mysql", Host: "db", Port: "3306", Database: "finance"},
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "users", Name: "Users", Trait: "user",
+			List: ListSpec{
+				Query: "SELECT id, email, mgr_id FROM employees",
+				Fields: []FieldMapping{
+					{Field: "id", Column: "id"},
+					{Field: "emails", Column: "email"},
+					{Field: "manager_id", Column: "mgr_id"},
+				},
+			},
+			Entitlements: EntitlementsSpec{Mode: "none"},
+		}},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := bsql.Parse(out); err != nil {
+		t.Fatalf("bsql.Parse rejected generated yaml: %v\n---\n%s", err, out)
+	}
+	s := string(out)
+	if !strings.Contains(s, ".mgr_id") {
+		t.Errorf("expected profile fallback to reference the real column .mgr_id; yaml:\n%s", s)
+	}
+	if strings.Contains(s, ".manager_id") {
+		t.Errorf("bogus hardcoded .manager_id leaked into output when column was mgr_id; yaml:\n%s", s)
+	}
+}
+
+// TestGenerate_ManagerEmailOnly_NoHardcodedManagerID guards against the same
+// regression for the manager_email-only case: no manager_id field is mapped at
+// all, so the fallback must key off manager_email (and never emit a bogus
+// profile.manager_id referencing a column that was never selected).
+func TestGenerate_ManagerEmailOnly_NoHardcodedManagerID(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		Connect: ConnectConfig{Scheme: "mysql", Host: "db", Port: "3306", Database: "finance"},
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "users", Name: "Users", Trait: "user",
+			List: ListSpec{
+				Query: "SELECT id, email, mgr_email FROM employees",
+				Fields: []FieldMapping{
+					{Field: "id", Column: "id"},
+					{Field: "emails", Column: "email"},
+					{Field: "manager_email", Column: "mgr_email"},
+				},
+			},
+			Entitlements: EntitlementsSpec{Mode: "none"},
+		}},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := bsql.Parse(out); err != nil {
+		t.Fatalf("bsql.Parse rejected generated yaml: %v\n---\n%s", err, out)
+	}
+	s := string(out)
+	if !strings.Contains(s, "profile:") {
+		t.Errorf("manager_email mapped but no profile block emitted; yaml:\n%s", s)
+	}
+	if !strings.Contains(s, "manager_email: .mgr_email") {
+		t.Errorf("expected profile.manager_email to reference the real column .mgr_email; yaml:\n%s", s)
+	}
+	if strings.Contains(s, "manager_id") || strings.Contains(s, ".manager_id") {
+		t.Errorf("bogus manager_id leaked into output when only manager_email was mapped; yaml:\n%s", s)
+	}
+}
