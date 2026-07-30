@@ -98,7 +98,7 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 		ent := mapNode()
 		putScalar(ent, "query", rt.Entitlements.Query)
 		mp := mapNode()
-		var displayCELForSlug string
+		var displayCELForSlug, idCELForSlug string
 		for _, fm := range rt.Entitlements.Fields {
 			cel, err := CompileField(fm)
 			if err != nil {
@@ -110,13 +110,27 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 			case "grantable_to":
 				putSeq(mp, "grantable_to", cel)
 			}
-			if fm.Field == "display_name" {
+			switch fm.Field {
+			case "display_name":
 				displayCELForSlug = cel
+			case "id":
+				idCELForSlug = cel
 			}
 		}
-		// Trap #3: always emit slug.
+		// Trap #3: always emit a valid slug. Prefer display_name, then fall
+		// back to id — never emit slugify() with an empty argument, which
+		// would silently break the "always emit a VALID slug" guarantee
+		// (bsql.EntitlementMapping.Slug is an unvalidated string, so a bad
+		// slug wouldn't be caught by bsql.Parse).
 		if !hasKey(mp, "slug") {
-			putScalar(mp, "slug", fmt.Sprintf("slugify(%s)", displayCELForSlug))
+			slugSrc := displayCELForSlug
+			if slugSrc == "" {
+				slugSrc = idCELForSlug
+			}
+			if slugSrc == "" {
+				return nil, fmt.Errorf("resource type %q: dynamic entitlements need a display_name or id mapping to derive a slug", rt.ID)
+			}
+			putScalar(mp, "slug", fmt.Sprintf("%s(%s)", RecipeSlugify, slugSrc))
 		}
 		// bsql.EntitlementsQuery.Map is []*EntitlementMapping (a YAML sequence),
 		// not a single mapping like ListQuery.Map — wrap our one built mapping

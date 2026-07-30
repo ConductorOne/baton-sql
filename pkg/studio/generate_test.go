@@ -155,3 +155,68 @@ func TestGenerate_DynamicEntitlementsAlwaysSlug(t *testing.T) {
 		t.Errorf("dynamic entitlements must always emit slug; yaml:\n%s", out)
 	}
 }
+
+// TestGenerate_DynamicEntitlementsSlugFallsBackToID guards against a
+// regression (fix round 1) where the default-slug computation only looked at
+// a mapped display_name field. When display_name is omitted but id is
+// mapped, the slug default must fall back to slugify(<id CEL>) instead of
+// emitting the malformed slugify() with an empty argument.
+func TestGenerate_DynamicEntitlementsSlugFallsBackToID(t *testing.T) {
+	spec := &Spec{
+		AppName: "EBS",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "menu", Name: "Menu", Trait: "role",
+			List: ListSpec{Query: "SELECT menu_id, menu_name FROM menus", Fields: []FieldMapping{
+				{Field: "id", Column: "menu_id"}, {Field: "display_name", Column: "menu_name"},
+			}},
+			Entitlements: EntitlementsSpec{
+				Mode:  "query",
+				Query: "SELECT function_id FROM functions WHERE menu_id = ?<menu_id>",
+				Fields: []FieldMapping{
+					{Field: "id", Column: "function_id"},
+				},
+			},
+		}},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := bsql.Parse(out); err != nil {
+		t.Fatalf("parse: %v\n%s", err, out)
+	}
+	s := string(out)
+	if !strings.Contains(s, "slug: slugify(.function_id)") {
+		t.Errorf("expected slug to fall back to slugify(.function_id); yaml:\n%s", s)
+	}
+	if strings.Contains(s, "slugify()") {
+		t.Errorf("must never emit slugify() with an empty argument; yaml:\n%s", s)
+	}
+}
+
+// TestGenerate_DynamicEntitlementsNoIDOrDisplayName_Errors guards against
+// silently emitting an invalid slugify() when a query-mode entitlements spec
+// maps neither display_name nor id: there is nothing to derive a default
+// slug from, so Generate must return an error rather than emit malformed
+// CEL.
+func TestGenerate_DynamicEntitlementsNoIDOrDisplayName_Errors(t *testing.T) {
+	spec := &Spec{
+		AppName: "EBS",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "menu", Name: "Menu", Trait: "role",
+			List: ListSpec{Query: "SELECT menu_id, menu_name FROM menus", Fields: []FieldMapping{
+				{Field: "id", Column: "menu_id"}, {Field: "display_name", Column: "menu_name"},
+			}},
+			Entitlements: EntitlementsSpec{
+				Mode:  "query",
+				Query: "SELECT function_id, description FROM functions WHERE menu_id = ?<menu_id>",
+				Fields: []FieldMapping{
+					{Field: "description", Column: "description"},
+				},
+			},
+		}},
+	}
+	if _, err := Generate(spec); err == nil {
+		t.Fatal("expected Generate to error when dynamic entitlements map neither id nor display_name")
+	}
+}
