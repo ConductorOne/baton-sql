@@ -1,0 +1,71 @@
+{
+  "app_name": "Finance DB",
+  "connect": {
+    "scheme": "mysql",
+    "host": "db.internal",
+    "port": "3306",
+    "database": "finance",
+    "user": "svc_baton",
+    "password": "changeme"
+  },
+  "resource_types": [
+    {
+      "id": "users",
+      "name": "Users",
+      "trait": "user",
+      "list": {
+        "query": "SELECT emp_id, first_name, last_name, email, active, department, manager_id FROM employees",
+        "fields": [
+          {"field": "id", "column": "emp_id"},
+          {
+            "field": "display_name",
+            "transform": {
+              "recipe": "composite_id",
+              "args": {"columns": ["first_name", "last_name"], "sep": " "}
+            }
+          },
+          {"field": "emails", "column": "email"},
+          {
+            "field": "status",
+            "transform": {
+              "recipe": "status_ternary",
+              "args": {"column": "active", "enabled": ["1"]}
+            }
+          },
+          {"field": "profile.department", "column": "department"},
+          {"field": "manager_id", "column": "manager_id"}
+        ]
+      },
+      "entitlements": {"mode": "none"}
+    },
+    {
+      "id": "roles",
+      "name": "Roles",
+      "trait": "role",
+      "list": {
+        "query": "SELECT role_id, role_name FROM roles",
+        "fields": [
+          {"field": "id", "column": "role_id"},
+          {"field": "display_name", "column": "role_name"}
+        ]
+      },
+      "entitlements": {
+        "mode": "static",
+        "static": [
+          {"id": "assigned", "display_name": "Assigned", "purpose": "Grants membership in this role"}
+        ]
+      },
+      "grants": [
+        {
+          "query": "SELECT user_id FROM user_roles WHERE role_id = ?<role_id>",
+          "resource_var": "role_id",
+          "principal_type": "users",
+          "entitlement": "assigned",
+          "fields": [
+            {"field": "principal_id", "column": "user_id"}
+          ]
+        }
+      ]
+    }
+  ]
+}

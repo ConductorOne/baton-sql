@@ -1,0 +1,37 @@
+app_name: Finance DB
+resource_types:
+    users:
+        name: Users
+        list:
+            query: SELECT emp_id, first_name, last_name, email, active, department, manager_id FROM employees
+            map:
+                id: .emp_id
+                display_name: string(.first_name) + ' ' + string(.last_name)
+                traits:
+                    user:
+                        emails:
+                            - .email
+                        status: 'string(.active) == ''1'' ? ''enabled'' : ''disabled'''
+                        manager_id: .manager_id
+                        profile:
+                            department: .department
+        skip_entitlements_and_grants: true
+    roles:
+        name: Roles
+        list:
+            query: SELECT role_id, role_name FROM roles
+            map:
+                id: .role_id
+                display_name: .role_name
+        static_entitlements:
+            - id: assigned
+              display_name: Assigned
+              purpose: Grants membership in this role
+        grants:
+            - query: SELECT user_id FROM user_roles WHERE role_id = ?<role_id>
+              vars:
+                role_id: resource.ID
+              map:
+                - principal_id: .user_id
+                  principal_type: users
+                  entitlement_id: assigned

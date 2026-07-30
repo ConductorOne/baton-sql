@@ -2,8 +2,45 @@ package studio
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 )
+
+// goldenFinanceSpec reads the multi-resource-type Finance DB fixture used to
+// prove the whole engine end-to-end (Task 9): a users list with a composite
+// display_name, a status ternary, profile.department, and manager_id, plus a
+// roles list with a static entitlement and a resource-scoped grant.
+func goldenFinanceSpec(t *testing.T) *Spec {
+	t.Helper()
+	data, err := os.ReadFile("testdata/finance.spec.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s Spec
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	return &s
+}
+
+// TestValidate_GoodSpecOK proves the fixture used across the whole Studio
+// engine (Generate, CLI, and this validation layer) is genuinely clean: no
+// principal_type issues, and it round-trips through bsql.Parse and the
+// authoritative syncer.Validate(ctx) check with zero errors.
+func TestValidate_GoodSpecOK(t *testing.T) {
+	spec := goldenFinanceSpec(t)
+	rep, err := Validate(context.Background(), spec, ValidateOptions{})
+	if err != nil {
+		t.Fatalf("validate returned error: %v", err)
+	}
+	if !rep.OK {
+		t.Fatalf("expected report OK for golden finance spec, got errors: %+v", rep.Errors)
+	}
+	if len(rep.Errors) != 0 {
+		t.Fatalf("expected no errors, got %+v", rep.Errors)
+	}
+}
 
 func TestValidate_BadPrincipalTypeReported(t *testing.T) {
 	spec := &Spec{

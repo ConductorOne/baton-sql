@@ -37,7 +37,7 @@ type FieldMapping struct {
 }
 
 type Transform struct {
-	Recipe string         `json:"recipe"`           // see recipes.go
+	Recipe string         `json:"recipe"` // see recipes.go
 	Args   map[string]any `json:"args,omitempty"`
 	RawCEL string         `json:"raw_cel,omitempty"`
 }
@@ -57,8 +57,8 @@ type StaticEntitlement struct {
 
 type GrantSpec struct {
 	Query         string         `json:"query"`
-	ResourceVar   string         `json:"resource_var,omitempty"`   // ?<var> bound to resource.ID
+	ResourceVar   string         `json:"resource_var,omitempty"` // ?<var> bound to resource.ID
 	PrincipalType string         `json:"principal_type"`
-	Entitlement   string         `json:"entitlement"`              // entitlement id/slug this grant targets
-	Fields        []FieldMapping `json:"fields"`                   // principal_id, resource_id, skip_if
+	Entitlement   string         `json:"entitlement"` // entitlement id/slug this grant targets
+	Fields        []FieldMapping `json:"fields"`      // principal_id, resource_id, skip_if
 }
