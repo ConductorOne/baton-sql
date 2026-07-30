@@ -19,6 +19,11 @@
     --ink-muted: #5b6672;
     --accent: #0d7d8a;
     --accent-rgb: 13, 125, 138;
+    /* Text color placed ON TOP of --accent (buttons, badges). White passes
+       AA against the light accent (#0d7d8a); the dark-theme accent
+       (#22b3c4) is much lighter, so white text there is only ~2.5:1 — a
+       dark ink instead gets ~7.4:1 (see the dark-theme overrides below). */
+    --on-accent: #ffffff;
     --good: #1f9d5b;
     --good-rgb: 31, 157, 91;
     --warn: #b9791a;
@@ -43,6 +48,8 @@
       --ink-muted: #93a1b0;
       --accent: #22b3c4;
       --accent-rgb: 34, 179, 196;
+      /* ~7.4:1 against #22b3c4 (vs. ~2.5:1 for white) — meets WCAG AA (4.5:1). */
+      --on-accent: #0d1219;
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
       color-scheme: dark;
     }
@@ -57,6 +64,7 @@
     --ink-muted: #5b6672;
     --accent: #0d7d8a;
     --accent-rgb: 13, 125, 138;
+    --on-accent: #ffffff;
     --shadow: 0 1px 2px rgba(19, 26, 34, 0.06), 0 8px 24px rgba(19, 26, 34, 0.06);
     color-scheme: light;
   }
@@ -70,6 +78,8 @@
     --ink-muted: #93a1b0;
     --accent: #22b3c4;
     --accent-rgb: 34, 179, 196;
+    /* ~7.4:1 against #22b3c4 (vs. ~2.5:1 for white) — meets WCAG AA (4.5:1). */
+    --on-accent: #0d1219;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
     color-scheme: dark;
   }
@@ -148,7 +158,7 @@
     height: 1.6rem;
     border-radius: 6px;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 700;
@@ -310,7 +320,7 @@
   .rail-step[data-state="done"] .marker {
     border-color: var(--accent);
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   .rail-step[data-state="active"] {
     background: rgba(var(--accent-rgb), 0.1);
@@ -440,7 +450,7 @@
   }
   .btn-primary {
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   .btn-primary:hover:not(:disabled) { opacity: 0.92; }
   .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -617,6 +627,12 @@
   .tab-dot[data-state="error"] { background: var(--crit); }
 
   .rail-add-btn { width: 100%; justify-content: center; }
+  .rail-review-btn {
+    margin-top: 0.5rem;
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .rail-review-btn:hover { background: rgba(var(--accent-rgb), 0.1); }
 
   /* ---------------------------------------------------------------------
      Declare resource types — plain-language prompt + chips + custom form
@@ -937,6 +953,64 @@
   .grant-field { max-width: 26rem; }
   .grant-entitlement-custom { margin-top: 0.5rem; }
 
+  /* ---------------------------------------------------------------------
+     Review & export (Task 6) — the validation report list, the "Valid"
+     summary banner (reuses .connected-banner's green look), and the YAML
+     drawer. The panel itself reuses .panel/.panel-header/.field/.hint-block
+     from earlier tasks.
+     ------------------------------------------------------------------- */
+  .review-panel { max-width: 780px; }
+
+  .issue-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid rgba(var(--crit-rgb), 0.35);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .issue-row { border-bottom: 1px solid var(--border); }
+  .issue-row:last-child { border-bottom: none; }
+  .issue-inner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.85rem;
+    width: 100%;
+    padding: 0.65rem 0.9rem;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  .issue-inner.issue-clickable { cursor: pointer; }
+  .issue-inner.issue-clickable:hover { background: rgba(var(--crit-rgb), 0.08); }
+  .issue-scope {
+    flex: 0 0 auto;
+    min-width: 6.5rem;
+    font-weight: 650;
+    font-size: 0.78rem;
+    color: var(--ink);
+  }
+  .issue-field {
+    flex: 0 0 auto;
+    min-width: 6.5rem;
+    font-size: 0.76rem;
+    color: var(--ink-muted);
+  }
+  .issue-message { flex: 1; min-width: 0; font-size: 0.84rem; color: var(--ink); }
+
+  .yaml-drawer { margin-top: 1.6rem; }
+  .yaml-scroll { max-height: 24rem; overflow-y: auto; }
+  .yaml-block {
+    margin: 0;
+    padding: 0.9rem 1rem;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    white-space: pre;
+    color: var(--ink);
+  }
+
   /* Responsive: collapse the rail to a horizontal strip; wrap, never
      scroll the page horizontally. */
   @media (max-width: 760px) {
@@ -970,6 +1044,7 @@
           <span class="dot" aria-hidden="true"></span>
           <span id="topbar-status-text">Not connected</span>
         </span>
+        <button type="button" class="btn btn-ghost" id="topbar-review-btn" style="display:none" title="Review and validate the configuration">Validate</button>
         <button type="button" class="btn btn-danger-ghost" id="topbar-disconnect-btn" style="display:none">Disconnect</button>
         <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle color theme" title="Toggle color theme">&#9788;</button>
       </div>
@@ -985,6 +1060,7 @@
           <div class="rail-title">Resource types</div>
           <ul class="rt-card-list" id="rt-card-list" aria-label="Declared resource types"></ul>
           <button type="button" class="btn btn-ghost rail-add-btn" id="rail-add-rt-btn">+ Add resource type</button>
+          <button type="button" class="btn btn-ghost rail-add-btn rail-review-btn" id="rail-review-btn">Review &amp; export</button>
         </div>
       </nav>
 
@@ -1116,6 +1192,50 @@
 
           <div class="tab-body" id="tab-body"></div>
         </section>
+
+        <section class="panel step-panel review-panel" id="review" aria-labelledby="review-title">
+          <div class="panel-header">
+            <p class="panel-kicker">Review &amp; export</p>
+            <h1 class="panel-title" id="review-title">Review your configuration</h1>
+            <p class="panel-subtitle">Validate against baton-sql's own parser and syncer checks, then export the generated connector YAML.</p>
+          </div>
+
+          <div class="field" style="max-width: 22rem; margin-bottom: 1.4rem;">
+            <label for="f-app-name-review">Connector name</label>
+            <input class="control" id="f-app-name-review" type="text" placeholder="my-service" autocomplete="off">
+            <p class="hint">Used for the generated config's app name and the export filename.</p>
+          </div>
+
+          <div class="form-actions" style="margin-bottom: 1.2rem;">
+            <button type="button" class="btn btn-primary" id="review-validate-btn">
+              <span id="review-validate-spinner" class="spinner" style="display:none" aria-hidden="true"></span>
+              <span id="review-validate-label">Validate</span>
+            </button>
+            <span class="status-pill" id="review-status-pill" data-state="unproven">
+              <span class="dot" aria-hidden="true"></span>
+              <span id="review-status-text">Not yet validated</span>
+            </span>
+          </div>
+
+          <div id="review-report" data-review-report></div>
+
+          <p class="hint-block" data-purpose-residual-hint>
+            Note: a <code class="mono">purpose</code> value derived from a column (rather than a fixed literal) can&rsquo;t be checked statically here &mdash; it&rsquo;s evaluated per row and may still resolve to UNSPECIFIED at runtime if it doesn&rsquo;t match &ldquo;assignment&rdquo; or &ldquo;permission&rdquo; exactly.
+          </p>
+
+          <div class="yaml-drawer">
+            <div class="form-actions">
+              <button type="button" class="btn btn-ghost" id="view-yaml-btn" aria-expanded="false">View YAML</button>
+              <button type="button" class="btn btn-primary" id="download-yaml-btn" data-download-yaml>Download .yaml</button>
+            </div>
+            <div id="yaml-panel" style="display:none; margin-top: 1rem;">
+              <div class="table-scroll yaml-scroll">
+                <pre class="mono yaml-block" id="yaml-block" data-yaml></pre>
+              </div>
+              <div class="inline-error" id="yaml-error" role="alert"></div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
   </div>
@@ -1165,7 +1285,14 @@
     // "sample value for ?<var>" prompt (Task 5) — remembered per resource
     // type purely so re-running after a tweak doesn't start from a blank
     // prompt. Never serialized as part of the Spec.
-    grantSamples: {}
+    grantSamples: {},
+
+    // lastValidate = {ok, errors} — the most recent /api/validate Report
+    // (Task 6), or null before the first run. Drives the Review panel's
+    // summary/issue list AND (best-effort) the rail cards' per-tab dot
+    // state via hasValidateError(). validating is purely a spinner flag.
+    lastValidate: null,
+    validating: false
   };
 
   var STEPS = [
@@ -1360,9 +1487,12 @@
   // List, Task 3's live-run signal). "empty" = nothing authored; "draft" =
   // authored but not (yet) proven; "ok" = proven by a successful run whose
   // columns match the current query; "error" = last run for this query
-  // failed. Tasks 4-5 will layer the same proven/stale/error signals into
-  // entitlements/grants once those tabs gain their own runs.
+  // failed, OR (Task 6) the most recent /api/validate Report has an issue
+  // that maps to this resource type + tab (hasValidateError, below) — this
+  // is checked first since a validate failure is the strongest signal and
+  // should override an otherwise-"ok" run-proven dot until re-validated.
   function rtTabState(rt, tab) {
+    if (hasValidateError(rt, tab)) return "error";
     if (tab === "list") {
       if (!rt.list || !rt.list.query) return "empty";
       var status = runStatusLabel(rt, "list");
@@ -1467,8 +1597,12 @@
     // The connect panel's own Disconnect button only reaches the user while
     // ui.step === "connect"; once past it, this topbar affordance is the
     // only way back, since the resource-types step replaces that panel.
-    document.getElementById("topbar-disconnect-btn").style.display =
-      (ui.connected && ui.step !== "connect") ? "" : "none";
+    // The Review/Validate button shares the same visibility rule — it only
+    // makes sense once there's a connection (and therefore a Spec worth
+    // reviewing).
+    var showTopbarNav = ui.connected && ui.step !== "connect";
+    document.getElementById("topbar-disconnect-btn").style.display = showTopbarNav ? "" : "none";
+    document.getElementById("topbar-review-btn").style.display = showTopbarNav ? "" : "none";
   }
 
   function renderConnectPanel() {
@@ -1501,23 +1635,34 @@
   }
 
   // renderStepPanels() shows exactly one of Connect / Declare resource types
-  // / a resource type's workspace, driven by ui.step and ui.selectedRT.
+  // / a resource type's workspace / Review & export, driven by ui.step and
+  // ui.selectedRT.
   function renderStepPanels() {
     var showConnect = ui.step === "connect";
-    var showWorkspace = ui.step !== "connect" && !!ui.selectedRT &&
+    var showReview = ui.step === "review";
+    var showWorkspace = !showConnect && !showReview && !!ui.selectedRT &&
       state.resource_types.some(function (rt) { return rt.id === ui.selectedRT; });
-    var showDeclare = ui.step !== "connect" && !showWorkspace;
+    var showDeclare = !showConnect && !showReview && !showWorkspace;
 
     document.getElementById("connect").classList.toggle("visible", showConnect);
     document.getElementById("declare-rt").classList.toggle("visible", showDeclare);
     document.getElementById("workspace").classList.toggle("visible", showWorkspace);
+    document.getElementById("review").classList.toggle("visible", showReview);
+  }
+
+  // renderAppNameField() writes state.app_name into one app-name <input> —
+  // shared by the Declare panel's field (Task 2) and the Review panel's own
+  // copy (Task 6), which stay in sync via their own "input" handlers (see
+  // init()). Skips the currently-focused element so typing in one never has
+  // its cursor/selection clobbered by a render triggered from elsewhere.
+  function renderAppNameField(id) {
+    var el = document.getElementById(id);
+    if (!el || document.activeElement === el) return;
+    el.value = state.app_name || "";
   }
 
   function renderDeclarePanel() {
-    var appNameInput = document.getElementById("f-app-name");
-    if (document.activeElement !== appNameInput) {
-      appNameInput.value = state.app_name || "";
-    }
+    renderAppNameField("f-app-name");
   }
 
   function renderWorkspace() {
@@ -1555,6 +1700,7 @@
     renderStepPanels();
     renderDeclarePanel();
     renderWorkspace();
+    renderReviewPanel();
   }
 
   // -----------------------------------------------------------------------
@@ -2847,6 +2993,316 @@
   }
 
   // -----------------------------------------------------------------------
+  // Review & export (Task 6) — POSTs the whole `state` object to
+  // /api/validate and /api/generate (it IS the studio.Spec the server
+  // expects — see the "state mirrors studio.Spec exactly" note above) and
+  // renders the Report / YAML. ISSUE_FIELD_TAB + issueEffectiveScope/
+  // issueTab are also consulted by rtTabState() (above) so a validate
+  // failure surfaces as an "error" dot on the right card+tab, not just in
+  // this panel's own issue list.
+  // -----------------------------------------------------------------------
+
+  // ISSUE_FIELD_TAB maps a studio.Issue.Field to the workspace tab it's
+  // best understood on, mirroring exactly which tab authors that field:
+  // principal_type/resource_id are Grants-tab concepts (pkg/studio/validate.go's
+  // Trap #4/FIX-2 checks), purpose/grantable_to are Entitlements-tab concepts
+  // (FIX-1/FIX-3). Fields with no entry here (e.g. "generate"/"parse"/
+  // "config"/"validate" — the whole-Spec infrastructure checks, or an
+  // unrecognized field) fall back to the List tab when a resource type can
+  // still be resolved, since List is the tab every resource type has.
+  var ISSUE_FIELD_TAB = {
+    principal_type: "grants",
+    resource_id: "grants",
+    purpose: "entitlements",
+    grantable_to: "entitlements"
+  };
+
+  function issueTab(issue) {
+    return (issue && ISSUE_FIELD_TAB[issue.field]) || null;
+  }
+
+  // issueEffectiveScope() returns the issue's resource-type id: the Issue's
+  // own Scope when set, or — for the whole-Spec issues studio.Validate
+  // emits with an empty Scope (Field "generate"/"parse"/"config"/
+  // "validate") — a best-effort extraction from the error message text,
+  // which for generate.go's own errors is always of the form
+  // `resource type "<id>": ...`. Returns "" when neither is available, in
+  // which case the issue is rendered as informational text rather than a
+  // clickable "go to this resource type" row.
+  function issueEffectiveScope(issue) {
+    if (!issue) return "";
+    if (issue.scope) return issue.scope;
+    var m = /resource type "([^"]+)"/.exec(String(issue.message || ""));
+    return m ? m[1] : "";
+  }
+
+  // hasValidateError() reports whether the most recent /api/validate Report
+  // (ui.lastValidate) has an issue that maps to rt/tab — an issue whose
+  // effective scope is rt.id, and whose issueTab() is either exactly `tab`
+  // or (for a tab-less/whole-RT issue) `tab === "list"` as the default
+  // landing tab. Returns false whenever there's no report yet, or the last
+  // report was OK — "best-effort... where practical" per the brief, not a
+  // live/continuously-revalidated signal.
+  function hasValidateError(rt, tab) {
+    if (!ui.lastValidate || ui.lastValidate.ok) return false;
+    return (ui.lastValidate.errors || []).some(function (issue) {
+      if (issueEffectiveScope(issue) !== rt.id) return false;
+      var t = issueTab(issue);
+      return t ? t === tab : tab === "list";
+    });
+  }
+
+  // focusIssue() is the Review panel's issue-list click handler: best-effort
+  // navigation to the resource type (and, where derivable, the specific
+  // tab) an issue is about. A no-op when the issue's effective scope
+  // doesn't resolve to a currently-declared resource type (e.g. a
+  // generate/parse error whose message didn't contain a recognizable
+  // `resource type "<id>"` phrase).
+  function focusIssue(issue) {
+    var scope = issueEffectiveScope(issue);
+    var rt = scope && state.resource_types.find(function (r) { return r.id === scope; });
+    if (!rt) return;
+    ui.step = "resource-types";
+    selectRT(scope);
+    var tab = issueTab(issue);
+    if (tab && tab !== ui.activeTab) {
+      ui.activeTab = tab;
+      render();
+    }
+  }
+
+  // renderReviewReport() fills #review-report with either the green "Valid"
+  // summary or the itemized issue list, from ui.lastValidate.
+  function renderReviewReport() {
+    var container = document.getElementById("review-report");
+    container.innerHTML = "";
+    var rep = ui.lastValidate;
+    if (!rep) {
+      var hint = document.createElement("p");
+      hint.className = "hint-block";
+      hint.textContent = "Click Validate to check this configuration against baton-sql's own parser and syncer validation before exporting.";
+      container.appendChild(hint);
+      return;
+    }
+    if (rep.ok) {
+      var okBanner = document.createElement("div");
+      okBanner.className = "connected-banner visible";
+      okBanner.setAttribute("data-review-ok", "");
+      var pill = document.createElement("span");
+      pill.className = "connected-pill";
+      var dot = document.createElement("span");
+      dot.className = "dot";
+      dot.setAttribute("aria-hidden", "true");
+      var pillText = document.createElement("span");
+      pillText.textContent = "Valid — ready to export";
+      pill.appendChild(dot);
+      pill.appendChild(pillText);
+      okBanner.appendChild(pill);
+      container.appendChild(okBanner);
+      return;
+    }
+    if (!rep.errors || rep.errors.length === 0) {
+      var generic = document.createElement("div");
+      generic.className = "inline-error visible";
+      generic.textContent = "Validation failed, but the server reported no specific issues.";
+      container.appendChild(generic);
+      return;
+    }
+    var list = document.createElement("ul");
+    list.className = "issue-list";
+    list.setAttribute("data-review-issues", "");
+    rep.errors.forEach(function (issue) {
+      var li = document.createElement("li");
+      li.className = "issue-row";
+
+      var scope = issueEffectiveScope(issue);
+      var rt = scope ? state.resource_types.find(function (r) { return r.id === scope; }) : null;
+
+      var inner = document.createElement(rt ? "button" : "div");
+      if (rt) {
+        inner.type = "button";
+        inner.addEventListener("click", function () { focusIssue(issue); });
+      }
+      inner.className = "issue-inner" + (rt ? " issue-clickable" : "");
+
+      var scopeSpan = document.createElement("span");
+      scopeSpan.className = "issue-scope";
+      scopeSpan.textContent = issue.scope ? issue.scope : (scope ? scope : "—");
+
+      var fieldSpan = document.createElement("span");
+      fieldSpan.className = "issue-field mono";
+      fieldSpan.textContent = issue.field || "";
+
+      var msgSpan = document.createElement("span");
+      msgSpan.className = "issue-message";
+      msgSpan.textContent = issue.message || "";
+
+      inner.appendChild(scopeSpan);
+      inner.appendChild(fieldSpan);
+      inner.appendChild(msgSpan);
+      li.appendChild(inner);
+      list.appendChild(li);
+    });
+    container.appendChild(list);
+  }
+
+  // renderReviewPanel() is the Review step's entry point (called from
+  // render(), unconditionally — cheap, and the panel is hidden via
+  // .step-panel when ui.step isn't "review"): syncs the app-name field,
+  // the status pill, and the report body.
+  function renderReviewPanel() {
+    renderAppNameField("f-app-name-review");
+
+    var pill = document.getElementById("review-status-pill");
+    var text = document.getElementById("review-status-text");
+    var rep = ui.lastValidate;
+    if (ui.validating) {
+      pill.setAttribute("data-state", "connecting");
+      text.textContent = "Validating…";
+    } else if (!rep) {
+      pill.setAttribute("data-state", "unproven");
+      text.textContent = "Not yet validated";
+    } else if (rep.ok) {
+      pill.setAttribute("data-state", "connected");
+      text.textContent = "Valid";
+    } else {
+      var n = (rep.errors || []).length;
+      pill.setAttribute("data-state", "error");
+      text.textContent = n + (n === 1 ? " issue found" : " issues found");
+    }
+
+    renderReviewReport();
+  }
+
+  // validateNow() POSTs the full `state` object to /api/validate and stores
+  // the Report in ui.lastValidate, then re-renders both the Review panel
+  // (status pill + issue list) and the rail (per-tab error dots via
+  // hasValidateError). api()'s own network-failure fallback has no `ok`
+  // field (just {error}), so that's distinguished from a real Report (which
+  // always has a boolean ok, true or false) rather than mistaken for one.
+  async function validateNow() {
+    ui.validating = true;
+    var btn = document.getElementById("review-validate-btn");
+    var spinner = document.getElementById("review-validate-spinner");
+    var label = document.getElementById("review-validate-label");
+    if (btn) btn.disabled = true;
+    if (spinner) spinner.style.display = "";
+    if (label) label.textContent = "Validating…";
+    renderReviewPanel();
+
+    var res = await api("/api/validate", state);
+
+    ui.validating = false;
+    if (btn) btn.disabled = false;
+    if (spinner) spinner.style.display = "none";
+    if (label) label.textContent = "Validate";
+
+    if (res && typeof res.ok === "boolean") {
+      ui.lastValidate = { ok: res.ok, errors: res.errors || [] };
+    } else {
+      ui.lastValidate = {
+        ok: false,
+        errors: [{ scope: "", field: "", message: (res && res.error) ? res.error : "Validation request failed — is the Studio server running?" }]
+      };
+    }
+
+    renderReviewPanel();
+    renderRail();
+  }
+
+  // goToReview() is the shared handler for every "go review this config"
+  // affordance (topbar Validate button, rail "Review & export" button):
+  // navigate to the Review step AND immediately re-validate, so it's always
+  // showing a fresh report rather than one from whatever was last edited
+  // several tabs ago.
+  function goToReview() {
+    ui.step = "review";
+    ui.selectedRT = null;
+    render();
+    validateNow();
+  }
+
+  // slugifyFilename() derives the export filename from state.app_name,
+  // falling back to a fixed default when app_name is blank or slugifies to
+  // nothing (e.g. all punctuation).
+  function slugifyFilename(name) {
+    var s = slugify(name);
+    return (s ? s : "baton-sql-config") + ".yaml";
+  }
+
+  // refreshYAML() POSTs `state` to /api/generate and writes the result (or
+  // error) into the YAML drawer. Returns the YAML text on success, or null
+  // on failure (error already shown inline) — handleDownloadYAML uses that
+  // return value to decide whether there's anything to download.
+  async function refreshYAML() {
+    var block = document.getElementById("yaml-block");
+    var errEl = document.getElementById("yaml-error");
+    block.textContent = "Generating…";
+    errEl.textContent = "";
+    errEl.classList.remove("visible");
+
+    var res = await api("/api/generate", state);
+    if (!res || res.error) {
+      block.textContent = "";
+      errEl.textContent = (res && res.error) ? res.error : "Could not generate YAML — is the Studio server running?";
+      errEl.classList.add("visible");
+      return null;
+    }
+    var yamlText = res.yaml || "";
+    block.textContent = yamlText;
+    return yamlText;
+  }
+
+  function isYAMLOpen() {
+    return document.getElementById("yaml-panel").style.display !== "none";
+  }
+
+  // toggleYAML() is the "View YAML" button's handler: opens the drawer and
+  // fetches a fresh render on open; closing never re-fetches.
+  async function toggleYAML() {
+    var panel = document.getElementById("yaml-panel");
+    var btn = document.getElementById("view-yaml-btn");
+    if (isYAMLOpen()) {
+      panel.style.display = "none";
+      btn.setAttribute("aria-expanded", "false");
+      return;
+    }
+    panel.style.display = "";
+    btn.setAttribute("aria-expanded", "true");
+    await refreshYAML();
+  }
+
+  // handleDownloadYAML() always fetches a fresh render first (so a download
+  // never ships a stale YAML from before the user's last edit), then — on
+  // success — triggers a purely client-side Blob download: no server
+  // endpoint returns a file attachment, this is the only place a "file" is
+  // produced, entirely in the browser. On failure, opens the drawer (if not
+  // already open) so the inline error refreshYAML() wrote is visible rather
+  // than silently doing nothing.
+  async function handleDownloadYAML() {
+    var btn = document.getElementById("download-yaml-btn");
+    btn.disabled = true;
+    var yamlText = await refreshYAML();
+    btn.disabled = false;
+
+    if (yamlText === null) {
+      document.getElementById("yaml-panel").style.display = "";
+      document.getElementById("view-yaml-btn").setAttribute("aria-expanded", "true");
+      return;
+    }
+
+    var blob = new Blob([yamlText], { type: "application/x-yaml" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = slugifyFilename(state.app_name);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // -----------------------------------------------------------------------
   // Resource-type declaration — state.resource_types is the single source
   // of truth; every mutator below re-renders the rail so cards stay in
   // sync, and callers may render() again for anything else that changed.
@@ -2906,6 +3362,12 @@
   }
 
   function selectRT(id) {
+    // Selecting a card must actually reach the workspace panel even when
+    // called from the Review step (Task 6: the rail's resource-type cards
+    // stay visible there too) — renderStepPanels() shows the workspace only
+    // when ui.step isn't "connect" or "review", so this has to leave
+    // "review" explicitly rather than relying on ui.selectedRT alone.
+    ui.step = "resource-types";
     ui.selectedRT = id;
     ui.activeTab = "list";
     render();
@@ -3037,6 +3499,14 @@
     showConnectError(message);
   }
 
+  // handleDisconnect() is only ever wired to the two explicit "Disconnect"
+  // buttons — never called from a failed handleTestConnection attempt — so
+  // the reset below only fires on an intentional disconnect, never on a
+  // connection that simply failed to establish. Without this, reconnecting
+  // to a DIFFERENT database would carry the old connection's resource
+  // types (including the pre-seeded Users type built from ITS columns),
+  // app_name, and cached run/preview state into the new one — silently
+  // exporting a config for the wrong database.
   async function handleDisconnect() {
     var btns = [document.getElementById("disconnect-btn"), document.getElementById("topbar-disconnect-btn")];
     btns.forEach(function (b) { b.disabled = true; });
@@ -3048,6 +3518,16 @@
     ui.step = "connect";
     ui.restoredSession = false;
     ui.selectedRT = null;
+    ui.activeTab = "list";
+    ui.lastRun = {};
+    ui.extraProfileFields = {};
+    ui.grantSamples = {};
+    ui.lastValidate = null;
+    ui.validating = false;
+
+    state.resource_types = [];
+    state.app_name = "";
+
     render();
   }
 
@@ -3095,9 +3575,15 @@
 
     document.getElementById("f-app-name").addEventListener("input", function (evt) {
       state.app_name = evt.target.value;
+      renderAppNameField("f-app-name-review");
+    });
+    document.getElementById("f-app-name-review").addEventListener("input", function (evt) {
+      state.app_name = evt.target.value;
+      renderAppNameField("f-app-name");
     });
     document.getElementById("rail-add-rt-btn").addEventListener("click", function () {
       ui.selectedRT = null;
+      ui.step = "resource-types";
       render();
     });
     document.getElementById("custom-rt-form").addEventListener("submit", handleAddCustomRT);
@@ -3105,6 +3591,13 @@
     TABS.forEach(function (tab) {
       document.getElementById("tab-" + tab).addEventListener("click", function () { selectTab(tab); });
     });
+
+    // Task 6: Review & export.
+    document.getElementById("topbar-review-btn").addEventListener("click", goToReview);
+    document.getElementById("rail-review-btn").addEventListener("click", goToReview);
+    document.getElementById("review-validate-btn").addEventListener("click", function () { validateNow(); });
+    document.getElementById("view-yaml-btn").addEventListener("click", toggleYAML);
+    document.getElementById("download-yaml-btn").addEventListener("click", handleDownloadYAML);
 
     var status = await api("/api/status");
     if (status && status.connected) {
@@ -3156,7 +3649,18 @@
     ensureGrant: ensureGrant,
     extractVarTokens: extractVarTokens,
     runGrantQuery: runGrantQuery,
-    GRANT_FIELD_DEFS: GRANT_FIELD_DEFS
+    GRANT_FIELD_DEFS: GRANT_FIELD_DEFS,
+    // Task 6 (Review & export) — exposed so a DB-less Playwright pass can
+    // drive validate/generate/download directly, inject a fake
+    // ui.lastValidate Report to exercise the issue list without a live
+    // server round-trip, and so tests can assert the exact export filename.
+    goToReview: goToReview,
+    validateNow: validateNow,
+    focusIssue: focusIssue,
+    refreshYAML: refreshYAML,
+    handleDownloadYAML: handleDownloadYAML,
+    slugifyFilename: slugifyFilename,
+    hasValidateError: hasValidateError
   };
 })();
 </script>

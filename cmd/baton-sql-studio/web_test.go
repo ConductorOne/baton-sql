@@ -62,6 +62,17 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"principal_type",
 		"data-grant-entitlement",
 		"data-grants-tab",
+		// Task 6: Review & export — live validation, generated YAML, and
+		// client-side download.
+		"/api/validate",
+		"/api/generate",
+		"Review",
+		"data-review-report",
+		"data-review-issues",
+		"View YAML",
+		"data-yaml",
+		"Download",
+		"data-download-yaml",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {
