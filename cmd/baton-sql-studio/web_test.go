@@ -38,6 +38,10 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"Declare resource types",
 		"What do people get access to?",
 		"data-rt-card",
+		// Delete-a-resource-type affordance — a per-card "x" button, kept out
+		// of the card's own click target (stopPropagation) and gated behind a
+		// confirm() before splicing state.resource_types.
+		"data-rt-delete",
 		">List<",
 		">Entitlements<",
 		">Grants<",

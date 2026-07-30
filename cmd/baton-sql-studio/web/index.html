@@ -603,6 +603,43 @@
     white-space: nowrap;
   }
 
+  /* Groups the trait badge and the delete ("x") button together on the
+     right of the card so justify-content:space-between on .rt-card-top
+     still resolves to a simple 2-item layout (name | actions) rather than
+     spreading 3 items unevenly. */
+  .rt-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+
+  /* Delete affordance on a resource-type card — deliberately NOT part of
+     the card's own click target (the card is a <button>; this is a nested
+     <button>, and its own click handler calls stopPropagation() so
+     clicking it never also triggers selectRT()). Muted by default so it
+     doesn't compete with the trait badge; red on hover/focus to signal
+     "destructive" only when the user is actually about to use it. */
+  .rt-card-delete-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.3rem;
+    height: 1.3rem;
+    flex-shrink: 0;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--ink-muted);
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .rt-card-delete-btn:hover,
+  .rt-card-delete-btn:focus-visible {
+    background: rgba(var(--crit-rgb), 0.14);
+    color: var(--crit);
+  }
+
   .badge {
     display: inline-flex;
     align-items: center;
@@ -1852,8 +1889,29 @@
       var badge = document.createElement("span");
       badge.className = "badge trait-" + (rt.trait || "none");
       badge.textContent = rt.trait || "none";
+
+      var actions = document.createElement("div");
+      actions.className = "rt-card-actions";
+      var deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "rt-card-delete-btn";
+      deleteBtn.setAttribute("data-rt-delete", "");
+      deleteBtn.setAttribute("data-rt-id", rt.id);
+      deleteBtn.setAttribute("aria-label", "Delete resource type " + rt.name);
+      deleteBtn.title = "Delete this resource type";
+      deleteBtn.textContent = "×";
+      // stopPropagation: this button is nested inside the card <button>
+      // (card.addEventListener("click", ...) below calls selectRT()) — without
+      // this, a click here would both delete the type AND select it.
+      deleteBtn.addEventListener("click", function (evt) {
+        evt.stopPropagation();
+        deleteResourceType(rt.id);
+      });
+      actions.appendChild(badge);
+      actions.appendChild(deleteBtn);
+
       top.appendChild(name);
-      top.appendChild(badge);
+      top.appendChild(actions);
 
       var dots = document.createElement("div");
       dots.className = "rt-card-dots";
@@ -4549,6 +4607,94 @@
     render();
   }
 
+  // referencingResourceTypeNames() is a best-effort scan (not the
+  // authoritative check — pkg/studio/validate.go's Review-step validation is)
+  // for OTHER declared resource types that point at the given id via a
+  // grant mapping's principal_type, or an entitlements grantable_to list
+  // (the global query-mode list, or a per-row static-mode list). Used only
+  // to name names in the delete-confirm message so the user knows those
+  // references will go stale.
+  function referencingResourceTypeNames(id) {
+    var names = [];
+    state.resource_types.forEach(function (rt) {
+      if (rt.id === id) return;
+      var refs = (rt.grants || []).some(function (g) {
+        return (g.mappings || []).some(function (m) { return m.principal_type === id; });
+      });
+      var ent = rt.entitlements;
+      if (!refs && ent) {
+        if (Array.isArray(ent.grantable_to) && ent.grantable_to.indexOf(id) >= 0) refs = true;
+        if (!refs && Array.isArray(ent.static)) {
+          refs = ent.static.some(function (e) {
+            return Array.isArray(e.grantable_to) && e.grantable_to.indexOf(id) >= 0;
+          });
+        }
+      }
+      if (refs) names.push(rt.name);
+    });
+    return names;
+  }
+
+  // clearResourceTypeCaches() drops every per-type UI cache entry keyed by
+  // the given resource-type id: ui.lastRun/ui.resultsSearch/
+  // ui.extraProfileFields (all keyed "id/tab" via mapKey()) and
+  // ui.grantSamples (keyed "id" directly). Only called from
+  // deleteResourceType() — without it, uniqueRTId() (which only checks the
+  // CURRENT state.resource_types) could hand the exact same id to a
+  // LATER-added type of the same name, silently resurrecting a stale
+  // last-run/mapping/sample from the deleted one. The schema browser cache
+  // is shared across the whole connection (one catalog, not per-type), so
+  // it's intentionally left alone here, same as everywhere else in this file.
+  function clearResourceTypeCaches(id) {
+    TABS.forEach(function (tab) {
+      var key = mapKey(id, tab);
+      delete ui.lastRun[key];
+      delete ui.resultsSearch[key];
+      delete ui.extraProfileFields[key];
+    });
+    delete ui.grantSamples[id];
+  }
+
+  // deleteResourceType() removes a resource type the user added by mistake.
+  // A native confirm() is used (fine for a localhost dev tool) rather than a
+  // custom dialog; it always names the type and, best-effort, any other
+  // declared types that reference it (referencingResourceTypeNames) so the
+  // user knows those references will go stale until edited. On confirm:
+  // splices the entry out of state.resource_types by id, clears its per-type
+  // UI caches, then either selects the first remaining type or — if none are
+  // left — returns to the "declare resource types" step. Deliberately does
+  // NOT call ensureDefaults()/addResourceType("Users", ...): that seeding
+  // only happens right after a successful connect (see ensureDefaults()'s
+  // own call sites), never as a side effect of deleting down to zero.
+  function deleteResourceType(id) {
+    var idx = -1;
+    for (var i = 0; i < state.resource_types.length; i++) {
+      if (state.resource_types[i].id === id) { idx = i; break; }
+    }
+    if (idx < 0) return;
+    var rt = state.resource_types[idx];
+
+    var message = "Delete resource type \"" + rt.name + "\"? This removes its list, entitlements, and grants.";
+    var refs = referencingResourceTypeNames(id);
+    if (refs.length > 0) {
+      message += " It is referenced as principal_type/grantable_to by: " + refs.join(", ") + ".";
+    }
+    if (!window.confirm(message)) return;
+
+    state.resource_types.splice(idx, 1);
+    clearResourceTypeCaches(id);
+
+    if (ui.selectedRT === id) {
+      if (state.resource_types.length > 0) {
+        selectRT(state.resource_types[0].id); // re-renders
+        return;
+      }
+      ui.selectedRT = null;
+      ui.step = "resource-types";
+    }
+    render();
+  }
+
   function selectTab(tab) {
     if (TABS.indexOf(tab) < 0) return;
     ui.activeTab = tab;
@@ -5032,6 +5178,14 @@
     addResourceType: addResourceType,
     selectRT: selectRT,
     selectTab: selectTab,
+    // Delete-a-resource-type affordance — exposed so a DB-less Playwright
+    // pass can call deleteResourceType() directly (bypassing the native
+    // confirm() dialog isn't possible from here, but the referencing-scan
+    // and cache-clearing helpers are independently useful to a test) and so
+    // the "delete to zero shows the declare prompt, no auto-reseed" path can
+    // be asserted against state.resource_types/ui.step/ui.selectedRT.
+    deleteResourceType: deleteResourceType,
+    referencingResourceTypeNames: referencingResourceTypeNames,
     // FIX 1 — exposed so a DB-less Playwright pass can exercise the
     // non-destructive "Edit connection" flow directly.
     startEditConnection: startEditConnection,
