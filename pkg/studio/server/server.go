@@ -54,6 +54,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connect", s.handleConnect)
 	mux.HandleFunc("/api/run", s.handleRun)
+	mux.HandleFunc("/api/generate", s.handleGenerate)
+	mux.HandleFunc("/api/validate", s.handleValidate)
+	mux.HandleFunc("/api/preview", s.handlePreview)
 	return mux
 }
 
