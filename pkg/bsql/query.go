@@ -443,6 +443,165 @@ func (s *SQLSyncer) RunProvisioningQueries(
 	return nil
 }
 
+// RunRevokeProvisioning runs revoke queries like RunProvisioningQueries, and
+// additionally runs an optional principal-exists probe once the revoke has
+// committed. The probe detects the case where the revoke deleted the principal
+// itself downstream (e.g. removing a user's last role deletes the user row):
+// when the exists-check returns no rows, principalDeleted is true.
+//
+// The probe only decides whether the caller reports the deletion, so it runs
+// outside the revoke transaction: a probe failure must not roll back a revoke
+// that already succeeded. Probe failures are logged and reported as "not
+// deleted", leaving the next sync to pick up the deletion.
+//
+// When every revoke query affects zero rows the function still commits and
+// probes, then returns ErrQueryAffectedZeroRows so the caller can report
+// GrantAlreadyRevoked — combined with ResourceDeleted when the principal is
+// also gone, so retried revokes still surface the deletion.
+func (s *SQLSyncer) RunRevokeProvisioning(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	existsCheck *PrincipalExistsCheck,
+	vars map[string]any,
+	useTx bool,
+) (bool, error) {
+	l := ctxzap.Extract(ctx).With(
+		zap.Bool("use_tx", useTx),
+	)
+
+	ctx = ctxzap.ToContext(ctx, l)
+
+	target, err := s.resolveProvisioningDB(vars)
+	if err != nil {
+		return false, err
+	}
+
+	allZero, err := s.runRevokeQueries(ctx, queries, validationQueries, vars, useTx, target)
+	if err != nil {
+		return false, err
+	}
+
+	var principalDeleted bool
+	if existsCheck != nil {
+		exists, err := s.runPrincipalExistsCheck(ctx, target, existsCheck, vars)
+		if err != nil {
+			l.Warn(
+				"revoke succeeded but the principal exists check failed; not reporting a principal deletion",
+				zap.Error(err),
+			)
+			// failed to probe the principal: don't report a deletion, and also don't return an error
+			principalDeleted = false
+		} else {
+			// No rows from the exists-check => the principal was deleted by the revoke.
+			principalDeleted = !exists
+		}
+	}
+
+	if allZero {
+		return principalDeleted, ErrQueryAffectedZeroRows
+	}
+	return principalDeleted, nil
+}
+
+// runRevokeQueries executes the revoke queries against target, committing when
+// useTx is set. It reports whether every query affected zero rows, which means
+// the grant was already revoked; that case commits rather than failing so the
+// caller can still probe the principal and annotate the response.
+func (s *SQLSyncer) runRevokeQueries(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	useTx bool,
+	target *sql.DB,
+) (bool, error) {
+	l := ctxzap.Extract(ctx)
+
+	var committed bool
+	var executor executor = target
+
+	if useTx {
+		tx, err := target.BeginTx(ctx, nil)
+		if err != nil {
+			return false, err
+		}
+		executor = tx
+
+		defer func() {
+			if !committed {
+				if err := tx.Rollback(); err != nil {
+					l.Error("failed to rollback revoke provisioning queries", zap.Error(err))
+				}
+			}
+		}()
+	}
+
+	var allZero bool
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, vars, executor)
+	if err != nil {
+		if !errors.Is(err, ErrQueryAffectedZeroRows) {
+			return false, err
+		}
+		allZero = true
+	}
+
+	if useTx {
+		tx, ok := executor.(*sql.Tx)
+		if !ok {
+			return false, errors.New("transactional executor required")
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		committed = true
+	}
+
+	return allZero, nil
+}
+
+// runPrincipalExistsCheck executes the exists-check probe on the given
+// executor. It returns true when the probe returns at least one row (the
+// principal still exists); no rows means the principal is gone.
+func (s *SQLSyncer) runPrincipalExistsCheck(
+	ctx context.Context,
+	executor executor,
+	existsCheck *PrincipalExistsCheck,
+	vars map[string]any,
+) (bool, error) {
+	l := ctxzap.Extract(ctx)
+
+	q, qArgs, err := s.prepareProvisioningQuery(existsCheck.Query, vars)
+	if err != nil {
+		return false, fmt.Errorf("failed to prepare principal exists check query: %w", err)
+	}
+
+	l.Debug(
+		"running principal exists check query",
+		zap.String("query", q),
+		zap.Any("args", qArgs),
+	)
+
+	rows, err := executor.QueryContext(ctx, q, qArgs...)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute principal exists check query: %w", err)
+	}
+
+	exists := rows.Next()
+
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, fmt.Errorf("failed to read principal exists check result: %w", err)
+	}
+
+	if err := rows.Close(); err != nil {
+		return false, fmt.Errorf("failed to close principal exists check result: %w", err)
+	}
+
+	// >=1 row => the principal still exists.
+	return exists, nil
+}
+
 func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 	ctx context.Context,
 	queries,

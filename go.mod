@@ -31,6 +31,7 @@ require (
 	filippo.io/age v1.3.1 // indirect
 	filippo.io/edwards25519 v1.1.1 // indirect
 	filippo.io/hpke v0.4.0 // indirect
+	filippo.io/nistec v0.0.4 // indirect
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/RaduBerinde/axisds v0.1.0 // indirect

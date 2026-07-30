@@ -411,7 +411,7 @@ type EntitlementProvisioning struct {
 	Grant *GrantEntitlementProvisioningQueries `yaml:"grant,omitempty" json:"grant,omitempty"`
 
 	// Revoke defines the SQL queries and settings for revoking this entitlement.
-	Revoke *EntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
+	Revoke *RevokeEntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
 
 	// Vars provides variables that can be used within provisioning SQL queries.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
@@ -427,6 +427,22 @@ type EntitlementProvisioningQueries struct {
 
 	// Queries is a list of SQL statements to execute for the provisioning operation.
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
+}
+
+// RevokeOptions holds optional revoke-only behavior beyond the shared provisioning queries.
+type RevokeOptions struct {
+	// PrincipalExistsCheck probes whether the principal still exists after the revoke queries run.
+	// No rows means the principal was deleted as a side effect of the revoke.
+	PrincipalExistsCheck *PrincipalExistsCheck `yaml:"principal_exists_check,omitempty" json:"principal_exists_check,omitempty"`
+}
+
+// PrincipalExistsCheck configures a probe query that reports whether the principal still exists after a revoke.
+type PrincipalExistsCheck struct {
+	// Query runs with the same provisioning vars once the revoke queries have committed.
+	// Returning at least one row means the principal still exists;
+	// returning no rows means it was deleted as a side effect of the revoke.
+	// A query that fails does not fail the revoke; the deletion just goes unreported.
+	Query string `yaml:"query" json:"query"`
 }
 
 type GrantReplaceProvisioningQueries struct {
@@ -452,6 +468,14 @@ type GrantEntitlementProvisioningQueries struct {
 
 	// GrantReplaceProvisioningQueries defines the SQL queries and settings for replacing existing grants with the new grant during provisioning.
 	GrantReplace *GrantReplaceProvisioningQueries `yaml:"grant_replace,omitempty" json:"grant_replace,omitempty"`
+}
+
+// RevokeEntitlementProvisioningQueries extends the shared provisioning query fields with revoke-only behavior.
+type RevokeEntitlementProvisioningQueries struct {
+	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
+
+	// RevokeOptions groups optional revoke-only settings such as principal_exists_check.
+	RevokeOptions *RevokeOptions `yaml:"revoke_options,omitempty" json:"revoke_options,omitempty"`
 }
 
 // GrantsQuery defines the structure for querying existing entitlement grants.

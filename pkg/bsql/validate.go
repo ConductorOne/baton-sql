@@ -63,13 +63,8 @@ func (l *EntitlementsQuery) staticValidate(ctx context.Context, s *SQLSyncer) er
 			return err
 		}
 
-		if mapping.Provisioning.Revoke != nil {
-			for _, query := range mapping.Provisioning.Revoke.Queries {
-				err := validateVarsInQuery(s, query, mapping.Provisioning.Vars)
-				if err != nil {
-					return err
-				}
-			}
+		if err := validateRevokeProvisioningQueries(s, mapping.Provisioning.Revoke, mapping.Provisioning.Vars); err != nil {
+			return err
 		}
 	}
 
@@ -85,13 +80,8 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 		return err
 	}
 
-	if l.Provisioning.Revoke != nil {
-		for _, query := range l.Provisioning.Revoke.Queries {
-			err := validateVarsInQuery(s, query, l.Provisioning.Vars)
-			if err != nil {
-				return err
-			}
-		}
+	if err := validateRevokeProvisioningQueries(s, l.Provisioning.Revoke, l.Provisioning.Vars); err != nil {
+		return err
 	}
 
 	return nil
@@ -110,6 +100,29 @@ func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvi
 
 	for _, query := range grant.Queries {
 		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateRevokeProvisioningQueries(s *SQLSyncer, revoke *RevokeEntitlementProvisioningQueries, vars map[string]string) error {
+	if revoke == nil {
+		return nil
+	}
+
+	for _, query := range revoke.Queries {
+		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
+		}
+	}
+
+	if revoke.RevokeOptions != nil && revoke.RevokeOptions.PrincipalExistsCheck != nil {
+		if revoke.RevokeOptions.PrincipalExistsCheck.Query == "" {
+			return errors.New("principal_exists_check requires a non-empty query")
+		}
+		if err := validateVarsInQuery(s, revoke.RevokeOptions.PrincipalExistsCheck.Query, vars); err != nil {
 			return err
 		}
 	}
