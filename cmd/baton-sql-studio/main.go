@@ -10,11 +10,39 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 3 || os.Args[1] != "compile" {
-		fmt.Fprintln(os.Stderr, "usage: baton-sql-studio compile <spec.json>")
+	if len(os.Args) < 2 {
+		usage()
 		os.Exit(2)
 	}
-	data, err := os.ReadFile(os.Args[2])
+
+	switch os.Args[1] {
+	case "compile":
+		runCompile(os.Args[2:])
+	case "serve":
+		if err := runServe(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	default:
+		usage()
+		os.Exit(2)
+	}
+}
+
+// usage prints the top-level command listing for baton-sql-studio.
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: baton-sql-studio compile <spec.json>")
+	fmt.Fprintln(os.Stderr, "       baton-sql-studio serve [-addr host:port]")
+}
+
+// runCompile implements the "compile" subcommand: unchanged behavior from
+// before the "serve" subcommand was added.
+func runCompile(args []string) {
+	if len(args) < 1 {
+		usage()
+		os.Exit(2)
+	}
+	data, err := os.ReadFile(args[0])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

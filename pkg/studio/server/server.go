@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"sync"
 
@@ -28,6 +29,18 @@ type Server struct {
 	// connect is injectable so handlers can be tested without a live
 	// database. Defaults to database.Connect.
 	connect func(context.Context, database.ConnectOptions) (*sql.DB, database.DbEngine, error)
+
+	// static, when set via SetStatic, serves the Studio UI's static assets
+	// at "/". Left nil, Handler falls back to a small coded page so "/"
+	// never 404s even when no UI build is embedded.
+	static fs.FS
+}
+
+// SetStatic sets the filesystem Handler serves static files from at "/".
+// Typically this is the "web" subdirectory of an embed.FS built into the
+// binary (see cmd/baton-sql-studio/serve.go).
+func (s *Server) SetStatic(fsys fs.FS) {
+	s.static = fsys
 }
 
 // New builds a Server ready to serve. The CEL environment is built once at
@@ -57,8 +70,36 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/generate", s.handleGenerate)
 	mux.HandleFunc("/api/validate", s.handleValidate)
 	mux.HandleFunc("/api/preview", s.handlePreview)
+	mux.Handle("/", s.staticHandler())
 	return mux
 }
+
+// staticHandler serves the Studio UI's static assets from s.static, or a
+// small coded fallback page when no static FS has been set (e.g. a build
+// that doesn't embed the UI yet). Registered on "/", the ServeMux catch-all
+// pattern, so it never shadows the more specific "/api/..." routes above.
+func (s *Server) staticHandler() http.Handler {
+	if s.static == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(fallbackPageHTML))
+		})
+	}
+	return http.FileServerFS(s.static)
+}
+
+// fallbackPageHTML is served at "/" when no static UI assets have been set
+// via SetStatic, so the server is still reachable without a 404.
+const fallbackPageHTML = `<!DOCTYPE html>
+<html>
+<head><title>baton-sql Studio</title></head>
+<body>
+<h1>baton-sql Studio</h1>
+<p>API up. No static UI assets configured.</p>
+</body>
+</html>
+`
 
 // engineName maps a database.DbEngine to the lowercase scheme string used in
 // ConnectConfig/ConnectOptions and in JSON responses.
