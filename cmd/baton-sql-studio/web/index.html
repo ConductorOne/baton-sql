@@ -1190,19 +1190,22 @@
 
   // ENTITLEMENT_FIELD_DEFS — the mapping widget's field vocabulary for
   // Entitlements' query mode (Task 4). Matches pkg/studio/generate.go's
-  // query-mode field switch exactly: id/display_name/description/purpose
-  // are passed through as-is; "slug" is deliberately NOT offered here — the
-  // engine always derives a valid slug from display_name (falling back to
-  // id) when one isn't explicitly mapped, so the mapping widget just hints
-  // at that instead of adding a row for it. "profile.*" is not a supported
-  // entitlements field (bsql entitlements have no profile), so this tab
-  // passes allowProfileFields:false to renderMappingTable rather than
-  // letting a user create a mapping the engine would silently drop.
+  // query-mode field switch exactly: id/display_name/description/purpose/
+  // slug are all passed through as-is when mapped (generate.go:131). "slug"
+  // is optional (not required) because the engine's hasKey(mp,"slug")
+  // fallback (generate.go:~154) auto-derives slugify(display_name), or
+  // slugify(id) if display_name isn't mapped either, ONLY when the user
+  // didn't map one explicitly — so leaving it unmapped is a supported,
+  // common case, not a missing-required-field error. "profile.*" is not a
+  // supported entitlements field (bsql entitlements have no profile), so
+  // this tab passes allowProfileFields:false to renderMappingTable rather
+  // than letting a user create a mapping the engine would silently drop.
   var ENTITLEMENT_FIELD_DEFS = [
     { field: "id", label: "ID", required: true },
     { field: "display_name", label: "Display name", required: true },
     { field: "description", label: "Description" },
-    { field: "purpose", label: "Purpose", hint: "(assignment or permission)" }
+    { field: "purpose", label: "Purpose", hint: "(assignment or permission)" },
+    { field: "slug", label: "Slug", hint: "(optional — auto-derived from display_name/id if left unmapped)" }
   ];
 
   // fieldDefsForTrait() returns the canonical field defs for a resource
@@ -2108,7 +2111,12 @@
     tr.innerHTML = "";
     var row = rt.entitlements.static[idx];
 
-    function textCell(key, placeholder, required) {
+    // affectsRail: only id/display_name are worth a rail re-render on every
+    // keystroke (they'll feed the card dot + a future entitlement picker in
+    // Task 5) — description doesn't affect anything the rail shows, so
+    // re-rendering the whole card list on every character typed there would
+    // be pure waste.
+    function textCell(key, placeholder, required, affectsRail) {
       var td = document.createElement("td");
       var input = document.createElement("input");
       input.className = "control";
@@ -2118,7 +2126,7 @@
       input.setAttribute("data-ent-field", key);
       input.addEventListener("input", function (evt) {
         row[key] = evt.target.value;
-        renderRail(); // id/display_name feed the card dot + (later) the entitlement picker
+        if (affectsRail) renderRail();
       });
       td.appendChild(input);
       if (required) {
@@ -2131,8 +2139,8 @@
       return td;
     }
 
-    tr.appendChild(textCell("id", "e.g. admin", true));
-    tr.appendChild(textCell("display_name", "e.g. Admin", true));
+    tr.appendChild(textCell("id", "e.g. admin", true, true));
+    tr.appendChild(textCell("display_name", "e.g. Admin", true, true));
 
     var tdPurpose = document.createElement("td");
     var purposeSelect = document.createElement("select");
@@ -2313,7 +2321,7 @@
     var slugHint = document.createElement("p");
     slugHint.className = "hint-block";
     slugHint.setAttribute("data-slug-hint", "");
-    slugHint.textContent = "slug is generated automatically (from display_name, or id if display_name isn't mapped) — no need to map it.";
+    slugHint.textContent = "Leave slug unmapped to auto-derive it from display_name (or id, if display_name isn't mapped) — map it explicitly only if you need a different value.";
     container.appendChild(slugHint);
 
     var purposeHint = document.createElement("p");
