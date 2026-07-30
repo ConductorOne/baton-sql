@@ -1,12 +1,971 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>baton-sql Studio</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>baton-sql Studio</title>
+<style>
+  /* ---------------------------------------------------------------------
+     Tokens — light is the default, dark via prefers-color-scheme, and
+     :root[data-theme="light"|"dark"] can force either regardless of the OS
+     setting (see the theme toggle in the top bar).
+     ------------------------------------------------------------------- */
+  :root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-alt: #f5f7fa;
+    --border: #dde3ec;
+    --ink: #131a22;
+    --ink-muted: #5b6672;
+    --accent: #0d7d8a;
+    --accent-rgb: 13, 125, 138;
+    --good: #1f9d5b;
+    --good-rgb: 31, 157, 91;
+    --warn: #b9791a;
+    --warn-rgb: 185, 121, 26;
+    --crit: #d24b4b;
+    --crit-rgb: 210, 75, 75;
+    --shadow: 0 1px 2px rgba(19, 26, 34, 0.06), 0 8px 24px rgba(19, 26, 34, 0.06);
+
+    --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1219;
+      --surface: #151d27;
+      --surface-alt: #1b2530;
+      --border: #26313f;
+      --ink: #e7edf4;
+      --ink-muted: #93a1b0;
+      --accent: #22b3c4;
+      --accent-rgb: 34, 179, 196;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+      color-scheme: dark;
+    }
+  }
+
+  :root[data-theme="light"] {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --surface-alt: #f5f7fa;
+    --border: #dde3ec;
+    --ink: #131a22;
+    --ink-muted: #5b6672;
+    --accent: #0d7d8a;
+    --accent-rgb: 13, 125, 138;
+    --shadow: 0 1px 2px rgba(19, 26, 34, 0.06), 0 8px 24px rgba(19, 26, 34, 0.06);
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0d1219;
+    --surface: #151d27;
+    --surface-alt: #1b2530;
+    --border: #26313f;
+    --ink: #e7edf4;
+    --ink-muted: #93a1b0;
+    --accent: #22b3c4;
+    --accent-rgb: 34, 179, 196;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+  }
+
+  /* ---------------------------------------------------------------------
+     Reset
+     ------------------------------------------------------------------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; }
+  html { overflow-x: hidden; }
+  body {
+    margin: 0;
+    overflow-x: hidden;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, p, dl, dd { margin: 0; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  code, .mono { font-family: var(--font-mono); }
+
+  :focus { outline: none; }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* ---------------------------------------------------------------------
+     Shell
+     ------------------------------------------------------------------- */
+  .app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.7rem 1.25rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .brand-name {
+    font-size: 0.98rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+
+  .brand-tag {
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-muted);
+    font-size: 1rem;
+    line-height: 1;
+    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .icon-btn:hover { background: var(--surface-alt); color: var(--ink); }
+
+  /* Status pill (top bar summary of connection state) */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.32rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-alt);
+    font-size: 0.8rem;
+    color: var(--ink-muted);
+    white-space: nowrap;
+  }
+  .status-pill .dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--ink-muted);
+    flex-shrink: 0;
+  }
+  .status-pill[data-state="connected"] {
+    border-color: rgba(var(--good-rgb), 0.4);
+    background: rgba(var(--good-rgb), 0.1);
+    color: var(--good);
+  }
+  .status-pill[data-state="connected"] .dot { background: var(--good); }
+  .status-pill[data-state="connecting"] {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.1);
+    color: var(--accent);
+  }
+  .status-pill[data-state="connecting"] .dot {
+    background: var(--accent);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Layout: rail + content
+     ------------------------------------------------------------------- */
+  .layout {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+
+  .rail {
+    width: 248px;
+    flex-shrink: 0;
+    padding: 1.5rem 1rem;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+
+  .rail-title {
+    font-size: 0.72rem;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-muted);
+    padding: 0 0.5rem 0.9rem;
+  }
+
+  .rail-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .rail-step {
+    position: relative;
+    display: flex;
+    gap: 0.7rem;
+    padding: 0.55rem 0.5rem;
+    border-radius: 8px;
+  }
+
+  .rail-step .stem {
+    position: absolute;
+    top: 2.1rem;
+    left: 1.15rem;
+    width: 1px;
+    height: calc(100% - 1.5rem);
+    background: var(--border);
+  }
+  .rail-step:last-child .stem { display: none; }
+
+  .rail-step .marker {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    flex-shrink: 0;
+    border-radius: 999px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin-top: 0.05rem;
+  }
+
+  .rail-step .text { min-width: 0; padding-top: 0.05rem; }
+  .rail-step .label { font-weight: 600; font-size: 0.86rem; }
+  .rail-step .desc {
+    color: var(--ink-muted);
+    font-size: 0.76rem;
+    margin-top: 0.1rem;
+  }
+
+  .rail-step[data-state="done"] .marker {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #fff;
+  }
+  .rail-step[data-state="active"] {
+    background: rgba(var(--accent-rgb), 0.1);
+  }
+  .rail-step[data-state="active"] .marker {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16);
+  }
+  .rail-step[data-state="active"] .label { color: var(--accent); }
+  .rail-step[data-state="upcoming"] .label,
+  .rail-step[data-state="upcoming"] .desc {
+    color: var(--ink-muted);
+  }
+
+  .content {
+    flex: 1;
+    min-width: 0;
+    padding: 2rem clamp(1.25rem, 4vw, 3rem);
+    overflow-y: auto;
+  }
+
+  .panel {
+    max-width: 640px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 1.75rem;
+  }
+
+  .panel-header { margin-bottom: 1.4rem; }
+  .panel-title { font-size: 1.15rem; font-weight: 650; letter-spacing: -0.01em; }
+  .panel-subtitle {
+    color: var(--ink-muted);
+    font-size: 0.86rem;
+    margin-top: 0.35rem;
+    max-width: 46ch;
+  }
+
+  /* ---------------------------------------------------------------------
+     Form
+     ------------------------------------------------------------------- */
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem 0.85rem;
+  }
+  .field-grid .span-2 { grid-column: 1 / -1; }
+
+  .field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .field label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+  }
+  .field .hint {
+    font-size: 0.74rem;
+    color: var(--ink-muted);
+  }
+
+  .control {
+    width: 100%;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 0.88rem;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .control:focus-visible {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
+  }
+  .control:disabled {
+    color: var(--ink-muted);
+    background: var(--surface-alt);
+    cursor: not-allowed;
+  }
+  .control::placeholder { color: var(--ink-muted); opacity: 0.75; }
+
+  select.control {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink-muted) 50%),
+                       linear-gradient(135deg, var(--ink-muted) 50%, transparent 50%);
+    background-position: calc(100% - 18px) center, calc(100% - 13px) center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 2rem;
+  }
+
+  .password-row { position: relative; }
+  .password-row .control { padding-right: 2.4rem; }
+  .reveal-btn {
+    position: absolute;
+    right: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.3rem 0.4rem;
+    border-radius: 6px;
+  }
+  .reveal-btn:hover { color: var(--ink); background: var(--surface-alt); }
+
+  .form-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    margin-top: 1.4rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 1.05rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 0.86rem;
+    font-weight: 600;
+    transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) { opacity: 0.92; }
+  .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--ink);
+  }
+  .btn-ghost:hover { background: var(--surface-alt); }
+
+  .btn-danger-ghost {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--crit);
+  }
+  .btn-danger-ghost:hover { background: rgba(var(--crit-rgb), 0.08); border-color: rgba(var(--crit-rgb), 0.4); }
+
+  .spinner {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-top-color: #fff;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .inline-error {
+    display: none;
+    margin-top: 1rem;
+    padding: 0.65rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--crit-rgb), 0.35);
+    background: rgba(var(--crit-rgb), 0.08);
+    color: var(--crit);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+  .inline-error.visible { display: block; }
+
+  /* Connected state card */
+  .connected-banner {
+    display: none;
+    margin-top: 1.4rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1rem;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--good-rgb), 0.35);
+    background: rgba(var(--good-rgb), 0.08);
+  }
+  .connected-banner.visible { display: flex; }
+
+  .connected-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.86rem;
+    font-weight: 650;
+    color: var(--good);
+  }
+  .connected-pill .dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    background: var(--good);
+  }
+  .connected-detail {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-muted);
+    margin-top: 0.15rem;
+  }
+
+  .next-hint {
+    margin-top: 1rem;
+    font-size: 0.82rem;
+    color: var(--ink-muted);
+  }
+  .next-hint strong { color: var(--ink); }
+
+  /* Restored-session note (status came back connected on page load, before
+     we know the original form values). */
+  .restored-note {
+    display: none;
+    margin-top: 1.4rem;
+    padding: 0.65rem 0.8rem;
+    border-radius: 8px;
+    border: 1px dashed var(--border);
+    background: var(--surface-alt);
+    color: var(--ink-muted);
+    font-size: 0.8rem;
+  }
+  .restored-note.visible { display: block; }
+
+  /* Responsive: collapse the rail to a horizontal strip; wrap, never
+     scroll the page horizontally. */
+  @media (max-width: 760px) {
+    .layout { flex-direction: column; }
+    .rail {
+      width: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+      padding: 0.9rem 1rem;
+    }
+    .rail-steps { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .rail-title { display: none; }
+    .rail-step { padding: 0.4rem 0.6rem; }
+    .rail-step .stem { display: none; }
+    .rail-step .desc { display: none; }
+    .field-grid { grid-template-columns: 1fr; }
+  }
+</style>
 </head>
 <body>
-  <!-- Placeholder page: Plan 3 replaces this with the real Studio UI. -->
-  <h1>baton-sql Studio</h1>
-  <p>API up.</p>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">&gt;_</span>
+        <span class="brand-name">baton-sql Studio</span>
+        <span class="brand-tag">Config wizard</span>
+      </div>
+      <div class="topbar-actions">
+        <span class="status-pill" id="topbar-status" data-state="disconnected">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="topbar-status-text">Not connected</span>
+        </span>
+        <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle color theme" title="Toggle color theme">&#9788;</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <nav class="rail" aria-label="Wizard steps">
+        <div class="rail-title">Build a config</div>
+        <ol class="rail-steps" id="rail-steps"></ol>
+      </nav>
+
+      <main class="content">
+        <section class="panel" id="connect" aria-labelledby="connect-title">
+          <div class="panel-header">
+            <h1 class="panel-title" id="connect-title">Connect to your database</h1>
+            <p class="panel-subtitle">Studio only runs read queries you explicitly approve — nothing is written to this database. Credentials stay on this machine.</p>
+          </div>
+
+          <form id="connect-form" novalidate>
+            <div class="field-grid">
+              <div class="field span-2">
+                <label for="f-scheme">Database type</label>
+                <select class="control" id="f-scheme" name="scheme" required>
+                  <option value="postgres">PostgreSQL</option>
+                  <option value="mysql">MySQL</option>
+                  <option value="sqlserver">SQL Server</option>
+                  <option value="oracle">Oracle</option>
+                  <option value="vertica">Vertica</option>
+                  <option value="hdb">SAP HANA (hdb)</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="f-host">Host</label>
+                <input class="control" id="f-host" name="host" type="text" placeholder="localhost" autocomplete="off" required>
+              </div>
+              <div class="field">
+                <label for="f-port">Port</label>
+                <input class="control" id="f-port" name="port" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="5432" autocomplete="off" required>
+              </div>
+
+              <div class="field span-2">
+                <label for="f-database">Database</label>
+                <input class="control" id="f-database" name="database" type="text" placeholder="production" autocomplete="off" required>
+              </div>
+
+              <div class="field">
+                <label for="f-user">User</label>
+                <input class="control" id="f-user" name="user" type="text" placeholder="readonly_user" autocomplete="off" required>
+              </div>
+              <div class="field">
+                <label for="f-password">Password</label>
+                <div class="password-row">
+                  <input class="control" id="f-password" name="password" type="password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="off">
+                  <button type="button" class="reveal-btn" id="toggle-password" aria-label="Show password">Show</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="test-connection-btn">
+                <span id="test-connection-spinner" class="spinner" style="display:none" aria-hidden="true"></span>
+                <span id="test-connection-label">Test connection</span>
+              </button>
+            </div>
+          </form>
+
+          <div class="inline-error" id="connect-error" role="alert"></div>
+
+          <div class="restored-note" id="restored-note">
+            Restored a connection from an earlier session. Re-enter credentials only if you need to switch databases.
+          </div>
+
+          <div class="connected-banner" id="connected-banner">
+            <div>
+              <span class="connected-pill">
+                <span class="dot" aria-hidden="true"></span>
+                <span id="connected-pill-text">Connected</span>
+              </span>
+              <div class="connected-detail" id="connected-detail"></div>
+            </div>
+            <button type="button" class="btn btn-danger-ghost" id="disconnect-btn">Disconnect</button>
+          </div>
+
+          <p class="next-hint" id="next-hint" style="display:none">
+            <strong>Next:</strong> declare the resource types people get access to (users, roles, groups&hellip;) &mdash; coming up in the next step of the wizard.
+          </p>
+        </section>
+      </main>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // -----------------------------------------------------------------------
+  // state — mirrors studio.Spec exactly (this is what eventually gets
+  // POSTed to /api/generate and /api/validate). Only fields the server's
+  // Spec JSON shape defines belong here.
+  // -----------------------------------------------------------------------
+  var state = {
+    app_name: "",
+    connect: {},
+    resource_types: []
+  };
+
+  // ui — transient, presentation-only state. Never serialized as part of
+  // the Spec.
+  var ui = {
+    step: "connect",       // "connect" | "resource-types" | "review"
+    connected: false,
+    engine: null,
+    connecting: false,
+    restoredSession: false
+  };
+
+  var STEPS = [
+    { key: "connect", label: "Connect", desc: "Point at a database" },
+    { key: "resource-types", label: "Resource types", desc: "What people get access to" },
+    { key: "review", label: "Review", desc: "Validate & export YAML" }
+  ];
+
+  // -----------------------------------------------------------------------
+  // api() — tiny fetch helper. GET when no body is given, POST JSON
+  // otherwise. Always resolves to a parsed object: on network failure or an
+  // unparsable body it resolves to {error:"..."} rather than throwing, so
+  // callers never need a try/catch around every call.
+  // -----------------------------------------------------------------------
+  async function api(path, body) {
+    var opts;
+    if (body === undefined) {
+      opts = { method: "GET" };
+    } else {
+      opts = {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      };
+    }
+    try {
+      var res = await fetch(path, opts);
+      var data = null;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        data = null;
+      }
+      if (!res.ok) {
+        if (data && typeof data === "object") return data;
+        return { error: "request failed (" + res.status + ")" };
+      }
+      return data || {};
+    } catch (networkErr) {
+      return { error: networkErr && networkErr.message ? networkErr.message : "network error: is the Studio server running?" };
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Rendering
+  // -----------------------------------------------------------------------
+  function stateForStep(stepKey) {
+    var order = STEPS.map(function (s) { return s.key; });
+    var current = order.indexOf(ui.step);
+    var idx = order.indexOf(stepKey);
+    if (idx < current) return "done";
+    if (idx === current) return "active";
+    return "upcoming";
+  }
+
+  function renderRail() {
+    var list = document.getElementById("rail-steps");
+    list.innerHTML = "";
+    STEPS.forEach(function (step, i) {
+      var st = stateForStep(step.key);
+      var li = document.createElement("li");
+      li.className = "rail-step";
+      li.setAttribute("data-state", st);
+      li.setAttribute("data-rail-step", step.key);
+
+      var stem = document.createElement("span");
+      stem.className = "stem";
+      li.appendChild(stem);
+
+      var marker = document.createElement("span");
+      marker.className = "marker";
+      marker.textContent = st === "done" ? "✓" : String(i + 1);
+      li.appendChild(marker);
+
+      var text = document.createElement("span");
+      text.className = "text";
+      var label = document.createElement("div");
+      label.className = "label";
+      label.textContent = step.label;
+      var desc = document.createElement("div");
+      desc.className = "desc";
+      desc.textContent = step.desc;
+      text.appendChild(label);
+      text.appendChild(desc);
+      li.appendChild(text);
+
+      list.appendChild(li);
+    });
+  }
+
+  function renderTopbarStatus() {
+    var pill = document.getElementById("topbar-status");
+    var text = document.getElementById("topbar-status-text");
+    if (ui.connecting) {
+      pill.setAttribute("data-state", "connecting");
+      text.textContent = "Connecting…";
+    } else if (ui.connected) {
+      pill.setAttribute("data-state", "connected");
+      text.textContent = "Connected · " + (ui.engine || "unknown");
+    } else {
+      pill.setAttribute("data-state", "disconnected");
+      text.textContent = "Not connected";
+    }
+  }
+
+  function renderConnectPanel() {
+    var form = document.getElementById("connect-form");
+    var fields = form.querySelectorAll(".control");
+    fields.forEach(function (el) { el.disabled = ui.connected; });
+
+    document.getElementById("test-connection-btn").style.display = ui.connected ? "none" : "";
+
+    var banner = document.getElementById("connected-banner");
+    var restoredNote = document.getElementById("restored-note");
+    var nextHint = document.getElementById("next-hint");
+
+    if (ui.connected) {
+      banner.classList.add("visible");
+      document.getElementById("connected-pill-text").textContent = "Connected · " + (ui.engine || "unknown");
+      var detail = document.getElementById("connected-detail");
+      if (state.connect && state.connect.host) {
+        detail.textContent = (state.connect.scheme || "") + "://" + state.connect.host +
+          (state.connect.port ? ":" + state.connect.port : "") +
+          (state.connect.database ? "/" + state.connect.database : "") +
+          (state.connect.user ? " as " + state.connect.user : "");
+      } else {
+        detail.textContent = "";
+      }
+      restoredNote.classList.toggle("visible", !!ui.restoredSession && !state.connect.host);
+      nextHint.style.display = "";
+    } else {
+      banner.classList.remove("visible");
+      restoredNote.classList.remove("visible");
+      nextHint.style.display = "none";
+    }
+  }
+
+  function render() {
+    renderRail();
+    renderTopbarStatus();
+    renderConnectPanel();
+  }
+
+  // -----------------------------------------------------------------------
+  // Connect form behavior
+  // -----------------------------------------------------------------------
+  function readConnectForm() {
+    var form = document.getElementById("connect-form");
+    var data = new FormData(form);
+    return {
+      scheme: String(data.get("scheme") || ""),
+      host: String(data.get("host") || ""),
+      port: String(data.get("port") || ""),
+      database: String(data.get("database") || ""),
+      user: String(data.get("user") || ""),
+      password: String(data.get("password") || "")
+    };
+  }
+
+  function showConnectError(message) {
+    var el = document.getElementById("connect-error");
+    el.textContent = message;
+    el.classList.add("visible");
+  }
+
+  function clearConnectError() {
+    var el = document.getElementById("connect-error");
+    el.textContent = "";
+    el.classList.remove("visible");
+  }
+
+  function setConnecting(isConnecting) {
+    ui.connecting = isConnecting;
+    var btn = document.getElementById("test-connection-btn");
+    var spinner = document.getElementById("test-connection-spinner");
+    var label = document.getElementById("test-connection-label");
+    btn.disabled = isConnecting;
+    spinner.style.display = isConnecting ? "" : "none";
+    label.textContent = isConnecting ? "Testing…" : "Test connection";
+    renderTopbarStatus();
+  }
+
+  async function handleTestConnection(evt) {
+    evt.preventDefault();
+    clearConnectError();
+
+    var cfg = readConnectForm();
+    if (!cfg.host || !cfg.database || !cfg.user) {
+      showConnectError("Host, database, and user are required.");
+      return;
+    }
+
+    setConnecting(true);
+    var res = await api("/api/connect", cfg);
+    setConnecting(false);
+
+    if (res && res.ok) {
+      state.connect = cfg;
+      ui.connected = true;
+      ui.engine = res.engine || cfg.scheme;
+      ui.step = "resource-types";
+      ui.restoredSession = false;
+      render();
+      return;
+    }
+
+    var message = (res && res.error) ? res.error : "Could not connect. Check the details and try again.";
+    showConnectError(message);
+  }
+
+  async function handleDisconnect() {
+    var btn = document.getElementById("disconnect-btn");
+    btn.disabled = true;
+    await api("/api/disconnect", {});
+    btn.disabled = false;
+
+    ui.connected = false;
+    ui.engine = null;
+    ui.step = "connect";
+    ui.restoredSession = false;
+    render();
+  }
+
+  // -----------------------------------------------------------------------
+  // Theme toggle — persists an explicit override; absent an override the
+  // page follows prefers-color-scheme.
+  // -----------------------------------------------------------------------
+  function applyStoredTheme() {
+    var stored = null;
+    try { stored = window.localStorage.getItem("studio-theme"); } catch (e) { stored = null; }
+    if (stored === "light" || stored === "dark") {
+      document.documentElement.setAttribute("data-theme", stored);
+    }
+  }
+
+  function toggleTheme() {
+    var current = document.documentElement.getAttribute("data-theme");
+    var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var effectiveIsDark = current ? current === "dark" : prefersDark;
+    var next = effectiveIsDark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { window.localStorage.setItem("studio-theme", next); } catch (e) { /* ignore */ }
+  }
+
+  // -----------------------------------------------------------------------
+  // Startup
+  // -----------------------------------------------------------------------
+  async function init() {
+    applyStoredTheme();
+    render();
+
+    document.getElementById("connect-form").addEventListener("submit", handleTestConnection);
+    document.getElementById("disconnect-btn").addEventListener("click", handleDisconnect);
+    document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
+    document.getElementById("toggle-password").addEventListener("click", function () {
+      var input = document.getElementById("f-password");
+      var btn = document.getElementById("toggle-password");
+      var showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      btn.textContent = showing ? "Show" : "Hide";
+      btn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+    });
+
+    var status = await api("/api/status");
+    if (status && status.connected) {
+      ui.connected = true;
+      ui.engine = status.engine || null;
+      ui.step = "resource-types";
+      ui.restoredSession = true;
+    }
+    render();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+
+  // Expose for debugging / future tasks that extend this same script.
+  window.__studio = { state: state, ui: ui, api: api, render: render };
+})();
+</script>
 </body>
 </html>

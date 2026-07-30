@@ -1,0 +1,65 @@
+package main
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+// TestWeb_IndexHTML asserts the Studio UI shell (Plan 3, Task 1) is present
+// and self-contained. It reads the embedded page's source file directly
+// rather than spinning up a server, since the markers under test are purely
+// structural (HTML/JS text), not server behavior.
+func TestWeb_IndexHTML(t *testing.T) {
+	data, err := os.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatalf("failed to read web/index.html: %v", err)
+	}
+	body := string(data)
+
+	requiredMarkers := []string{
+		"baton-sql Studio",
+		"Test connection",
+		`id="connect"`,
+		"/api/connect",
+		"/api/status",
+		"/api/disconnect",
+	}
+	for _, marker := range requiredMarkers {
+		if !strings.Contains(body, marker) {
+			t.Errorf("web/index.html missing required marker %q", marker)
+		}
+	}
+
+	// The page must be fully self-contained: no CDN-hosted fonts/scripts,
+	// no external network calls of any kind. A same-origin relative fetch
+	// (e.g. "/api/connect") is fine; an absolute reference to a non-local
+	// host is not.
+	forbiddenSubstrings := []string{
+		"cdn.",
+		"googleapis",
+		"unpkg",
+		"jsdelivr",
+	}
+	for _, forbidden := range forbiddenSubstrings {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("web/index.html contains forbidden external-network marker %q", forbidden)
+		}
+	}
+
+	for _, scheme := range []string{"http://", "https://"} {
+		idx := 0
+		for {
+			i := strings.Index(body[idx:], scheme)
+			if i < 0 {
+				break
+			}
+			pos := idx + i
+			rest := body[pos+len(scheme):]
+			if !strings.HasPrefix(rest, "127.0.0.1") && !strings.HasPrefix(rest, "localhost") {
+				t.Errorf("web/index.html references external URL scheme %q at byte %d (not 127.0.0.1/localhost): %q", scheme, pos, rest[:min(40, len(rest))])
+			}
+			idx = pos + len(scheme)
+		}
+	}
+}
