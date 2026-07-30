@@ -125,3 +125,33 @@ func TestGenerate_ManagerEmailOnly_NoHardcodedManagerID(t *testing.T) {
 		t.Errorf("bogus manager_id leaked into output when only manager_email was mapped; yaml:\n%s", s)
 	}
 }
+
+func TestGenerate_DynamicEntitlementsAlwaysSlug(t *testing.T) {
+	spec := &Spec{
+		AppName: "EBS",
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "menu", Name: "Menu", Trait: "role",
+			List: ListSpec{Query: "SELECT menu_id, menu_name FROM menus", Fields: []FieldMapping{
+				{Field: "id", Column: "menu_id"}, {Field: "display_name", Column: "menu_name"},
+			}},
+			Entitlements: EntitlementsSpec{
+				Mode:  "query",
+				Query: "SELECT function_id, function_name FROM functions WHERE menu_id = ?<menu_id>",
+				Fields: []FieldMapping{
+					{Field: "id", Column: "function_id"},
+					{Field: "display_name", Column: "function_name"},
+				},
+			},
+		}},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bsql.Parse(out); err != nil {
+		t.Fatalf("parse: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "slug:") {
+		t.Errorf("dynamic entitlements must always emit slug; yaml:\n%s", out)
+	}
+}

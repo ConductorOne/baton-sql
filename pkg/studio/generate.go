@@ -1,6 +1,8 @@
 package studio
 
 import (
+	"fmt"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -79,11 +81,67 @@ func genResourceType(spec *Spec, rt *ResourceTypeSpec) (*yaml.Node, error) {
 	putNode(list, "map", mp)
 	putNode(n, "list", list)
 
+	switch rt.Entitlements.Mode {
+	case "static":
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, e := range rt.Entitlements.Static {
+			item := mapNode()
+			putScalar(item, "id", e.ID)
+			putScalar(item, "display_name", e.DisplayName)
+			if e.Purpose != "" {
+				putScalar(item, "purpose", e.Purpose)
+			}
+			seq.Content = append(seq.Content, item)
+		}
+		putNode(n, "static_entitlements", seq)
+	case "query":
+		ent := mapNode()
+		putScalar(ent, "query", rt.Entitlements.Query)
+		mp := mapNode()
+		var displayCELForSlug string
+		for _, fm := range rt.Entitlements.Fields {
+			cel, err := CompileField(fm)
+			if err != nil {
+				return nil, err
+			}
+			switch fm.Field {
+			case "id", "display_name", "description", "purpose", "slug":
+				putScalar(mp, fm.Field, cel)
+			case "grantable_to":
+				putSeq(mp, "grantable_to", cel)
+			}
+			if fm.Field == "display_name" {
+				displayCELForSlug = cel
+			}
+		}
+		// Trap #3: always emit slug.
+		if !hasKey(mp, "slug") {
+			putScalar(mp, "slug", fmt.Sprintf("slugify(%s)", displayCELForSlug))
+		}
+		// bsql.EntitlementsQuery.Map is []*EntitlementMapping (a YAML sequence),
+		// not a single mapping like ListQuery.Map — wrap our one built mapping
+		// in a sequence so this round-trips through bsql.Parse. Emitting `map:`
+		// as a bare mapping node fails yaml.v3 unmarshal into the slice field.
+		mapSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		mapSeq.Content = append(mapSeq.Content, mp)
+		putNode(ent, "map", mapSeq)
+		putNode(n, "entitlements", ent)
+	}
+
 	// Trap #3: no entitlements and no grants => skip flag, emitted as a real bool.
 	if rt.Entitlements.Mode == "none" && len(rt.Grants) == 0 {
 		putBool(n, "skip_entitlements_and_grants", true)
 	}
 	return n, nil
+}
+
+func hasKey(m *yaml.Node, key string) bool {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 func mapNode() *yaml.Node { return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"} }
