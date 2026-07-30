@@ -35,6 +35,7 @@ func seedDB(t *testing.T, n int) *sql.DB {
 func doRun(t *testing.T, s *Server, body string) runResponse {
 	t.Helper()
 	req := httptest.NewRequest("POST", "/api/run", strings.NewReader(body))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -189,6 +190,7 @@ func TestRun_NotConnected(t *testing.T) {
 func TestRun_MethodNotAllowed(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("GET", "/api/run", nil)
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 405 {

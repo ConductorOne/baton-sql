@@ -61,8 +61,10 @@ func New() *Server {
 	return s
 }
 
-// Handler returns the http.Handler serving all Studio API routes. Later
-// tasks register additional routes on the same mux.
+// Handler returns the http.Handler serving all Studio API routes, wrapped in
+// localOnly so every route — API and static alike — is guarded against
+// non-loopback Host/Origin requests. Later tasks register additional routes
+// on the same mux.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/connect", s.handleConnect)
@@ -70,8 +72,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/generate", s.handleGenerate)
 	mux.HandleFunc("/api/validate", s.handleValidate)
 	mux.HandleFunc("/api/preview", s.handlePreview)
+	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/disconnect", s.handleDisconnect)
 	mux.Handle("/", s.staticHandler())
-	return mux
+	return localOnly(mux)
 }
 
 // staticHandler serves the Studio UI's static assets from s.static, or a

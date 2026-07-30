@@ -39,6 +39,7 @@ func TestGenerate_OK(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "/api/generate", strings.NewReader(string(body)))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -62,6 +63,7 @@ func TestGenerate_OK(t *testing.T) {
 func TestGenerate_MethodNotAllowed(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("GET", "/api/generate", nil)
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 405 {
@@ -72,6 +74,7 @@ func TestGenerate_MethodNotAllowed(t *testing.T) {
 func TestGenerate_MalformedJSON(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("POST", "/api/generate", strings.NewReader(`{not json`))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -95,6 +98,7 @@ func TestValidate_NoSession_OK(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "/api/validate", strings.NewReader(string(body)))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -126,6 +130,7 @@ func TestValidate_WithSession_OK(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "/api/validate", strings.NewReader(string(body)))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -143,6 +148,7 @@ func TestValidate_WithSession_OK(t *testing.T) {
 func TestValidate_MethodNotAllowed(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("GET", "/api/validate", nil)
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 405 {
@@ -153,6 +159,7 @@ func TestValidate_MethodNotAllowed(t *testing.T) {
 func TestValidate_MalformedJSON(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("POST", "/api/validate", strings.NewReader(`{not json`))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -184,6 +191,7 @@ func TestPreview_CompositeID(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest("POST", "/api/preview", strings.NewReader(string(body)))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -207,6 +215,7 @@ func TestPreview_CompositeID(t *testing.T) {
 func TestPreview_MethodNotAllowed(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("GET", "/api/preview", nil)
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 405 {
@@ -217,6 +226,7 @@ func TestPreview_MethodNotAllowed(t *testing.T) {
 func TestPreview_MalformedJSON(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("POST", "/api/preview", strings.NewReader(`{not json`))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {

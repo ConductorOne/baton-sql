@@ -22,6 +22,7 @@ func TestConnect_OK(t *testing.T) {
 	}
 	body := `{"scheme":"mysql","host":"h","port":"3306","database":"d","user":"u","password":"p"}`
 	req := httptest.NewRequest("POST", "/api/connect", strings.NewReader(body))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -45,6 +46,7 @@ func TestConnect_Failure_Is200NotOK(t *testing.T) {
 		return nil, database.Unknown, fmt.Errorf("dial tcp: refused")
 	}
 	req := httptest.NewRequest("POST", "/api/connect", strings.NewReader(`{"scheme":"mysql"}`))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
@@ -62,6 +64,7 @@ func TestConnect_Failure_Is200NotOK(t *testing.T) {
 func TestConnect_MethodNotAllowed(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("GET", "/api/connect", nil)
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 405 {
@@ -72,6 +75,7 @@ func TestConnect_MethodNotAllowed(t *testing.T) {
 func TestConnect_MalformedJSON(t *testing.T) {
 	s := New()
 	req := httptest.NewRequest("POST", "/api/connect", strings.NewReader(`{not json`))
+	req.Host = "127.0.0.1" // localOnly guard requires a loopback Host.
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
