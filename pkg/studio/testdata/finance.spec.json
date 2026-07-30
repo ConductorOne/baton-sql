@@ -59,10 +59,8 @@
         {
           "query": "SELECT user_id FROM user_roles WHERE role_id = ?<role_id>",
           "resource_var": "role_id",
-          "principal_type": "users",
-          "entitlement": "assigned",
-          "fields": [
-            {"field": "principal_id", "column": "user_id"}
+          "mappings": [
+            {"principal_id": {"column": "user_id"}, "principal_type": "users", "entitlement": "assigned"}
           ]
         }
       ]

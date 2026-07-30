@@ -189,25 +189,31 @@ func genResourceType(rt *ResourceTypeSpec) (*yaml.Node, error) {
 				putScalar(vars, g.ResourceVar, "resource.ID")
 				putNode(gm, "vars", vars)
 			}
-			row := mapNode()
-			for _, fm := range g.Fields {
-				cel, err := CompileField(fm)
+			// One bsql grant map: entry per GrantMapping. Key order per row is
+			// principal_id, skip_if (when set), principal_type, entitlement_id
+			// (when set) — held fixed so Studio-generated configs round-trip
+			// byte-identically.
+			mseq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+			for _, m := range g.Mappings {
+				row := mapNode()
+				pidCEL, err := CompileField(m.PrincipalID)
 				if err != nil {
 					return nil, err
 				}
-				switch fm.Field {
-				// resource_id is NOT a bsql GrantMapping key — emitting it would
-				// be silently dropped by bsql, so we never emit it here.
-				case "principal_id", "skip_if":
-					putScalar(row, fm.Field, cel)
+				putScalar(row, "principal_id", pidCEL)
+				if m.SkipIf != nil {
+					skipCEL, err := CompileField(*m.SkipIf)
+					if err != nil {
+						return nil, err
+					}
+					putScalar(row, "skip_if", skipCEL)
 				}
+				putScalar(row, "principal_type", m.PrincipalType)
+				if m.Entitlement != "" {
+					putScalar(row, "entitlement_id", m.Entitlement)
+				}
+				mseq.Content = append(mseq.Content, row)
 			}
-			putScalar(row, "principal_type", g.PrincipalType)
-			if g.Entitlement != "" {
-				putScalar(row, "entitlement_id", g.Entitlement)
-			}
-			mseq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-			mseq.Content = append(mseq.Content, row)
 			putNode(gm, "map", mseq)
 			gseq.Content = append(gseq.Content, gm)
 		}

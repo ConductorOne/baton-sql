@@ -78,19 +78,14 @@ func Validate(ctx context.Context, spec *Spec, opts ValidateOptions) (*Report, e
 	}
 	for _, rt := range spec.ResourceTypes {
 		for _, g := range rt.Grants {
-			if !defined[g.PrincipalType] {
-				rep.OK = false
-				rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "principal_type",
-					Message: "principal_type \"" + g.PrincipalType + "\" is not a defined resource type"})
-			}
-			// FIX-2: resource_id is not a supported grant mapping key (bsql's
-			// GrantMapping has no such field) — a user who maps it gets a
-			// silent no-op, so flag it instead.
-			for _, fm := range g.Fields {
-				if fm.Field == "resource_id" {
+			// Each mapping row's principal_type must reference a defined
+			// resource type — a multi-row grant fans out to several, so check
+			// them all.
+			for _, m := range g.Mappings {
+				if !defined[m.PrincipalType] {
 					rep.OK = false
-					rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "resource_id",
-						Message: "\"resource_id\" is not a supported grant mapping; remove it (the grant is already scoped to its resource type)"})
+					rep.Errors = append(rep.Errors, Issue{Scope: rt.ID, Field: "principal_type",
+						Message: "principal_type \"" + m.PrincipalType + "\" is not a defined resource type"})
 				}
 			}
 		}

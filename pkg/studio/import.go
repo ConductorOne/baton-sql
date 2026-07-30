@@ -377,25 +377,17 @@ func entitlementsSpecFromConfig(id string, rt bsql.ResourceType) (EntitlementsSp
 	return EntitlementsSpec{Mode: "none"}, nil
 }
 
+// grantsFromConfig reverses a resource type's grants queries into GrantSpecs.
+// Every map row of every query becomes a GrantMapping, so multi-row grant
+// maps (fanning one query over several principal_type/entitlement pairs)
+// reconstruct fully. It still returns an error for symmetry with the caller,
+// though it currently never fails.
 func grantsFromConfig(id string, gqs []*bsql.GrantsQuery) ([]GrantSpec, error) {
+	_ = id
 	var out []GrantSpec
 	for _, gq := range gqs {
 		if gq == nil {
 			continue
-		}
-
-		// GrantSpec models exactly one principal_type/entitlement pair per
-		// grants query (Studio's Fields is a flat []FieldMapping, not
-		// per-row). A config with more than one map row - a common pattern
-		// for fanning one grants query out over multiple principal types
-		// and/or entitlements, e.g. examples/redshift-test.yml's "table"
-		// type has ONE grants query with 12 map rows - can't be
-		// reconstructed without silently dropping rows 1..n-1. Fail loudly
-		// instead of truncating.
-		if len(gq.Map) > 1 {
-			return nil, fmt.Errorf(
-				"resource type %q: this config has a grant query with %d mapping rows; Studio currently supports one principal_type per grant query and cannot import it without losing data",
-				id, len(gq.Map))
 		}
 
 		resourceVar := ""
@@ -413,27 +405,34 @@ func grantsFromConfig(id string, gqs []*bsql.GrantsQuery) ([]GrantSpec, error) {
 			}
 		}
 
-		principalType := ""
-		entitlement := ""
-		var fields []FieldMapping
-		if len(gq.Map) > 0 && gq.Map[0] != nil {
-			row := gq.Map[0]
-			principalType = row.PrincipalType
-			entitlement = row.Entitlement
+		// Reverse EVERY map row into a GrantMapping. A single grants query can
+		// fan out over many principal_type/entitlement pairs (e.g.
+		// examples/redshift-test.yml's grants queries), and GrantSpec.Mappings
+		// now models that fully — so multi-row grant maps import losslessly
+		// instead of erroring.
+		var mappings []GrantMapping
+		for _, row := range gq.Map {
+			if row == nil {
+				continue
+			}
+			m := GrantMapping{
+				PrincipalType: row.PrincipalType,
+				Entitlement:   row.Entitlement,
+			}
 			if row.PrincipalId != "" {
-				fields = append(fields, mustFieldMapping("principal_id", row.PrincipalId))
+				m.PrincipalID = mustFieldMapping("principal_id", row.PrincipalId)
 			}
 			if row.SkipIf != "" {
-				fields = append(fields, mustFieldMapping("skip_if", row.SkipIf))
+				skip := mustFieldMapping("skip_if", row.SkipIf)
+				m.SkipIf = &skip
 			}
+			mappings = append(mappings, m)
 		}
 
 		out = append(out, GrantSpec{
-			Query:         gq.Query,
-			ResourceVar:   resourceVar,
-			PrincipalType: principalType,
-			Entitlement:   entitlement,
-			Fields:        fields,
+			Query:       gq.Query,
+			ResourceVar: resourceVar,
+			Mappings:    mappings,
 		})
 	}
 	return out, nil

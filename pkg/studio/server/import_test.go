@@ -97,12 +97,11 @@ func TestImport_BadYAML(t *testing.T) {
 	}
 }
 
-// TestImport_MultiRowGrantMapSurfacesAsError verifies the CRITICAL
-// silent-truncation fix's error actually reaches the HTTP client: a config
-// whose grants query has more than one map row must come back as a normal
-// {error:...} / HTTP 200 result (like any other bad input), not a 500 and
-// not a spec that silently dropped rows.
-func TestImport_MultiRowGrantMapSurfacesAsError(t *testing.T) {
+// TestImport_MultiRowGrantMapImportsAllRows verifies the multi-row grant fix
+// end-to-end over HTTP: a config whose grants query has more than one map row
+// now imports to a full spec (one GrantMapping per row) with no error, instead
+// of the old loud-error / truncation behavior.
+func TestImport_MultiRowGrantMapImportsAllRows(t *testing.T) {
 	const multiRowGrantYAML = `
 app_name: Test App
 resource_types:
@@ -140,7 +139,7 @@ resource_types:
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Code != 200 {
-		t.Fatalf("expected 200 for a parse/convert-error result, got %d", rec.Code)
+		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 
 	var resp struct {
@@ -150,14 +149,18 @@ resource_types:
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp.Error == "" {
-		t.Fatal("expected an error for a multi-row grant map")
+	if resp.Error != "" {
+		t.Fatalf("expected no error importing a multi-row grant map, got: %s", resp.Error)
 	}
-	if !strings.Contains(resp.Error, "roles") || !strings.Contains(resp.Error, "mapping rows") {
-		t.Fatalf("expected error naming the resource type and mapping rows, got: %s", resp.Error)
+	if resp.Spec == nil || len(resp.Spec.ResourceTypes) != 1 {
+		t.Fatalf("expected a spec with 1 resource type, got %+v", resp.Spec)
 	}
-	if resp.Spec != nil {
-		t.Fatalf("expected no spec on error (no truncated data), got %+v", resp.Spec)
+	grants := resp.Spec.ResourceTypes[0].Grants
+	if len(grants) != 1 || len(grants[0].Mappings) != 2 {
+		t.Fatalf("expected 1 grants query with 2 mappings, got %+v", grants)
+	}
+	if grants[0].Mappings[0].PrincipalType != "user" || grants[0].Mappings[1].PrincipalType != "group" {
+		t.Fatalf("mapping types/order wrong: %+v", grants[0].Mappings)
 	}
 }
 

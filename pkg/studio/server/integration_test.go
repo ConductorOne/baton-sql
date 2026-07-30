@@ -131,12 +131,14 @@ func integrationSpec() *studio.Spec {
 				},
 				Grants: []studio.GrantSpec{
 					{
-						Query:         grantQuery,
-						ResourceVar:   "role_id",
-						PrincipalType: "users",
-						Entitlement:   "assigned",
-						Fields: []studio.FieldMapping{
-							{Field: "principal_id", Column: "user_id"},
+						Query:       grantQuery,
+						ResourceVar: "role_id",
+						Mappings: []studio.GrantMapping{
+							{
+								PrincipalID:   studio.FieldMapping{Field: "principal_id", Column: "user_id"},
+								PrincipalType: "users",
+								Entitlement:   "assigned",
+							},
 						},
 					},
 				},

@@ -59,10 +59,21 @@ type StaticEntitlement struct {
 	Immutable   bool     `json:"immutable,omitempty"`
 }
 
+// GrantSpec models one grants query. A single query can fan out to MANY
+// principal mappings (e.g. Redshift's grants query producing one row per
+// principal_type x entitlement), so Mappings is a list: one entry per row of
+// the emitted bsql grant map: sequence.
 type GrantSpec struct {
-	Query         string         `json:"query"`
-	ResourceVar   string         `json:"resource_var,omitempty"` // ?<var> bound to resource.ID
-	PrincipalType string         `json:"principal_type"`
-	Entitlement   string         `json:"entitlement"` // entitlement id/slug this grant targets
-	Fields        []FieldMapping `json:"fields"`      // principal_id, resource_id, skip_if
+	Query       string         `json:"query"`
+	ResourceVar string         `json:"resource_var,omitempty"` // ?<var> bound to resource.ID
+	Mappings    []GrantMapping `json:"mappings"`
+}
+
+// GrantMapping is one row of a grants query's map: sequence — a single
+// principal_id/principal_type/entitlement grant, optionally guarded by skip_if.
+type GrantMapping struct {
+	PrincipalID   FieldMapping  `json:"principal_id"`          // column/CEL for the principal id
+	PrincipalType string        `json:"principal_type"`        // literal resource-type id
+	Entitlement   string        `json:"entitlement,omitempty"` // entitlement id/slug this row grants
+	SkipIf        *FieldMapping `json:"skip_if,omitempty"`     // optional CEL bool
 }

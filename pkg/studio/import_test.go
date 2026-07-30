@@ -1,7 +1,6 @@
 package studio
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -138,14 +137,13 @@ func TestImport_InvalidYAMLReturnsError(t *testing.T) {
 	}
 }
 
-// TestImport_MultiRowGrantMapErrorsLoudly is the CRITICAL fix from review
-// round 1: Studio's GrantSpec models exactly one principal_type/entitlement
-// pair per grants query, so a config whose grants query has more than one
-// map row cannot be reconstructed without silently dropping rows. Reading
-// only index [0] would be silent data loss - exactly what this project
-// exists to prevent - so SpecFromConfig must fail loudly instead, naming the
-// resource type and row count.
-func TestImport_MultiRowGrantMapErrorsLoudly(t *testing.T) {
+// TestImport_MultiRowGrantMapImportsAllRows is the inverse of the old
+// loud-error test: a grants query whose map: has more than one row now imports
+// to one GrantMapping per row WITHOUT error. Reconstructing only row [0] would
+// be silent data loss — GrantSpec.Mappings models every row, so redshift-style
+// configs (one grants query fanning out over several principal_type/entitlement
+// pairs) import fully.
+func TestImport_MultiRowGrantMapImportsAllRows(t *testing.T) {
 	yamlIn := []byte(`
 app_name: Test App
 resource_types:
@@ -174,14 +172,102 @@ resource_types:
                   entitlement_id: member
 `)
 	spec, err := SpecFromYAML(yamlIn)
-	if err == nil {
-		t.Fatalf("expected an error for a 2-row grant map, got a spec instead: %+v", spec)
+	if err != nil {
+		t.Fatalf("expected a 2-row grant map to import without error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), `"roles"`) {
-		t.Fatalf("expected error to name the resource type %q, got: %v", "roles", err)
+	rt := spec.ResourceTypes[0]
+	if len(rt.Grants) != 1 {
+		t.Fatalf("expected 1 grants query, got %d", len(rt.Grants))
 	}
-	if !strings.Contains(err.Error(), "2") {
-		t.Fatalf("expected error to mention the row count (2), got: %v", err)
+	g := rt.Grants[0]
+	if g.ResourceVar != "rid" {
+		t.Fatalf("expected resource_var rid, got %q", g.ResourceVar)
+	}
+	if len(g.Mappings) != 2 {
+		t.Fatalf("expected 2 grant mappings, got %d: %+v", len(g.Mappings), g.Mappings)
+	}
+	if g.Mappings[0].PrincipalType != "user" || g.Mappings[1].PrincipalType != "group" {
+		t.Fatalf("mapping types/order wrong: %q, %q", g.Mappings[0].PrincipalType, g.Mappings[1].PrincipalType)
+	}
+	if g.Mappings[0].PrincipalID.Column != "user_id" {
+		t.Fatalf("row 0 principal_id column = %q, want user_id", g.Mappings[0].PrincipalID.Column)
+	}
+	if g.Mappings[0].SkipIf == nil || g.Mappings[0].SkipIf.Transform == nil ||
+		g.Mappings[0].SkipIf.Transform.RawCEL != ".identity_type != 'user'" {
+		t.Fatalf("row 0 skip_if not reconstructed: %+v", g.Mappings[0].SkipIf)
+	}
+	if g.Mappings[1].Entitlement != "member" {
+		t.Fatalf("row 1 entitlement = %q, want member", g.Mappings[1].Entitlement)
+	}
+}
+
+// TestImport_MultiRowGrantRoundTrip is the core proof that redshift-style
+// multi-row grant configs round-trip byte-identically: build a Spec whose one
+// grants query fans out to 3 GrantMappings (distinct principal_types and
+// skip_ifs), Generate -> SpecFromYAML -> Generate, and assert the two YAMLs are
+// identical AND the imported spec still carries all 3 mappings.
+func TestImport_MultiRowGrantRoundTrip(t *testing.T) {
+	spec := &Spec{
+		AppName: "Warehouse",
+		ResourceTypes: []ResourceTypeSpec{
+			{ID: "users", Name: "Users", Trait: "user",
+				List:         ListSpec{Query: "SELECT id FROM u", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "roles", Name: "Roles", Trait: "role",
+				List:         ListSpec{Query: "SELECT id FROM r", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "groups", Name: "Groups", Trait: "group",
+				List:         ListSpec{Query: "SELECT id FROM g", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "tables", Name: "Tables", Trait: "role",
+				List:         ListSpec{Query: "SELECT id FROM t", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "select", DisplayName: "Select", Purpose: "permission"}}},
+				Grants: []GrantSpec{{
+					Query:       "SELECT grantee, kind FROM grants WHERE table_id = ?<tid>",
+					ResourceVar: "tid",
+					Mappings: []GrantMapping{
+						{PrincipalID: FieldMapping{Field: "principal_id", Column: "grantee"}, PrincipalType: "users", Entitlement: "select",
+							SkipIf: &FieldMapping{Field: "skip_if", Transform: &Transform{Recipe: RecipeRaw, RawCEL: ".kind != 'user'"}}},
+						{PrincipalID: FieldMapping{Field: "principal_id", Column: "grantee"}, PrincipalType: "roles", Entitlement: "select",
+							SkipIf: &FieldMapping{Field: "skip_if", Transform: &Transform{Recipe: RecipeRaw, RawCEL: ".kind != 'role'"}}},
+						{PrincipalID: FieldMapping{Field: "principal_id", Column: "grantee"}, PrincipalType: "groups", Entitlement: "select",
+							SkipIf: &FieldMapping{Field: "skip_if", Transform: &Transform{Recipe: RecipeRaw, RawCEL: ".kind != 'group'"}}},
+					},
+				}},
+			},
+		},
+	}
+
+	yaml1, err := Generate(spec)
+	if err != nil {
+		t.Fatalf("Generate(original): %v", err)
+	}
+	spec2, err := SpecFromYAML(yaml1)
+	if err != nil {
+		t.Fatalf("SpecFromYAML: %v", err)
+	}
+	yaml2, err := Generate(spec2)
+	if err != nil {
+		t.Fatalf("Generate(reconstructed): %v", err)
+	}
+	if string(yaml1) != string(yaml2) {
+		t.Fatalf("multi-row grant round-trip mismatch:\n--- original ---\n%s\n--- reconstructed ---\n%s", yaml1, yaml2)
+	}
+
+	var tables *ResourceTypeSpec
+	for i := range spec2.ResourceTypes {
+		if spec2.ResourceTypes[i].ID == "tables" {
+			tables = &spec2.ResourceTypes[i]
+		}
+	}
+	if tables == nil {
+		t.Fatal("imported spec missing the tables resource type")
+	}
+	if len(tables.Grants) != 1 {
+		t.Fatalf("expected 1 grants query, got %d", len(tables.Grants))
+	}
+	if len(tables.Grants[0].Mappings) != 3 {
+		t.Fatalf("expected 3 grant mappings after import, got %d", len(tables.Grants[0].Mappings))
 	}
 }
 
@@ -218,26 +304,6 @@ resource_types:
 	}
 	if !strings.Contains(err.Error(), "2") {
 		t.Fatalf("expected error to mention the row count (2), got: %v", err)
-	}
-}
-
-// TestImport_RedshiftExample_MultiRowGrantsErrorsNotTruncates points the same
-// guard at a real production-shaped config: examples/redshift-test.yml's
-// "table" resource type has ONE grants query with 12 map rows (fanning one
-// query out over select/insert/update/delete x user/role/group). Before this
-// fix, SpecFromConfig would have silently reconstructed 1 of 12 rows with no
-// error - this proves it now refuses instead.
-func TestImport_RedshiftExample_MultiRowGrantsErrorsNotTruncates(t *testing.T) {
-	data, err := os.ReadFile("../../examples/redshift-test.yml")
-	if err != nil {
-		t.Fatalf("reading example fixture: %v", err)
-	}
-	spec, err := SpecFromYAML(data)
-	if err == nil {
-		t.Fatalf("expected an error importing a multi-row-map config, got a spec instead: %+v", spec)
-	}
-	if !strings.Contains(err.Error(), "mapping rows") {
-		t.Fatalf("expected the multi-row-map error, got: %v", err)
 	}
 }
 

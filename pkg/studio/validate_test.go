@@ -49,7 +49,7 @@ func TestValidate_BadPrincipalTypeReported(t *testing.T) {
 			ID: "roles", Name: "Roles", Trait: "role",
 			List:         ListSpec{Query: "SELECT role_id FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_id"}}},
 			Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned"}}},
-			Grants:       []GrantSpec{{Query: "SELECT u FROM t", PrincipalType: "does_not_exist", Entitlement: "assigned", Fields: []FieldMapping{{Field: "principal_id", Column: "u"}}}},
+			Grants:       []GrantSpec{{Query: "SELECT u FROM t", Mappings: []GrantMapping{{PrincipalID: FieldMapping{Field: "principal_id", Column: "u"}, PrincipalType: "does_not_exist", Entitlement: "assigned"}}}},
 		}},
 	}
 	rep, err := Validate(context.Background(), spec, ValidateOptions{})
@@ -86,10 +86,13 @@ func TestValidate_BsqlValidationErrorReported(t *testing.T) {
 			List:         ListSpec{Query: "SELECT role_id FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_id"}}},
 			Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned"}}},
 			Grants: []GrantSpec{{
-				Query:         "SELECT u FROM t WHERE r = ?<rid>", // "rid" is never declared in vars
-				PrincipalType: "roles",                            // valid: matches the resource type's own ID
-				Entitlement:   "assigned",
-				Fields:        []FieldMapping{{Field: "principal_id", Column: "u"}},
+				Query:       "SELECT u FROM t WHERE r = ?<rid>", // "rid" is never declared in vars
+				ResourceVar: "",
+				Mappings: []GrantMapping{{
+					PrincipalID:   FieldMapping{Field: "principal_id", Column: "u"},
+					PrincipalType: "roles", // valid: matches the resource type's own ID
+					Entitlement:   "assigned",
+				}},
 			}},
 		}},
 	}
@@ -155,10 +158,10 @@ func TestValidate_GrantableToUndefinedResourceTypeReported(t *testing.T) {
 	}
 }
 
-// TestValidate_GrantResourceIDReported verifies FIX-2's validation: a grant
-// field mapping named resource_id is flagged (Field "resource_id") rather than
-// silently dropped.
-func TestValidate_GrantResourceIDReported(t *testing.T) {
+// TestValidate_BadPrincipalTypeInAnyMappingRow verifies that principal_type is
+// checked for EVERY mapping row of a multi-row grant: here row 0 is valid but
+// row 1 references an undefined resource type, and that must be flagged.
+func TestValidate_BadPrincipalTypeInAnyMappingRow(t *testing.T) {
 	spec := &Spec{
 		AppName: "x",
 		ResourceTypes: []ResourceTypeSpec{{
@@ -166,8 +169,11 @@ func TestValidate_GrantResourceIDReported(t *testing.T) {
 			List:         ListSpec{Query: "SELECT role_id FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_id"}}},
 			Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned"}}},
 			Grants: []GrantSpec{{
-				Query: "SELECT u, r FROM t", PrincipalType: "roles", Entitlement: "assigned",
-				Fields: []FieldMapping{{Field: "principal_id", Column: "u"}, {Field: "resource_id", Column: "r"}},
+				Query: "SELECT u, kind FROM t",
+				Mappings: []GrantMapping{
+					{PrincipalID: FieldMapping{Field: "principal_id", Column: "u"}, PrincipalType: "roles", Entitlement: "assigned"},
+					{PrincipalID: FieldMapping{Field: "principal_id", Column: "u"}, PrincipalType: "does_not_exist", Entitlement: "assigned"},
+				},
 			}},
 		}},
 	}
@@ -175,8 +181,8 @@ func TestValidate_GrantResourceIDReported(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
-	if rep.OK || !hasField(rep.Errors, "resource_id") {
-		t.Fatalf("expected a resource_id issue, got %+v (ok=%v)", rep.Errors, rep.OK)
+	if rep.OK || !hasField(rep.Errors, "principal_type") {
+		t.Fatalf("expected a principal_type issue for the bad second mapping row, got %+v (ok=%v)", rep.Errors, rep.OK)
 	}
 }
 

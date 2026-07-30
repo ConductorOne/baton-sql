@@ -289,8 +289,11 @@ func TestGenerate_ResourceScopedGrant(t *testing.T) {
 				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned", Purpose: "assignment"}}},
 				Grants: []GrantSpec{{
 					Query:       "SELECT user_id FROM user_roles WHERE role_id = ?<role_id>",
-					ResourceVar: "role_id", PrincipalType: "users", Entitlement: "assigned",
-					Fields: []FieldMapping{{Field: "principal_id", Column: "user_id"}},
+					ResourceVar: "role_id",
+					Mappings: []GrantMapping{{
+						PrincipalID:   FieldMapping{Field: "principal_id", Column: "user_id"},
+						PrincipalType: "users", Entitlement: "assigned",
+					}},
 				}},
 			},
 		},
@@ -437,23 +440,37 @@ func TestGenerate_DynamicGrantableToLiteralList(t *testing.T) {
 	}
 }
 
-// TestGenerate_GrantResourceIDNotEmitted verifies FIX-2: even when a spec maps
-// a resource_id grant field, Generate must NOT emit it (bsql's GrantMapping has
-// no resource_id key, so emitting it is a silent no-op).
-func TestGenerate_GrantResourceIDNotEmitted(t *testing.T) {
+// TestGenerate_MultiRowGrantMappings verifies a grants query with more than one
+// GrantMapping emits one map: entry per mapping, in order, each carrying its own
+// principal_id, skip_if (when set), principal_type, and entitlement_id.
+func TestGenerate_MultiRowGrantMappings(t *testing.T) {
 	spec := &Spec{
-		AppName: "Finance DB",
+		AppName: "Warehouse",
 		ResourceTypes: []ResourceTypeSpec{
 			{ID: "users", Name: "Users", Trait: "user",
-				List:         ListSpec{Query: "SELECT id FROM employees", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				List:         ListSpec{Query: "SELECT id FROM u", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
 				Entitlements: EntitlementsSpec{Mode: "none"}},
 			{ID: "roles", Name: "Roles", Trait: "role",
-				List:         ListSpec{Query: "SELECT role_id, role_name FROM roles", Fields: []FieldMapping{{Field: "id", Column: "role_id"}, {Field: "display_name", Column: "role_name"}}},
-				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "assigned", DisplayName: "Assigned", Purpose: "assignment"}}},
+				List:         ListSpec{Query: "SELECT id FROM r", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "none"}},
+			{ID: "tables", Name: "Tables", Trait: "role",
+				List:         ListSpec{Query: "SELECT id FROM t", Fields: []FieldMapping{{Field: "id", Column: "id"}, {Field: "display_name", Column: "id"}}},
+				Entitlements: EntitlementsSpec{Mode: "static", Static: []StaticEntitlement{{ID: "select", DisplayName: "Select", Purpose: "permission"}}},
 				Grants: []GrantSpec{{
-					Query:       "SELECT user_id, r FROM user_roles WHERE role_id = ?<role_id>",
-					ResourceVar: "role_id", PrincipalType: "users", Entitlement: "assigned",
-					Fields: []FieldMapping{{Field: "principal_id", Column: "user_id"}, {Field: "resource_id", Column: "r"}},
+					Query:       "SELECT grantee, grantee_type FROM grants WHERE table_id = ?<tid>",
+					ResourceVar: "tid",
+					Mappings: []GrantMapping{
+						{
+							PrincipalID:   FieldMapping{Field: "principal_id", Column: "grantee"},
+							PrincipalType: "users", Entitlement: "select",
+							SkipIf: &FieldMapping{Field: "skip_if", Transform: &Transform{Recipe: RecipeRaw, RawCEL: ".grantee_type != 'user'"}},
+						},
+						{
+							PrincipalID:   FieldMapping{Field: "principal_id", Column: "grantee"},
+							PrincipalType: "roles", Entitlement: "select",
+							SkipIf: &FieldMapping{Field: "skip_if", Transform: &Transform{Recipe: RecipeRaw, RawCEL: ".grantee_type != 'role'"}},
+						},
+					},
 				}},
 			},
 		},
@@ -462,11 +479,22 @@ func TestGenerate_GrantResourceIDNotEmitted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bsql.Parse(out); err != nil {
+	cfg, err := bsql.Parse(out)
+	if err != nil {
 		t.Fatalf("parse: %v\n%s", err, out)
 	}
-	if strings.Contains(string(out), "resource_id") {
-		t.Errorf("resource_id must never be emitted on a grant; yaml:\n%s", out)
+	gqs := cfg.ResourceTypes["tables"].Grants
+	if len(gqs) != 1 {
+		t.Fatalf("expected 1 grants query, got %d", len(gqs))
+	}
+	if len(gqs[0].Map) != 2 {
+		t.Fatalf("expected 2 grant map rows, got %d", len(gqs[0].Map))
+	}
+	if gqs[0].Map[0].PrincipalType != "users" || gqs[0].Map[1].PrincipalType != "roles" {
+		t.Fatalf("mapping order/types wrong: %q, %q", gqs[0].Map[0].PrincipalType, gqs[0].Map[1].PrincipalType)
+	}
+	if gqs[0].Map[0].SkipIf != ".grantee_type != 'user'" {
+		t.Errorf("row 0 skip_if = %q", gqs[0].Map[0].SkipIf)
 	}
 }
 
