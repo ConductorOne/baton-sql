@@ -517,13 +517,6 @@
     margin-top: 0.15rem;
   }
 
-  .next-hint {
-    margin-top: 1rem;
-    font-size: 0.82rem;
-    color: var(--ink-muted);
-  }
-  .next-hint strong { color: var(--ink); }
-
   /* Restored-session note (status came back connected on page load, before
      we know the original form values). */
   .restored-note {
@@ -537,6 +530,196 @@
     font-size: 0.8rem;
   }
   .restored-note.visible { display: block; }
+
+  /* A "step panel" is one full-screen-ish section of the wizard's content
+     area (Connect / Declare resource types / a resource type's workspace).
+     Exactly one is visible at a time, driven by ui.step / ui.selectedRT. */
+  .step-panel { display: none; }
+  .step-panel.visible { display: block; }
+
+  /* ---------------------------------------------------------------------
+     Resource-type cards (left rail, Task 2) — cards, not an indented tree.
+     ------------------------------------------------------------------- */
+  #rail-types { display: none; }
+
+  .rt-card-list {
+    list-style: none;
+    margin: 0 0 0.85rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .rt-card {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    text-align: left;
+    padding: 0.6rem 0.7rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .rt-card:hover { background: var(--surface-alt); }
+  /* Selected styling uses an OUTSET ring (box-shadow), never an inset one
+     and never a border-width change — either would resize the card. */
+  .rt-card[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.32);
+  }
+
+  .rt-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .rt-card-name {
+    font-weight: 600;
+    font-size: 0.86rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+    border: 1px solid transparent;
+  }
+  .trait-user  { background: rgba(var(--accent-rgb), 0.14); color: var(--accent); }
+  .trait-group { background: rgba(var(--good-rgb), 0.14); color: var(--good); }
+  .trait-role  { background: rgba(var(--warn-rgb), 0.16); color: var(--warn); }
+  .trait-app   { background: rgba(124, 92, 219, 0.16); color: #7c5cdb; }
+  .trait-none  { background: var(--surface-alt); color: var(--ink-muted); border-color: var(--border); }
+
+  .rt-card-dots { display: flex; gap: 0.35rem; }
+  .tab-dot {
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 999px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .tab-dot[data-state="draft"] { background: var(--accent); }
+  .tab-dot[data-state="ok"] { background: var(--good); }
+  .tab-dot[data-state="error"] { background: var(--crit); }
+
+  .rail-add-btn { width: 100%; justify-content: center; }
+
+  /* ---------------------------------------------------------------------
+     Declare resource types — plain-language prompt + chips + custom form
+     ------------------------------------------------------------------- */
+  .panel-kicker {
+    font-size: 0.72rem;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-muted);
+    margin-bottom: 0.35rem;
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-top: 0.3rem;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.45rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+  .chip:hover { background: var(--surface-alt); border-color: var(--accent); }
+  .chip-outline { border-style: dashed; color: var(--ink-muted); }
+
+  .custom-rt-form {
+    display: none;
+    margin-top: 1.1rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    grid-template-columns: 1fr 1fr;
+    gap: 0.85rem;
+  }
+  .custom-rt-form.visible { display: grid; }
+  .custom-rt-form .form-actions { grid-column: 1 / -1; margin-top: 0.1rem; }
+
+  .rt-existing-list {
+    list-style: none;
+    margin: 1.1rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .rt-existing-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.84rem;
+    color: var(--ink-muted);
+  }
+
+  /* ---------------------------------------------------------------------
+     Workspace (per-resource-type tab shell) — Task 2
+     ------------------------------------------------------------------- */
+  .workspace-panel { max-width: 860px; }
+  .workspace-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.3rem;
+  }
+  .workspace-title { font-size: 1.15rem; font-weight: 650; letter-spacing: -0.01em; }
+
+  .tabs {
+    display: flex;
+    gap: 0.3rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1.3rem;
+  }
+  .tab {
+    padding: 0.55rem 0.9rem;
+    border: none;
+    background: transparent;
+    color: var(--ink-muted);
+    font-weight: 600;
+    font-size: 0.86rem;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    border-radius: 0;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab[aria-selected="true"] {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-body {
+    color: var(--ink-muted);
+    font-size: 0.88rem;
+    line-height: 1.6;
+    max-width: 60ch;
+  }
 
   /* Responsive: collapse the rail to a horizontal strip; wrap, never
      scroll the page horizontally. */
@@ -554,6 +737,7 @@
     .rail-step .stem { display: none; }
     .rail-step .desc { display: none; }
     .field-grid { grid-template-columns: 1fr; }
+    .custom-rt-form { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -570,18 +754,26 @@
           <span class="dot" aria-hidden="true"></span>
           <span id="topbar-status-text">Not connected</span>
         </span>
+        <button type="button" class="btn btn-danger-ghost" id="topbar-disconnect-btn" style="display:none">Disconnect</button>
         <button type="button" class="icon-btn" id="theme-toggle" aria-label="Toggle color theme" title="Toggle color theme">&#9788;</button>
       </div>
     </header>
 
     <div class="layout">
       <nav class="rail" aria-label="Wizard steps">
-        <div class="rail-title">Build a config</div>
-        <ol class="rail-steps" id="rail-steps"></ol>
+        <div id="rail-flow">
+          <div class="rail-title">Build a config</div>
+          <ol class="rail-steps" id="rail-steps"></ol>
+        </div>
+        <div id="rail-types">
+          <div class="rail-title">Resource types</div>
+          <ul class="rt-card-list" id="rt-card-list" aria-label="Declared resource types"></ul>
+          <button type="button" class="btn btn-ghost rail-add-btn" id="rail-add-rt-btn">+ Add resource type</button>
+        </div>
       </nav>
 
       <main class="content">
-        <section class="panel" id="connect" aria-labelledby="connect-title">
+        <section class="panel step-panel" id="connect" aria-labelledby="connect-title">
           <div class="panel-header">
             <h1 class="panel-title" id="connect-title">Connect to your database</h1>
             <p class="panel-subtitle">Studio only runs read queries you explicitly approve — nothing is written to this database. Credentials stay on this machine.</p>
@@ -653,9 +845,60 @@
             <button type="button" class="btn btn-danger-ghost" id="disconnect-btn">Disconnect</button>
           </div>
 
-          <p class="next-hint" id="next-hint" style="display:none">
-            <strong>Next:</strong> declare the resource types people get access to (users, roles, groups&hellip;) &mdash; coming up in the next step of the wizard.
-          </p>
+        </section>
+
+        <section class="panel step-panel" id="declare-rt" aria-labelledby="declare-rt-title">
+          <div class="panel-header">
+            <p class="panel-kicker">Declare resource types</p>
+            <h1 class="panel-title" id="declare-rt-title">What do people get access to?</h1>
+            <p class="panel-subtitle">Each type below becomes a resource type in the generated connector &mdash; a card appears in the left rail once it's added. Click a card any time to map its List, Entitlements, and Grants.</p>
+          </div>
+
+          <div class="field" style="max-width: 22rem; margin-bottom: 1.5rem;">
+            <label for="f-app-name">Connector name</label>
+            <input class="control" id="f-app-name" type="text" placeholder="my-service" autocomplete="off">
+            <p class="hint">Used for the generated config's app name and the export filename.</p>
+          </div>
+
+          <div class="chip-row" id="rt-chip-row" role="group" aria-label="Add a common resource type"></div>
+
+          <form class="custom-rt-form" id="custom-rt-form">
+            <div class="field">
+              <label for="custom-rt-name">Name</label>
+              <input class="control" id="custom-rt-name" type="text" placeholder="e.g. Projects" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="custom-rt-trait">Trait</label>
+              <select class="control" id="custom-rt-trait">
+                <option value="none">None (generic resource)</option>
+                <option value="user">User</option>
+                <option value="group">Group</option>
+                <option value="role">Role</option>
+                <option value="app">App</option>
+              </select>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Add resource type</button>
+              <button type="button" class="btn btn-ghost" id="custom-rt-cancel">Cancel</button>
+            </div>
+          </form>
+
+          <div class="inline-error" id="declare-rt-error" role="alert"></div>
+        </section>
+
+        <section class="panel step-panel workspace-panel" id="workspace" aria-labelledby="workspace-title">
+          <div class="workspace-header">
+            <h1 class="workspace-title" id="workspace-title"></h1>
+            <span class="badge trait-badge" id="workspace-trait-badge"></span>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Resource type mapping">
+            <button type="button" class="tab" role="tab" id="tab-list" data-tab="list" aria-selected="true">List</button>
+            <button type="button" class="tab" role="tab" id="tab-entitlements" data-tab="entitlements" aria-selected="false">Entitlements</button>
+            <button type="button" class="tab" role="tab" id="tab-grants" data-tab="grants" aria-selected="false">Grants</button>
+          </div>
+
+          <div class="tab-body" id="tab-body"></div>
         </section>
       </main>
     </div>
@@ -683,13 +926,27 @@
     connected: false,
     engine: null,
     connecting: false,
-    restoredSession: false
+    restoredSession: false,
+    selectedRT: null,      // id of the resource type whose workspace is open, or null
+    activeTab: "list"      // "list" | "entitlements" | "grants" — tab within the workspace
   };
 
   var STEPS = [
     { key: "connect", label: "Connect", desc: "Point at a database" },
     { key: "resource-types", label: "Resource types", desc: "What people get access to" },
     { key: "review", label: "Review", desc: "Validate & export YAML" }
+  ];
+
+  var TABS = ["list", "entitlements", "grants"];
+  var TAB_LABELS = { list: "List", entitlements: "Entitlements", grants: "Grants" };
+
+  // Common resource-type chips offered on the "declare resource types" step.
+  // Trait choices mirror the studio.Spec trait enum: user|group|role|app|none.
+  var COMMON_RESOURCE_TYPES = [
+    { name: "Roles", trait: "role" },
+    { name: "Groups", trait: "group" },
+    { name: "Databases / Schemas / Permissions", trait: "none" },
+    { name: "Applications", trait: "app" }
   ];
 
   // -----------------------------------------------------------------------
@@ -739,7 +996,7 @@
     return "upcoming";
   }
 
-  function renderRail() {
+  function renderFlowSteps() {
     var list = document.getElementById("rail-steps");
     list.innerHTML = "";
     STEPS.forEach(function (step, i) {
@@ -774,6 +1031,77 @@
     });
   }
 
+  // rtTabState() derives a per-tab dot state from state alone (no server
+  // round-trip yet — Tasks 3-5 will layer in proven/stale/error signals from
+  // actual runs). "empty" = nothing authored; "draft" = something authored
+  // but not yet validated.
+  function rtTabState(rt, tab) {
+    if (tab === "list") return (rt.list && rt.list.query) ? "draft" : "empty";
+    if (tab === "entitlements") return (rt.entitlements && rt.entitlements.mode && rt.entitlements.mode !== "none") ? "draft" : "empty";
+    if (tab === "grants") return (rt.grants && rt.grants.length > 0) ? "draft" : "empty";
+    return "empty";
+  }
+
+  // renderRail() is the single entry point for the left rail: it shows the
+  // 3-stage flow (Connect/Resource types/Review) while on the Connect step,
+  // then switches wholesale to one card per declared resource type — per the
+  // validated mockup, cards rather than an indented tree.
+  function renderRail() {
+    var showCards = ui.step !== "connect";
+    document.getElementById("rail-flow").style.display = showCards ? "none" : "";
+    // #rail-types has a CSS default of display:none (to avoid a flash of
+    // cards before first render); "block" must be set explicitly here since
+    // an empty string would just fall back to that stylesheet default.
+    document.getElementById("rail-types").style.display = showCards ? "block" : "none";
+
+    if (!showCards) {
+      renderFlowSteps();
+      return;
+    }
+
+    var list = document.getElementById("rt-card-list");
+    list.innerHTML = "";
+    state.resource_types.forEach(function (rt) {
+      var li = document.createElement("li");
+
+      var card = document.createElement("button");
+      card.type = "button";
+      card.className = "rt-card";
+      card.setAttribute("data-rt-card", "");
+      card.setAttribute("data-rt-id", rt.id);
+      card.setAttribute("aria-pressed", ui.selectedRT === rt.id ? "true" : "false");
+
+      var top = document.createElement("div");
+      top.className = "rt-card-top";
+      var name = document.createElement("span");
+      name.className = "rt-card-name";
+      name.textContent = rt.name;
+      var badge = document.createElement("span");
+      badge.className = "badge trait-" + (rt.trait || "none");
+      badge.textContent = rt.trait || "none";
+      top.appendChild(name);
+      top.appendChild(badge);
+
+      var dots = document.createElement("div");
+      dots.className = "rt-card-dots";
+      TABS.forEach(function (tab) {
+        var dot = document.createElement("span");
+        dot.className = "tab-dot";
+        dot.setAttribute("data-tab-dot", tab);
+        dot.setAttribute("data-state", rtTabState(rt, tab));
+        dot.title = TAB_LABELS[tab];
+        dots.appendChild(dot);
+      });
+
+      card.appendChild(top);
+      card.appendChild(dots);
+      card.addEventListener("click", function () { selectRT(rt.id); });
+
+      li.appendChild(card);
+      list.appendChild(li);
+    });
+  }
+
   function renderTopbarStatus() {
     var pill = document.getElementById("topbar-status");
     var text = document.getElementById("topbar-status-text");
@@ -787,6 +1115,11 @@
       pill.setAttribute("data-state", "disconnected");
       text.textContent = "Not connected";
     }
+    // The connect panel's own Disconnect button only reaches the user while
+    // ui.step === "connect"; once past it, this topbar affordance is the
+    // only way back, since the resource-types step replaces that panel.
+    document.getElementById("topbar-disconnect-btn").style.display =
+      (ui.connected && ui.step !== "connect") ? "" : "none";
   }
 
   function renderConnectPanel() {
@@ -798,7 +1131,6 @@
 
     var banner = document.getElementById("connected-banner");
     var restoredNote = document.getElementById("restored-note");
-    var nextHint = document.getElementById("next-hint");
 
     if (ui.connected) {
       banner.classList.add("visible");
@@ -813,18 +1145,184 @@
         detail.textContent = "";
       }
       restoredNote.classList.toggle("visible", !!ui.restoredSession && !state.connect.host);
-      nextHint.style.display = "";
     } else {
       banner.classList.remove("visible");
       restoredNote.classList.remove("visible");
-      nextHint.style.display = "none";
     }
+  }
+
+  // renderStepPanels() shows exactly one of Connect / Declare resource types
+  // / a resource type's workspace, driven by ui.step and ui.selectedRT.
+  function renderStepPanels() {
+    var showConnect = ui.step === "connect";
+    var showWorkspace = ui.step !== "connect" && !!ui.selectedRT &&
+      state.resource_types.some(function (rt) { return rt.id === ui.selectedRT; });
+    var showDeclare = ui.step !== "connect" && !showWorkspace;
+
+    document.getElementById("connect").classList.toggle("visible", showConnect);
+    document.getElementById("declare-rt").classList.toggle("visible", showDeclare);
+    document.getElementById("workspace").classList.toggle("visible", showWorkspace);
+  }
+
+  function renderDeclarePanel() {
+    var appNameInput = document.getElementById("f-app-name");
+    if (document.activeElement !== appNameInput) {
+      appNameInput.value = state.app_name || "";
+    }
+  }
+
+  function renderWorkspace() {
+    if (!ui.selectedRT) return;
+    var rt = state.resource_types.find(function (r) { return r.id === ui.selectedRT; });
+    if (!rt) return;
+
+    document.getElementById("workspace-title").textContent = rt.name;
+    var badge = document.getElementById("workspace-trait-badge");
+    badge.className = "badge trait-" + (rt.trait || "none");
+    badge.textContent = rt.trait || "none";
+
+    TABS.forEach(function (tab) {
+      document.getElementById("tab-" + tab).setAttribute("aria-selected", ui.activeTab === tab ? "true" : "false");
+    });
+
+    var messages = {
+      list: "List mapping — coming in the next step. You'll write the SQL query that lists " + rt.name.toLowerCase() + " and map its columns to fields.",
+      entitlements: "Entitlements — coming in a later step. You'll define what can be granted on " + rt.name.toLowerCase() + " (a static list, or one derived from a query).",
+      grants: "Grants — coming in a later step. You'll define who has which entitlement, scoped to a resource of this type."
+    };
+    document.getElementById("tab-body").textContent = messages[ui.activeTab] || "";
   }
 
   function render() {
     renderRail();
     renderTopbarStatus();
     renderConnectPanel();
+    renderStepPanels();
+    renderDeclarePanel();
+    renderWorkspace();
+  }
+
+  // -----------------------------------------------------------------------
+  // Resource-type declaration — state.resource_types is the single source
+  // of truth; every mutator below re-renders the rail so cards stay in
+  // sync, and callers may render() again for anything else that changed.
+  // -----------------------------------------------------------------------
+  function slugify(s) {
+    return String(s || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  function uniqueRTId(base) {
+    base = base || "type";
+    var existing = {};
+    state.resource_types.forEach(function (rt) { existing[rt.id] = true; });
+    var id = base;
+    var n = 2;
+    while (existing[id]) {
+      id = base + "_" + n;
+      n++;
+    }
+    return id;
+  }
+
+  // addResourceType() pushes a well-formed resource_types[] entry (matching
+  // studio.ResourceTypeSpec exactly) and re-renders the rail. Returns the
+  // new entry, or null if name is blank.
+  function addResourceType(name, trait) {
+    name = String(name || "").trim();
+    if (!name) return null;
+    var id = uniqueRTId(slugify(name) || "type");
+    var rt = {
+      id: id,
+      name: name,
+      trait: trait || "none",
+      list: { query: "", fields: [] },
+      entitlements: { mode: "none" },
+      grants: []
+    };
+    state.resource_types.push(rt);
+    renderRail();
+    return rt;
+  }
+
+  // ensureDefaults() seeds a Users type (if none exists yet) and a sensible
+  // app_name, once — called right after a successful connect (fresh or
+  // restored) so the declare step never opens empty-handed.
+  function ensureDefaults(cfg) {
+    if (state.resource_types.length === 0) {
+      addResourceType("Users", "user");
+    }
+    if (!state.app_name) {
+      var base = (cfg && cfg.database) || (cfg && cfg.scheme) || "connector";
+      state.app_name = slugify(base) || "connector";
+    }
+  }
+
+  function selectRT(id) {
+    ui.selectedRT = id;
+    ui.activeTab = "list";
+    render();
+  }
+
+  function selectTab(tab) {
+    if (TABS.indexOf(tab) < 0) return;
+    ui.activeTab = tab;
+    renderWorkspace();
+  }
+
+  function renderChips() {
+    var row = document.getElementById("rt-chip-row");
+    row.innerHTML = "";
+    COMMON_RESOURCE_TYPES.forEach(function (t) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chip";
+      btn.textContent = "+ " + t.name;
+      btn.addEventListener("click", function () { addResourceType(t.name, t.trait); });
+      row.appendChild(btn);
+    });
+
+    var custom = document.createElement("button");
+    custom.type = "button";
+    custom.className = "chip chip-outline";
+    custom.id = "chip-custom";
+    custom.textContent = "Something else…";
+    custom.addEventListener("click", toggleCustomRTForm);
+    row.appendChild(custom);
+  }
+
+  function toggleCustomRTForm(forceShow) {
+    var form = document.getElementById("custom-rt-form");
+    var show = typeof forceShow === "boolean" ? forceShow : !form.classList.contains("visible");
+    form.classList.toggle("visible", show);
+    if (show) {
+      document.getElementById("custom-rt-name").focus();
+    }
+  }
+
+  function handleAddCustomRT(evt) {
+    evt.preventDefault();
+    var nameInput = document.getElementById("custom-rt-name");
+    var traitSelect = document.getElementById("custom-rt-trait");
+    var errorEl = document.getElementById("declare-rt-error");
+
+    var name = nameInput.value.trim();
+    if (!name) {
+      errorEl.textContent = "Give the resource type a name.";
+      errorEl.classList.add("visible");
+      nameInput.focus();
+      return;
+    }
+    errorEl.textContent = "";
+    errorEl.classList.remove("visible");
+
+    addResourceType(name, traitSelect.value);
+    nameInput.value = "";
+    traitSelect.value = "none";
+    toggleCustomRTForm(false);
   }
 
   // -----------------------------------------------------------------------
@@ -884,8 +1382,9 @@
       state.connect = cfg;
       ui.connected = true;
       ui.engine = res.engine || cfg.scheme;
-      ui.step = "resource-types";
       ui.restoredSession = false;
+      ensureDefaults(cfg);
+      ui.step = "resource-types";
       render();
       return;
     }
@@ -895,15 +1394,16 @@
   }
 
   async function handleDisconnect() {
-    var btn = document.getElementById("disconnect-btn");
-    btn.disabled = true;
+    var btns = [document.getElementById("disconnect-btn"), document.getElementById("topbar-disconnect-btn")];
+    btns.forEach(function (b) { b.disabled = true; });
     await api("/api/disconnect", {});
-    btn.disabled = false;
+    btns.forEach(function (b) { b.disabled = false; });
 
     ui.connected = false;
     ui.engine = null;
     ui.step = "connect";
     ui.restoredSession = false;
+    ui.selectedRT = null;
     render();
   }
 
@@ -933,10 +1433,12 @@
   // -----------------------------------------------------------------------
   async function init() {
     applyStoredTheme();
+    renderChips();
     render();
 
     document.getElementById("connect-form").addEventListener("submit", handleTestConnection);
     document.getElementById("disconnect-btn").addEventListener("click", handleDisconnect);
+    document.getElementById("topbar-disconnect-btn").addEventListener("click", handleDisconnect);
     document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
     document.getElementById("toggle-password").addEventListener("click", function () {
       var input = document.getElementById("f-password");
@@ -947,12 +1449,26 @@
       btn.setAttribute("aria-label", showing ? "Show password" : "Hide password");
     });
 
+    document.getElementById("f-app-name").addEventListener("input", function (evt) {
+      state.app_name = evt.target.value;
+    });
+    document.getElementById("rail-add-rt-btn").addEventListener("click", function () {
+      ui.selectedRT = null;
+      render();
+    });
+    document.getElementById("custom-rt-form").addEventListener("submit", handleAddCustomRT);
+    document.getElementById("custom-rt-cancel").addEventListener("click", function () { toggleCustomRTForm(false); });
+    TABS.forEach(function (tab) {
+      document.getElementById("tab-" + tab).addEventListener("click", function () { selectTab(tab); });
+    });
+
     var status = await api("/api/status");
     if (status && status.connected) {
       ui.connected = true;
       ui.engine = status.engine || null;
-      ui.step = "resource-types";
       ui.restoredSession = true;
+      ensureDefaults(state.connect);
+      ui.step = "resource-types";
     }
     render();
   }
@@ -964,7 +1480,15 @@
   }
 
   // Expose for debugging / future tasks that extend this same script.
-  window.__studio = { state: state, ui: ui, api: api, render: render };
+  window.__studio = {
+    state: state,
+    ui: ui,
+    api: api,
+    render: render,
+    addResourceType: addResourceType,
+    selectRT: selectRT,
+    selectTab: selectTab
+  };
 })();
 </script>
 </body>

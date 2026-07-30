@@ -24,6 +24,13 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"/api/connect",
 		"/api/status",
 		"/api/disconnect",
+		// Task 2: resource-type declaration + card rail + workspace tab shell.
+		"Declare resource types",
+		"What do people get access to?",
+		"data-rt-card",
+		">List<",
+		">Entitlements<",
+		">Grants<",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {
