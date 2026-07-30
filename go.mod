@@ -3,6 +3,7 @@ module github.com/conductorone/baton-sql
 go 1.25.2
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/SAP/go-hdb v1.14.5
 	github.com/conductorone/baton-sdk v0.15.7
 	github.com/elliotchance/phpserialize v1.4.0

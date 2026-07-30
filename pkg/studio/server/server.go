@@ -75,6 +75,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/preview", s.handlePreview)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/disconnect", s.handleDisconnect)
+	mux.HandleFunc("/api/schema", s.handleSchema)
+	mux.HandleFunc("/api/schema/table", s.handleSchemaTable)
 	mux.Handle("/", s.staticHandler())
 	return localOnly(mux)
 }
