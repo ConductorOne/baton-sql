@@ -93,6 +93,16 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"data-results-search",
 		"Search results…",
 		"data-results-search-count",
+		// Load YAML — import an existing baton-sql config (file picker or
+		// paste) via /api/import, reachable from the top bar at any step.
+		"Load YAML",
+		"/api/import",
+		"data-import-yaml-btn",
+		"data-import-yaml-file",
+		"data-import-yaml-textarea",
+		"data-import-yaml-submit",
+		"data-import-yaml-error",
+		"data-import-yaml-note",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {

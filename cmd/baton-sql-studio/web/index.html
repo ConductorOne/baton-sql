@@ -1076,6 +1076,54 @@
     color: var(--ink);
   }
 
+  /* ---------------------------------------------------------------------
+     Load YAML dialog — a small modal reachable from the top bar at any
+     step, so importing an existing config never depends on where the
+     wizard currently is. Uses position:fixed (not a step-panel) since it
+     must float above the topbar/rail/content regardless of ui.step.
+     ------------------------------------------------------------------- */
+  .modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(0, 0, 0, 0.45);
+    align-items: flex-start;
+    justify-content: center;
+    padding: 4.5rem 1rem 1rem;
+    overflow-y: auto;
+  }
+  .modal-backdrop.visible { display: flex; }
+  .modal-panel {
+    width: 100%;
+    max-width: 34rem;
+  }
+  .import-yaml-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .import-yaml-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--ink-muted);
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .import-yaml-divider::before,
+  .import-yaml-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .import-yaml-textarea {
+    min-height: 9rem;
+    resize: vertical;
+  }
+
   /* Responsive: collapse the rail to a horizontal strip; wrap, never
      scroll the page horizontally. */
   @media (max-width: 760px) {
@@ -1109,6 +1157,7 @@
           <span class="dot" aria-hidden="true"></span>
           <span id="topbar-status-text">Not connected</span>
         </span>
+        <button type="button" class="btn btn-ghost" id="topbar-load-yaml-btn" data-import-yaml-btn title="Load an existing baton-sql config to continue editing it here">Load YAML</button>
         <button type="button" class="btn btn-ghost" id="topbar-review-btn" style="display:none" title="Review and validate the configuration">Validate</button>
         <button type="button" class="btn btn-ghost" id="topbar-edit-connect-btn" style="display:none" title="Change the database connection without losing your resource types">Edit connection</button>
         <button type="button" class="btn btn-danger-ghost" id="topbar-disconnect-btn" style="display:none">Disconnect</button>
@@ -1305,6 +1354,43 @@
         </section>
       </main>
     </div>
+  </div>
+
+  <div class="modal-backdrop" id="load-yaml-backdrop" data-import-yaml-backdrop>
+    <section class="panel modal-panel" id="load-yaml-panel" role="dialog" aria-modal="true" aria-labelledby="load-yaml-title">
+      <div class="panel-header">
+        <h2 class="panel-title" id="load-yaml-title">Load existing YAML</h2>
+        <p class="panel-subtitle">Import an existing baton-sql connector config so you can keep editing it in the wizard.</p>
+      </div>
+
+      <div class="import-yaml-row">
+        <div class="field">
+          <label for="load-yaml-file">Choose a file</label>
+          <input class="control" id="load-yaml-file" type="file" accept=".yaml,.yml,.txt" data-import-yaml-file>
+        </div>
+
+        <div class="import-yaml-divider">or</div>
+
+        <div class="field">
+          <label for="load-yaml-textarea">Paste YAML</label>
+          <textarea class="control mono import-yaml-textarea" id="load-yaml-textarea" data-import-yaml-textarea placeholder="app_name: my-service&#10;resource_types:&#10;  ..."></textarea>
+        </div>
+      </div>
+
+      <p class="hint-block" data-import-yaml-note>
+        Import only recreates what this wizard models (List/Entitlements/Grants query mappings). A config using features the wizard doesn&rsquo;t represent yet &mdash; <code class="mono">expandable</code>, <code class="mono">scope</code>, annotations, multiple databases, provisioning, or custom actions &mdash; will silently drop those if you re-export from here.
+      </p>
+
+      <div class="inline-error" id="load-yaml-error" role="alert" data-import-yaml-error></div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-primary" id="load-yaml-submit-btn" data-import-yaml-submit>
+          <span id="load-yaml-spinner" class="spinner" style="display:none" aria-hidden="true"></span>
+          <span id="load-yaml-submit-label">Load</span>
+        </button>
+        <button type="button" class="btn btn-ghost" id="load-yaml-cancel-btn" data-import-yaml-cancel>Cancel</button>
+      </div>
+    </section>
   </div>
 
 <script>
@@ -4049,6 +4135,144 @@
   }
 
   // -----------------------------------------------------------------------
+  // Load YAML (import) — a top-bar dialog that lets the user hand the
+  // wizard an existing baton-sql config, either as a file (read client-side
+  // via FileReader, never uploaded as a file — its text is just copied into
+  // the textarea) or pasted directly, then POSTs {yaml} to /api/import and
+  // (on success) replaces state.resource_types/app_name with the imported
+  // Spec. Reachable from any step: the dialog is a fixed-position overlay,
+  // not one of the step-panels renderStepPanels() toggles.
+  // -----------------------------------------------------------------------
+
+  // isLoadYAMLOpen()/showLoadYAMLError()/clearLoadYAMLError() mirror the
+  // connect-error helpers above; kept separate since the two dialogs' error
+  // elements are independent and can be visible at different times.
+  function isLoadYAMLOpen() {
+    return document.getElementById("load-yaml-backdrop").classList.contains("visible");
+  }
+
+  function showLoadYAMLError(message) {
+    var el = document.getElementById("load-yaml-error");
+    el.textContent = message;
+    el.classList.add("visible");
+  }
+
+  function clearLoadYAMLError() {
+    var el = document.getElementById("load-yaml-error");
+    el.textContent = "";
+    el.classList.remove("visible");
+  }
+
+  // openLoadYAMLDialog()/closeLoadYAMLDialog() — every open starts from a
+  // clean slate (no stale error or leftover paste from a previous import),
+  // since re-opening almost always means "load a different config" rather
+  // than "resume the last attempt".
+  function openLoadYAMLDialog() {
+    clearLoadYAMLError();
+    document.getElementById("load-yaml-file").value = "";
+    document.getElementById("load-yaml-textarea").value = "";
+    document.getElementById("load-yaml-backdrop").classList.add("visible");
+    document.getElementById("load-yaml-textarea").focus();
+  }
+
+  function closeLoadYAMLDialog() {
+    document.getElementById("load-yaml-backdrop").classList.remove("visible");
+  }
+
+  // handleLoadYAMLFile() reads the chosen file as text client-side and
+  // drops it into the textarea (rather than auto-submitting), so a file
+  // pick and a paste go through the exact same review-then-Load path and
+  // the user can see/edit what's about to be imported either way.
+  function handleLoadYAMLFile(evt) {
+    var file = evt.target.files && evt.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      document.getElementById("load-yaml-textarea").value = String(reader.result || "");
+      clearLoadYAMLError();
+    };
+    reader.onerror = function () {
+      showLoadYAMLError("Could not read that file.");
+    };
+    reader.readAsText(file);
+  }
+
+  // hasUsefulConnectValues() — true when a ConnectConfig has at least a host
+  // or database, i.e. it's worth pre-filling the (still-blank) connect form
+  // from rather than overwriting real fields with an all-empty object.
+  function hasUsefulConnectValues(c) {
+    return !!(c && (c.host || c.database));
+  }
+
+  // applyImportedSpec() is the success path shared by handleLoadYAMLSubmit:
+  // it never touches state on error, so this is only ever called once
+  // /api/import has already returned a usable spec.
+  function applyImportedSpec(spec) {
+    state.resource_types = spec.resource_types || [];
+    state.app_name = spec.app_name || "";
+
+    // Never clobber a live DB connection — importing a config is about the
+    // resource-type mappings, not the session's DB credentials. Only when
+    // there's no live connection yet is it safe to pre-fill the connect
+    // form from the imported spec's own `connect` section, and even then we
+    // leave the password blank exactly like fillConnectFormFromState()
+    // does for "Edit connection" (the server never round-trips it either).
+    if (!ui.connected && hasUsefulConnectValues(spec.connect)) {
+      state.connect = spec.connect;
+      fillConnectFormFromState();
+    }
+
+    closeLoadYAMLDialog();
+
+    if (state.resource_types.length > 0) {
+      // selectRT() puts the wizard in the imported config's first resource
+      // type's workspace — exactly like a fresh "Add resource type" does —
+      // so the user immediately sees the imported mappings rather than
+      // landing back on an empty declare-resource-types screen.
+      selectRT(state.resource_types[0].id);
+    } else {
+      ui.step = "resource-types";
+      ui.selectedRT = null;
+      render();
+    }
+  }
+
+  // handleLoadYAMLSubmit() POSTs the dialog's current YAML text to
+  // /api/import. A bad/unparsable document (or a config using multi-row
+  // DYNAMIC ENTITLEMENTS, which the engine can't model yet) comes back as
+  // {error} with HTTP 200 (see pkg/studio/server/import.go) — shown inline,
+  // leaving state untouched, so a failed import never wipes an in-progress
+  // config the user might already have.
+  async function handleLoadYAMLSubmit() {
+    var text = document.getElementById("load-yaml-textarea").value;
+    if (!text || !text.trim()) {
+      showLoadYAMLError("Paste some YAML, or choose a file, first.");
+      return;
+    }
+    clearLoadYAMLError();
+
+    var btn = document.getElementById("load-yaml-submit-btn");
+    var spinner = document.getElementById("load-yaml-spinner");
+    var label = document.getElementById("load-yaml-submit-label");
+    btn.disabled = true;
+    spinner.style.display = "";
+    label.textContent = "Loading…";
+
+    var res = await api("/api/import", { yaml: text });
+
+    btn.disabled = false;
+    spinner.style.display = "none";
+    label.textContent = "Load";
+
+    if (!res || res.error || !res.spec) {
+      showLoadYAMLError((res && res.error) ? res.error : "Import failed — is the Studio server running?");
+      return;
+    }
+
+    applyImportedSpec(res.spec);
+  }
+
+  // -----------------------------------------------------------------------
   // Theme toggle — persists an explicit override; absent an override the
   // page follows prefers-color-scheme.
   // -----------------------------------------------------------------------
@@ -4085,6 +4309,17 @@
     // branch.
     document.getElementById("topbar-edit-connect-btn").addEventListener("click", startEditConnection);
     document.getElementById("edit-connect-cancel-btn").addEventListener("click", cancelEditConnection);
+
+    // Load YAML — reachable from any step, so it isn't gated behind
+    // ui.connected like Validate/Edit connection/Disconnect are.
+    document.getElementById("topbar-load-yaml-btn").addEventListener("click", openLoadYAMLDialog);
+    document.getElementById("load-yaml-cancel-btn").addEventListener("click", closeLoadYAMLDialog);
+    document.getElementById("load-yaml-backdrop").addEventListener("click", function (evt) {
+      if (evt.target === evt.currentTarget) closeLoadYAMLDialog();
+    });
+    document.getElementById("load-yaml-file").addEventListener("change", handleLoadYAMLFile);
+    document.getElementById("load-yaml-submit-btn").addEventListener("click", handleLoadYAMLSubmit);
+
     document.getElementById("theme-toggle").addEventListener("click", toggleTheme);
     document.getElementById("toggle-password").addEventListener("click", function () {
       var input = document.getElementById("f-password");
@@ -4196,7 +4431,14 @@
     refreshYAML: refreshYAML,
     handleDownloadYAML: handleDownloadYAML,
     slugifyFilename: slugifyFilename,
-    hasValidateError: hasValidateError
+    hasValidateError: hasValidateError,
+    // Load YAML — exposed so a DB-less Playwright pass can open the dialog,
+    // set the textarea directly (bypassing FileReader), submit, and inspect
+    // the resulting state without a live database.
+    openLoadYAMLDialog: openLoadYAMLDialog,
+    closeLoadYAMLDialog: closeLoadYAMLDialog,
+    handleLoadYAMLSubmit: handleLoadYAMLSubmit,
+    applyImportedSpec: applyImportedSpec
   };
 })();
 </script>
