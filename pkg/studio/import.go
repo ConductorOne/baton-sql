@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 
@@ -119,6 +120,20 @@ func reorderResourceTypes(spec *Spec, order []string) {
 // references (".<column>") come back as clean column picks; anything else
 // comes back as an editable raw-CEL mapping (see celToMapping) rather than an
 // attempt to reverse-engineer a recipe.
+//
+// Known round-trip limitation: id/display_name/description share ONE YAML
+// map node (genResourceType's mp), so their relative order within that node
+// isn't recoverable from a parsed bsql.Config - SpecFromConfig always
+// reconstructs them in the fixed order id, display_name, description. Since
+// Generate always emits them in that same canonical order, a Studio-generated
+// config (the case the round-trip test proves) regenerates byte-identical.
+// A hand-authored config that orders these fields differently (e.g.
+// display_name before id) will canonicalize to id-first on import - this is
+// a known, narrow loss, not an order-independence guarantee for arbitrary
+// input. Trait-scalar fields and profile.<key> fields do NOT have this
+// caveat: each lands in its own distinct map/seq entry in genResourceType
+// regardless of iteration order, so their relative order to one another (and
+// to id/display_name/description) never affects the regenerated YAML.
 func SpecFromConfig(cfg *bsql.Config) (*Spec, error) {
 	spec := &Spec{
 		AppName: cfg.AppName,
@@ -168,13 +183,13 @@ func resourceTypeFromConfig(id string, rt bsql.ResourceType) (*ResourceTypeSpec,
 	}
 	spec.List = listSpec
 
-	entSpec, err := entitlementsSpecFromConfig(rt)
+	entSpec, err := entitlementsSpecFromConfig(id, rt)
 	if err != nil {
 		return nil, err
 	}
 	spec.Entitlements = entSpec
 
-	grants, err := grantsFromConfig(rt.Grants)
+	grants, err := grantsFromConfig(id, rt.Grants)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +317,7 @@ func traitFieldMappings(traits *bsql.Traits) []FieldMapping {
 	return out
 }
 
-func entitlementsSpecFromConfig(rt bsql.ResourceType) (EntitlementsSpec, error) {
+func entitlementsSpecFromConfig(id string, rt bsql.ResourceType) (EntitlementsSpec, error) {
 	if len(rt.StaticEntitlements) > 0 {
 		statics := make([]StaticEntitlement, 0, len(rt.StaticEntitlements))
 		for _, e := range rt.StaticEntitlements {
@@ -323,6 +338,18 @@ func entitlementsSpecFromConfig(rt bsql.ResourceType) (EntitlementsSpec, error) 
 
 	if rt.Entitlements != nil && rt.Entitlements.Query != "" {
 		ent := rt.Entitlements
+		// EntitlementsSpec models exactly one entitlement mapping per query
+		// (Studio's Fields is a flat []FieldMapping, not per-row). A config
+		// with more than one map row can't be reconstructed without silently
+		// dropping rows 1..n-1 - fail loudly instead (see the grants path
+		// below for the same shape of guard, and the CRITICAL fix this
+		// addresses: a real config can have many map rows, e.g.
+		// examples/redshift-test.yml's "table" grants query has 12).
+		if len(ent.Map) > 1 {
+			return EntitlementsSpec{}, fmt.Errorf(
+				"resource type %q: this config has a dynamic entitlements query with %d mapping rows; Studio currently supports one entitlement mapping per query and cannot import it without losing data",
+				id, len(ent.Map))
+		}
 		var fields []FieldMapping
 		var grantableTo []string
 		if len(ent.Map) > 0 && ent.Map[0] != nil {
@@ -350,11 +377,25 @@ func entitlementsSpecFromConfig(rt bsql.ResourceType) (EntitlementsSpec, error) 
 	return EntitlementsSpec{Mode: "none"}, nil
 }
 
-func grantsFromConfig(gqs []*bsql.GrantsQuery) ([]GrantSpec, error) {
+func grantsFromConfig(id string, gqs []*bsql.GrantsQuery) ([]GrantSpec, error) {
 	var out []GrantSpec
 	for _, gq := range gqs {
 		if gq == nil {
 			continue
+		}
+
+		// GrantSpec models exactly one principal_type/entitlement pair per
+		// grants query (Studio's Fields is a flat []FieldMapping, not
+		// per-row). A config with more than one map row - a common pattern
+		// for fanning one grants query out over multiple principal types
+		// and/or entitlements, e.g. examples/redshift-test.yml's "table"
+		// type has ONE grants query with 12 map rows - can't be
+		// reconstructed without silently dropping rows 1..n-1. Fail loudly
+		// instead of truncating.
+		if len(gq.Map) > 1 {
+			return nil, fmt.Errorf(
+				"resource type %q: this config has a grant query with %d mapping rows; Studio currently supports one principal_type per grant query and cannot import it without losing data",
+				id, len(gq.Map))
 		}
 
 		resourceVar := ""
