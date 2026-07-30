@@ -40,6 +40,16 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"data-map-column",
 		"data-map-recipe",
 		"data-map-preview",
+		// Task 4: Entitlements tab — mode toggle, static list, grantable_to.
+		"data-entitlements-mode-toggle",
+		"data-entitlements-mode-btn",
+		"Static list",
+		"From a query",
+		"data-entitlements-static",
+		"data-entitlements-query",
+		"grantable_to",
+		"data-grantable-to",
+		"data-ent-purpose",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {

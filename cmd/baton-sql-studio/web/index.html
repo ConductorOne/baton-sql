@@ -860,6 +860,62 @@
     padding: 0.4rem 0;
   }
 
+  /* ---------------------------------------------------------------------
+     Entitlements tab (Task 4) — mode toggle, static-list editor, and the
+     grantable_to multiselect (shared by static rows and query mode).
+     ------------------------------------------------------------------- */
+  .entitlements-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 1.6rem;
+  }
+
+  .mode-toggle {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+  }
+  .mode-toggle-btn {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 600;
+    font-size: 0.86rem;
+  }
+  .mode-toggle-btn:hover { background: var(--surface-alt); }
+  .mode-toggle-btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent);
+  }
+
+  .ent-static-table select.control,
+  .ent-static-table input.control { min-width: 8rem; }
+
+  .grantable-to-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .grantable-to-chip {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+  .grantable-to-chip[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.14);
+    color: var(--accent);
+  }
+
+  .checkbox-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
   /* Responsive: collapse the rail to a horizontal strip; wrap, never
      scroll the page horizontally. */
   @media (max-width: 760px) {
@@ -1132,6 +1188,23 @@
     { field: "description", label: "Description" }
   ];
 
+  // ENTITLEMENT_FIELD_DEFS — the mapping widget's field vocabulary for
+  // Entitlements' query mode (Task 4). Matches pkg/studio/generate.go's
+  // query-mode field switch exactly: id/display_name/description/purpose
+  // are passed through as-is; "slug" is deliberately NOT offered here — the
+  // engine always derives a valid slug from display_name (falling back to
+  // id) when one isn't explicitly mapped, so the mapping widget just hints
+  // at that instead of adding a row for it. "profile.*" is not a supported
+  // entitlements field (bsql entitlements have no profile), so this tab
+  // passes allowProfileFields:false to renderMappingTable rather than
+  // letting a user create a mapping the engine would silently drop.
+  var ENTITLEMENT_FIELD_DEFS = [
+    { field: "id", label: "ID", required: true },
+    { field: "display_name", label: "Display name", required: true },
+    { field: "description", label: "Description" },
+    { field: "purpose", label: "Purpose", hint: "(assignment or permission)" }
+  ];
+
   // fieldDefsForTrait() returns the canonical field defs for a resource
   // type's trait: the fuller Users vocabulary for trait "user", and the
   // generic id/display_name/description set for everything else
@@ -1254,7 +1327,13 @@
       if (status.state === "proven") return "ok";
       return "draft"; // unproven or stale, but a query is authored
     }
-    if (tab === "entitlements") return (rt.entitlements && rt.entitlements.mode && rt.entitlements.mode !== "none") ? "draft" : "empty";
+    if (tab === "entitlements") {
+      var ent = rt.entitlements;
+      if (!ent || !ent.mode || ent.mode === "none") return "empty";
+      if (ent.mode === "static") return (ent.static && ent.static.length > 0) ? "draft" : "empty";
+      if (ent.mode === "query") return (ent.query && ent.query.trim().length > 0) ? "draft" : "empty";
+      return "empty";
+    }
     if (tab === "grants") return (rt.grants && rt.grants.length > 0) ? "draft" : "empty";
     return "empty";
   }
@@ -1406,9 +1485,12 @@
       renderListTab(rt);
       return;
     }
+    if (ui.activeTab === "entitlements") {
+      renderEntitlementsTab(rt);
+      return;
+    }
 
     var messages = {
-      entitlements: "Entitlements — coming in a later step. You'll define what can be granted on " + rt.name.toLowerCase() + " (a static list, or one derived from a query).",
       grants: "Grants — coming in a later step. You'll define who has which entitlement, scoped to a resource of this type."
     };
     var body = document.getElementById("tab-body");
@@ -1750,28 +1832,37 @@
     scroll.appendChild(table);
     container.appendChild(scroll);
 
-    var addRow = document.createElement("div");
-    addRow.className = "add-profile-field";
-    var addInput = document.createElement("input");
-    addInput.className = "control";
-    addInput.type = "text";
-    addInput.placeholder = "profile key, e.g. department";
-    addInput.setAttribute("data-add-profile-input", "");
-    var addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "btn btn-ghost";
-    addBtn.setAttribute("data-add-profile-btn", "");
-    addBtn.textContent = "+ Add profile field";
-    addBtn.addEventListener("click", function () {
-      var raw = (addInput.value || "").trim();
-      if (!raw) return;
-      var field = "profile." + raw;
-      if (ui.extraProfileFields[key].indexOf(field) < 0) ui.extraProfileFields[key].push(field);
-      renderMappingTable(container, opts);
-    });
-    addRow.appendChild(addInput);
-    addRow.appendChild(addBtn);
-    container.appendChild(addRow);
+    // "+ Add profile field" only makes sense where the generator actually
+    // reads "profile.<key>" mappings (List — see genResourceType()'s field
+    // switch). Entitlements' query-mode field switch (generate.go) has no
+    // profile.* case, so a profile field mapped there would silently be
+    // dropped at generate time; callers for that tab pass
+    // allowProfileFields:false to keep the widget from offering a control
+    // that produces a mapping the engine ignores.
+    if (opts.allowProfileFields !== false) {
+      var addRow = document.createElement("div");
+      addRow.className = "add-profile-field";
+      var addInput = document.createElement("input");
+      addInput.className = "control";
+      addInput.type = "text";
+      addInput.placeholder = "profile key, e.g. department";
+      addInput.setAttribute("data-add-profile-input", "");
+      var addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "btn btn-ghost";
+      addBtn.setAttribute("data-add-profile-btn", "");
+      addBtn.textContent = "+ Add profile field";
+      addBtn.addEventListener("click", function () {
+        var raw = (addInput.value || "").trim();
+        if (!raw) return;
+        var field = "profile." + raw;
+        if (ui.extraProfileFields[key].indexOf(field) < 0) ui.extraProfileFields[key].push(field);
+        renderMappingTable(container, opts);
+      });
+      addRow.appendChild(addInput);
+      addRow.appendChild(addBtn);
+      container.appendChild(addRow);
+    }
   }
 
   // runStatusLabel() derives the status pill's {state, text} from ui.lastRun,
@@ -1957,6 +2048,365 @@
       fieldDefs: fieldDefsForTrait(rt.trait),
       query: rt.list.query
     });
+
+    body.appendChild(wrap);
+  }
+
+  // -----------------------------------------------------------------------
+  // Entitlements tab (Task 4) — a mode toggle between a hand-authored
+  // static list and a query-derived list, plus the grantable_to multiselect
+  // shared by both. Reuses runQuery/renderResultsPanel/renderMappingTable
+  // from the List tab (Task 3) for query mode, since queryForTab/fieldsFor
+  // already understand the "entitlements" tab key.
+  // -----------------------------------------------------------------------
+
+  // renderGrantableToMultiselect() is the one control both static rows and
+  // query mode use to edit a grantable_to list: a chip per currently
+  // defined resource type (id shown alongside its name, since IDs — not
+  // names — are what's written to the spec and what a reviewer needs to
+  // recognize). `selected` is read once to seed initial state; `onChange`
+  // receives the whole updated array on every toggle (the caller owns
+  // where it's stored — state.resource_types[i].entitlements.grantable_to
+  // for query mode, or a single static row's .grantable_to).
+  function renderGrantableToMultiselect(container, selected, onChange) {
+    container.innerHTML = "";
+    var sel = (selected || []).slice();
+    if (state.resource_types.length === 0) {
+      var empty = document.createElement("span");
+      empty.className = "hint-block";
+      empty.textContent = "No resource types declared yet.";
+      container.appendChild(empty);
+      return;
+    }
+    state.resource_types.forEach(function (candidate) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip grantable-to-chip";
+      chip.setAttribute("data-grantable-to-chip", candidate.id);
+      var checked = sel.indexOf(candidate.id) >= 0;
+      chip.setAttribute("aria-pressed", checked ? "true" : "false");
+      chip.textContent = candidate.name + " (" + candidate.id + ")";
+      chip.addEventListener("click", function () {
+        var idx = sel.indexOf(candidate.id);
+        if (idx >= 0) { sel.splice(idx, 1); } else { sel.push(candidate.id); }
+        chip.setAttribute("aria-pressed", idx >= 0 ? "false" : "true");
+        onChange(sel.slice());
+      });
+      container.appendChild(chip);
+    });
+  }
+
+  // buildStaticEntitlementRow() populates one <tr> for
+  // state.resource_types[i].entitlements.static[idx] — matching
+  // pkg/studio/spec.go's StaticEntitlement exactly: id, display_name,
+  // purpose (constrained to assignment|permission via <select> so the
+  // engine's validator can never reject what the UI wrote), description,
+  // immutable (checkbox), grantable_to (multiselect). Every input mutates
+  // the row object in place — never a full renderWorkspace() — so typing in
+  // one cell never disturbs another row or loses focus.
+  function buildStaticEntitlementRow(tr, rt, idx) {
+    tr.innerHTML = "";
+    var row = rt.entitlements.static[idx];
+
+    function textCell(key, placeholder, required) {
+      var td = document.createElement("td");
+      var input = document.createElement("input");
+      input.className = "control";
+      input.type = "text";
+      input.placeholder = placeholder || "";
+      input.value = row[key] || "";
+      input.setAttribute("data-ent-field", key);
+      input.addEventListener("input", function (evt) {
+        row[key] = evt.target.value;
+        renderRail(); // id/display_name feed the card dot + (later) the entitlement picker
+      });
+      td.appendChild(input);
+      if (required) {
+        var star = document.createElement("span");
+        star.className = "field-required";
+        star.title = "Required";
+        star.textContent = " *";
+        td.appendChild(star);
+      }
+      return td;
+    }
+
+    tr.appendChild(textCell("id", "e.g. admin", true));
+    tr.appendChild(textCell("display_name", "e.g. Admin", true));
+
+    var tdPurpose = document.createElement("td");
+    var purposeSelect = document.createElement("select");
+    purposeSelect.className = "control";
+    purposeSelect.setAttribute("data-ent-purpose", "");
+    [["", "— none —"], ["assignment", "Assignment"], ["permission", "Permission"]].forEach(function (opt) {
+      var o = document.createElement("option");
+      o.value = opt[0];
+      o.textContent = opt[1];
+      purposeSelect.appendChild(o);
+    });
+    purposeSelect.value = row.purpose || "";
+    purposeSelect.addEventListener("change", function (evt) { row.purpose = evt.target.value; });
+    tdPurpose.appendChild(purposeSelect);
+    tr.appendChild(tdPurpose);
+
+    tr.appendChild(textCell("description", "optional", false));
+
+    var tdImmutable = document.createElement("td");
+    var immLabel = document.createElement("label");
+    immLabel.className = "checkbox-cell";
+    var immCheckbox = document.createElement("input");
+    immCheckbox.type = "checkbox";
+    immCheckbox.setAttribute("data-ent-immutable", "");
+    immCheckbox.checked = !!row.immutable;
+    immCheckbox.addEventListener("change", function (evt) { row.immutable = evt.target.checked; });
+    immLabel.appendChild(immCheckbox);
+    immLabel.appendChild(document.createTextNode("Immutable"));
+    tdImmutable.appendChild(immLabel);
+    tr.appendChild(tdImmutable);
+
+    var tdGrant = document.createElement("td");
+    var grantContainer = document.createElement("div");
+    grantContainer.setAttribute("data-grantable-to", "");
+    renderGrantableToMultiselect(grantContainer, row.grantable_to || [], function (next) {
+      row.grantable_to = next;
+    });
+    tdGrant.appendChild(grantContainer);
+    tr.appendChild(tdGrant);
+
+    var tdRemove = document.createElement("td");
+    var removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn-danger-ghost";
+    removeBtn.setAttribute("data-ent-remove", "");
+    removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", function () {
+      rt.entitlements.static.splice(idx, 1);
+      renderWorkspace();
+      renderRail();
+    });
+    tdRemove.appendChild(removeBtn);
+    tr.appendChild(tdRemove);
+  }
+
+  // renderStaticEntitlements() builds the whole static-mode editor: a table
+  // of rows (writing state.resource_types[i].entitlements.static[]) plus an
+  // "+ Add entitlement" button that appends a well-formed, empty row.
+  function renderStaticEntitlements(rt) {
+    if (!rt.entitlements.static) rt.entitlements.static = [];
+
+    var container = document.createElement("div");
+    container.setAttribute("data-entitlements-static", "");
+
+    var heading = document.createElement("h3");
+    heading.className = "mapping-heading";
+    heading.textContent = "Static entitlements";
+    container.appendChild(heading);
+
+    var scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    var table = document.createElement("table");
+    table.className = "mapping-table ent-static-table";
+    var thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th>ID</th><th>Display name</th><th>Purpose</th><th>Description</th><th>Immutable</th><th>Grantable to</th><th></th></tr>";
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    rt.entitlements.static.forEach(function (row, idx) {
+      var tr = document.createElement("tr");
+      tr.setAttribute("data-ent-row", String(idx));
+      buildStaticEntitlementRow(tr, rt, idx);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    container.appendChild(scroll);
+
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn btn-ghost";
+    addBtn.setAttribute("data-add-entitlement-btn", "");
+    addBtn.style.marginTop = "0.9rem";
+    addBtn.textContent = "+ Add entitlement";
+    addBtn.addEventListener("click", function () {
+      rt.entitlements.static.push({ id: "", display_name: "", purpose: "", description: "", immutable: false, grantable_to: [] });
+      renderWorkspace();
+      renderRail();
+    });
+    container.appendChild(addBtn);
+
+    return container;
+  }
+
+  // renderQueryEntitlements() builds query mode: a SQL editor + Run (reusing
+  // runQuery/renderResultsPanel exactly as the List tab does), the reusable
+  // mapping widget for id/display_name/description/purpose, a hint that
+  // slug is auto-derived (mirrors generate.go's fallback: display_name,
+  // then id), and the grantable_to multiselect — which for query mode
+  // applies to every entitlement the query produces, so it lives on
+  // entitlements.grantable_to rather than per-row.
+  function renderQueryEntitlements(rt) {
+    var ent = rt.entitlements;
+    if (ent.query === undefined) ent.query = "";
+    if (!ent.fields) ent.fields = [];
+    if (!ent.grantable_to) ent.grantable_to = [];
+
+    var container = document.createElement("div");
+    container.setAttribute("data-entitlements-query", "");
+    container.className = "list-tab";
+
+    var querySection = document.createElement("div");
+    var qLabel = document.createElement("label");
+    qLabel.className = "field-label";
+    qLabel.setAttribute("for", "entitlements-query-editor");
+    qLabel.textContent = "SQL query";
+    var qTextarea = document.createElement("textarea");
+    qTextarea.className = "control mono query-editor";
+    qTextarea.id = "entitlements-query-editor";
+    qTextarea.placeholder = "SELECT id, name, ... FROM entitlements";
+    qTextarea.value = ent.query || "";
+
+    var actions = document.createElement("div");
+    actions.className = "query-actions";
+    var runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.className = "btn btn-primary";
+    runBtn.id = "entitlements-run-btn";
+    runBtn.textContent = "Run";
+    runBtn.addEventListener("click", function () { runQuery(rt.id, "entitlements"); });
+
+    var statusPill = document.createElement("span");
+    statusPill.className = "status-pill";
+    var statusDot = document.createElement("span");
+    statusDot.className = "dot";
+    var statusText = document.createElement("span");
+    statusText.className = "status-text";
+    statusPill.appendChild(statusDot);
+    statusPill.appendChild(statusText);
+    applyRunStatus(statusPill, rt, "entitlements");
+
+    qTextarea.addEventListener("input", function (evt) {
+      ent.query = evt.target.value;
+      applyRunStatus(statusPill, rt, "entitlements");
+      renderRail();
+    });
+
+    actions.appendChild(runBtn);
+    actions.appendChild(statusPill);
+    querySection.appendChild(qLabel);
+    querySection.appendChild(qTextarea);
+    querySection.appendChild(actions);
+    container.appendChild(querySection);
+
+    var resultsSection = document.createElement("div");
+    container.appendChild(resultsSection);
+    renderResultsPanel(resultsSection, rt, "entitlements");
+
+    var mappingSection = document.createElement("div");
+    container.appendChild(mappingSection);
+    renderMappingTable(mappingSection, {
+      rtId: rt.id,
+      tab: "entitlements",
+      fieldDefs: ENTITLEMENT_FIELD_DEFS,
+      query: ent.query,
+      allowProfileFields: false
+    });
+
+    var slugHint = document.createElement("p");
+    slugHint.className = "hint-block";
+    slugHint.setAttribute("data-slug-hint", "");
+    slugHint.textContent = "slug is generated automatically (from display_name, or id if display_name isn't mapped) — no need to map it.";
+    container.appendChild(slugHint);
+
+    var purposeHint = document.createElement("p");
+    purposeHint.className = "hint-block";
+    purposeHint.textContent = "purpose must resolve to exactly \"assignment\" or \"permission\" (via a literal or a column returning one of those two values) — anything else is treated as unspecified by the engine. A column-sourced purpose can't be checked here; run Validate to confirm.";
+    container.appendChild(purposeHint);
+
+    var grantableSection = document.createElement("div");
+    var grantableLabel = document.createElement("label");
+    grantableLabel.className = "field-label";
+    grantableLabel.textContent = "Grantable to";
+    grantableSection.appendChild(grantableLabel);
+    var grantableContainer = document.createElement("div");
+    grantableContainer.setAttribute("data-grantable-to", "");
+    renderGrantableToMultiselect(grantableContainer, ent.grantable_to, function (next) {
+      ent.grantable_to = next;
+    });
+    grantableSection.appendChild(grantableContainer);
+    var grantableHint = document.createElement("p");
+    grantableHint.className = "hint";
+    grantableHint.textContent = "Applies to every entitlement this query produces.";
+    grantableSection.appendChild(grantableHint);
+    container.appendChild(grantableSection);
+
+    return container;
+  }
+
+  // setEntitlementsMode() flips entitlements.mode and lazily initializes
+  // whichever mode's storage isn't there yet — it never clears the OTHER
+  // mode's data, so switching static -> query -> static preserves whatever
+  // was already entered in both (per the brief: "preserves already-entered
+  // data where sensible"). "none" is the only mode addResourceType() sets,
+  // so the toggle itself is what first commits to static or query.
+  function setEntitlementsMode(rt, mode) {
+    if (!rt.entitlements) rt.entitlements = { mode: "none" };
+    rt.entitlements.mode = mode;
+    if (mode === "static" && !rt.entitlements.static) rt.entitlements.static = [];
+    if (mode === "query") {
+      if (rt.entitlements.query === undefined) rt.entitlements.query = "";
+      if (!rt.entitlements.fields) rt.entitlements.fields = [];
+      if (!rt.entitlements.grantable_to) rt.entitlements.grantable_to = [];
+    }
+    renderWorkspace();
+    renderRail();
+  }
+
+  // renderEntitlementsTab() is the Entitlements tab's entry point (called
+  // from renderWorkspace()): the mode toggle, plus whichever editor is
+  // active. Guards against rt.entitlements being absent entirely (e.g. an
+  // injected/older state object in tests) rather than throwing.
+  function renderEntitlementsTab(rt) {
+    if (!rt.entitlements) rt.entitlements = { mode: "none" };
+    var ent = rt.entitlements;
+
+    var body = document.getElementById("tab-body");
+    body.innerHTML = "";
+
+    var wrap = document.createElement("div");
+    wrap.className = "entitlements-tab";
+
+    var modeSection = document.createElement("div");
+    var modeLabel = document.createElement("label");
+    modeLabel.className = "field-label";
+    modeLabel.textContent = "Entitlement source";
+    var modeToggle = document.createElement("div");
+    modeToggle.className = "mode-toggle";
+    modeToggle.setAttribute("data-entitlements-mode-toggle", "");
+
+    [["static", "Static list"], ["query", "From a query"]].forEach(function (opt) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mode-toggle-btn";
+      btn.setAttribute("data-entitlements-mode-btn", opt[0]);
+      btn.setAttribute("aria-pressed", ent.mode === opt[0] ? "true" : "false");
+      btn.textContent = opt[1];
+      btn.addEventListener("click", function () { setEntitlementsMode(rt, opt[0]); });
+      modeToggle.appendChild(btn);
+    });
+
+    modeSection.appendChild(modeLabel);
+    modeSection.appendChild(modeToggle);
+    wrap.appendChild(modeSection);
+
+    if (ent.mode === "static") {
+      wrap.appendChild(renderStaticEntitlements(rt));
+    } else if (ent.mode === "query") {
+      wrap.appendChild(renderQueryEntitlements(rt));
+    } else {
+      var hint = document.createElement("p");
+      hint.className = "placeholder-copy";
+      hint.textContent = "Choose how entitlements are defined for " + rt.name + ": a fixed static list, or one derived from a query.";
+      wrap.appendChild(hint);
+    }
 
     body.appendChild(wrap);
   }
@@ -2255,7 +2705,15 @@
     mapKey: mapKey,
     previewField: previewField,
     renderMappingTable: renderMappingTable,
-    fieldDefsForTrait: fieldDefsForTrait
+    fieldDefsForTrait: fieldDefsForTrait,
+    // Task 4 (Entitlements tab) — exposed so a DB-less Playwright pass can
+    // drive the mode toggle / static rows / grantable_to multiselect
+    // directly, and so Task 5 (Grants) can reuse the multiselect + mapping
+    // widget without re-deriving them.
+    renderEntitlementsTab: renderEntitlementsTab,
+    setEntitlementsMode: setEntitlementsMode,
+    renderGrantableToMultiselect: renderGrantableToMultiselect,
+    ENTITLEMENT_FIELD_DEFS: ENTITLEMENT_FIELD_DEFS
   };
 })();
 </script>
