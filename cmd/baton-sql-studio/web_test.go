@@ -67,6 +67,17 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"principal_type",
 		"data-grant-entitlement",
 		"data-grants-tab",
+		// Grants multi-row principal mappings — grants[0].mappings[] (new
+		// GrantSpec shape: {query, resource_var, mappings:[{principal_id,
+		// principal_type, entitlement, skip_if}]}), one card per mapping row
+		// with its own principal_id/principal_type/entitlement/skip_if plus
+		// Add/Remove controls.
+		"Principal mappings",
+		"data-grant-mapping",
+		"Add principal mapping",
+		"data-add-grant-mapping-btn",
+		"data-remove-grant-mapping",
+		"data-grant-skip-if-toggle",
 		// Task 6: Review & export — live validation, generated YAML, and
 		// client-side download.
 		"/api/validate",

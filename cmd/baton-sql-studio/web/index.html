@@ -988,6 +988,36 @@
   .grant-field { max-width: 26rem; }
   .grant-entitlement-custom { margin-top: 0.5rem; }
 
+  /* Multi-row principal mappings (grants[0].mappings[]) — one bordered
+     card per mapping row: principal_id column/recipe/preview,
+     principal_type, entitlement, and an optional collapsible skip_if. */
+  .grant-mappings-heading { margin-top: 0.4rem; }
+  .grant-mapping-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-alt);
+    padding: 1rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .grant-mapping-row-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .grant-mapping-row-title { font-weight: 650; font-size: 0.86rem; }
+  .grant-map-field-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+  }
+  .grant-map-field-controls .control { min-width: 11rem; flex: 1 1 11rem; }
+  .grant-skip-if-toggle { align-self: flex-start; }
+  .add-grant-mapping-btn { margin-top: 0.2rem; }
+
   /* ---------------------------------------------------------------------
      Review & export (Task 6) — the validation report list, the "Valid"
      summary banner (reuses .connected-banner's green look), and the YAML
@@ -1415,14 +1445,16 @@
     { field: "slug", label: "Slug", hint: "(optional — auto-derived from display_name/id if left unmapped)" }
   ];
 
-  // GRANT_FIELD_DEFS — the mapping widget's field vocabulary for the Grants
-  // tab (Task 5). Matches pkg/studio/generate.go's grant-field switch
-  // exactly (generate.go: `case "principal_id", "skip_if":`) — deliberately
-  // does NOT include "resource_id": the engine's switch dropped it, so a
-  // mapping there would be silently discarded at /api/generate time.
-  // "profile.*" isn't a supported grant field either (grants have no
-  // profile), so callers pass allowProfileFields:false to
-  // renderMappingTable for this tab, same as Entitlements' query mode.
+  // GRANT_FIELD_DEFS — the field vocabulary for one grants[0].mappings[]
+  // row's principal_id/skip_if controls (buildGrantFieldControl, below).
+  // Matches pkg/studio/spec.go's GrantMapping fields exactly — deliberately
+  // does NOT include "resource_id": GrantMapping has no such field, so the
+  // engine could never read one even if the UI offered it. Unlike List/
+  // Entitlements this is no longer fed to renderMappingTable — each mapping
+  // row owns its own principal_id/skip_if FieldMapping rather than sharing
+  // one fields[] array keyed by field name (multiple rows would collide on
+  // the same key) — so there's no allowProfileFields concern here either;
+  // "profile.*" was never reachable through this array to begin with.
   var GRANT_FIELD_DEFS = [
     { field: "principal_id", label: "Principal ID", required: true },
     { field: "skip_if", label: "Skip if", hint: "(optional CEL — skip this row when it evaluates true)" }
@@ -1816,27 +1848,45 @@
   }
 
   // ensureGrant() lazily initializes state.resource_types[i].grants[0] —
-  // v1 authors exactly ONE grant per resource type (per the brief), so
-  // every Grants-tab accessor below reads/writes grants[0] specifically,
-  // never the array as a whole. Matches pkg/studio/spec.go's GrantSpec
-  // shape exactly: query, resource_var, principal_type, entitlement,
-  // fields[]. The one time this creates the record (isNew), it also
-  // defaults principal_type to "users" when that resource type is already
-  // declared (brief: "default to users if present") — a later render never
-  // re-applies that default, so clearing the dropdown deliberately sticks.
+  // exactly ONE grants QUERY per resource type (the resource-scoped
+  // who-has-what query + its resource_var binding), matching
+  // pkg/studio/spec.go's GrantSpec exactly: query, resource_var,
+  // mappings[]. That single query can fan out to 1..N principal MAPPINGS
+  // (GrantSpec.Mappings — e.g. Redshift's grants query producing one row
+  // per principal_type x entitlement), so unlike the old flat
+  // {principal_type,entitlement,fields} shape this no longer authors those
+  // fields directly on grants[0] itself. The one time this creates the
+  // record (isNew), it also seeds exactly one mapping via
+  // newGrantMapping() — the common single-principal case stays one row,
+  // no extra clicks.
   function ensureGrant(rt) {
     if (!rt.grants) rt.grants = [];
     var isNew = !rt.grants[0];
     if (isNew) {
-      rt.grants[0] = { query: "", resource_var: "", principal_type: "", entitlement: "", fields: [] };
+      rt.grants[0] = { query: "", resource_var: "", mappings: [] };
     }
     var g = rt.grants[0];
-    if (!g.fields) g.fields = [];
-    if (isNew && !g.principal_type) {
-      var hasUsers = state.resource_types.some(function (r) { return r.id === "users"; });
-      if (hasUsers) g.principal_type = "users";
+    if (!g.mappings) g.mappings = [];
+    if (isNew && g.mappings.length === 0) {
+      g.mappings.push(newGrantMapping(rt));
     }
     return g;
+  }
+
+  // newGrantMapping() returns a well-formed, empty GrantMapping matching
+  // pkg/studio/spec.go's shape exactly: principal_id (a FieldMapping,
+  // always present — even unmapped — so the JSON shape never drops the
+  // field entirely, since PrincipalID isn't a pointer), principal_type
+  // (defaults to "users" when that resource type is already declared —
+  // brief: "default to users if present"; a later render never re-applies
+  // this default, so clearing the dropdown deliberately sticks), an empty
+  // entitlement, and no skip_if until the user opts in (SkipIf is a
+  // pointer — absent means omitted, not an empty FieldMapping).
+  function newGrantMapping(rt) {
+    var principalType = "";
+    var hasUsers = state.resource_types.some(function (r) { return r.id === "users"; });
+    if (hasUsers) principalType = "users";
+    return { principal_id: { field: "principal_id" }, principal_type: principalType, entitlement: "" };
   }
 
   // GRANT_VAR_TOKEN_RE mirrors pkg/studio/server/run.go's tokenRegex exactly
@@ -1865,10 +1915,13 @@
   // given tab's query text / field-mapping array live on a resource type.
   // "list" is fully wired today; "entitlements" is wired far enough (query
   // mode's own query + fields) for Task 4 to reuse runQuery/renderMappingTable
-  // without re-deriving this. "grants" (Task 5) points at grants[0] via
-  // ensureGrant() — v1 authors exactly one grant per resource type, so
-  // unlike list/entitlements this lazily creates that single record on
-  // first access rather than assuming it already exists.
+  // without re-deriving this. "grants" points at grants[0].query via
+  // ensureGrant() — the query itself is still singular per resource type —
+  // but grants[0] no longer has a fields[] array (fieldsFor has no "grants"
+  // case): each grants[0].mappings[] row owns its own independent
+  // principal_id/skip_if FieldMapping instead (see buildGrantFieldControl),
+  // since a shared fields[] array keyed by field name can't represent N
+  // rows all needing their own "principal_id".
   function queryForTab(rt, tab) {
     if (tab === "list") return (rt.list && rt.list.query) || "";
     if (tab === "entitlements") return (rt.entitlements && rt.entitlements.query) || "";
@@ -1882,7 +1935,6 @@
       if (!rt.entitlements.fields) rt.entitlements.fields = [];
       return rt.entitlements.fields;
     }
-    if (tab === "grants") return ensureGrant(rt).fields;
     return [];
   }
 
@@ -2852,28 +2904,40 @@
   }
 
   // -----------------------------------------------------------------------
-  // Grants tab (Task 5) — resource-scoped: a who-has-what query bound to
-  // the CURRENT resource via a ?<var> token (resource_var), a principal_type
-  // + entitlement this grant targets, and the principal_id/skip_if mapping
-  // widget. v1 authors exactly ONE grant per resource type (grants[0] via
-  // ensureGrant()). Reuses runQuery/renderResultsPanel/renderMappingTable
-  // exactly as List/Entitlements do, since queryForTab/fieldsFor (above)
-  // now understand the "grants" tab key.
+  // Grants tab — resource-scoped: ONE who-has-what query per resource type
+  // (grants[0], via ensureGrant()) bound to the CURRENT resource via a
+  // ?<var> token (resource_var), fanning out to 1..N principal MAPPINGS
+  // (grants[0].mappings[] — pkg/studio/spec.go's GrantSpec/GrantMapping).
+  // Each mapping row is its own principal_id (FieldMapping) + principal_type
+  // + entitlement + optional skip_if (FieldMapping) — the exact shape the
+  // engine now requires; the old flat {principal_type,entitlement,fields}
+  // shape is gone (the engine silently produced zero mappings from it).
+  // Reuses runQuery/renderResultsPanel exactly as List/Entitlements do,
+  // since queryForTab (above) still understands the "grants" tab key for
+  // the shared query text; the per-row principal_id/skip_if controls are
+  // NOT built via renderMappingTable/fieldsFor (that machinery keys off a
+  // single shared fields[] array by field name — unusable once N mapping
+  // rows all need their own independent "principal_id"/"skip_if" entry), so
+  // buildGrantFieldControl() below reimplements the same column+recipe+
+  // preview widget scoped to one mapping object instead.
   // -----------------------------------------------------------------------
 
-  // renderEntitlementPicker() fills `container` with the control for
-  // grants[0].entitlement — the entitlement id/slug this grant targets.
-  // When the type has a static entitlements list, offers those ids in a
-  // <select> (plus a "Custom…" escape hatch, since a grant may still target
-  // an id that isn't in that list, e.g. one added afterward); otherwise
-  // (query mode, or no entitlements defined yet) falls back to a plain text
-  // input, since query-derived entitlement ids/slugs aren't known statically
-  // at author time.
-  function renderEntitlementPicker(container, rt, g) {
+  // renderEntitlementPicker() fills `container` with the control for one
+  // mapping row's `entitlement` — the entitlement id/slug that row grants.
+  // `idSuffix` (e.g. "-2") disambiguates element ids across the multiple
+  // mapping rows that can now be rendered at once (grants[0].mappings[] is
+  // 1..N). When the type has a static entitlements list, offers those ids
+  // in a <select> (plus a "Custom…" escape hatch, since a grant may still
+  // target an id that isn't in that list, e.g. one added afterward);
+  // otherwise (query mode, or no entitlements defined yet) falls back to a
+  // plain text input, since query-derived entitlement ids/slugs aren't
+  // known statically at author time.
+  function renderEntitlementPicker(container, rt, g, idSuffix) {
     container.innerHTML = "";
+    var elId = "grant-entitlement" + (idSuffix || "");
     var label = document.createElement("label");
     label.className = "field-label";
-    label.setAttribute("for", "grant-entitlement");
+    label.setAttribute("for", elId);
     label.textContent = "Entitlement";
     container.appendChild(label);
 
@@ -2883,7 +2947,7 @@
     if (staticRows.length > 0) {
       var select = document.createElement("select");
       select.className = "control grant-field";
-      select.id = "grant-entitlement";
+      select.id = elId;
       select.setAttribute("data-grant-entitlement", "");
       var blank = document.createElement("option");
       blank.value = "";
@@ -2934,7 +2998,7 @@
       var input = document.createElement("input");
       input.className = "control grant-field";
       input.type = "text";
-      input.id = "grant-entitlement";
+      input.id = elId;
       input.placeholder = "entitlement id/slug this grant targets";
       input.setAttribute("data-grant-entitlement", "");
       input.value = g.entitlement || "";
@@ -2953,12 +3017,299 @@
     }
   }
 
+  // previewGrantMappingField() mirrors previewFieldRow()'s (Task 3)
+  // placeholder / live-preview logic, but operates on a FieldMapping ENTRY
+  // directly rather than looking it up via findFieldMapping() by field
+  // name — multiple mapping rows all use the same field names
+  // ("principal_id", "skip_if"), so the shared-array lookup buildMappingRow
+  // relies on doesn't apply here. previewSpan._seq guards against an
+  // in-flight request from an earlier keystroke overwriting a later one,
+  // exactly as previewFieldRow does.
+  function previewGrantMappingField(rt, entry, previewSpan) {
+    previewSpan.classList.remove("map-preview-error");
+    var lr = getLastRun(rt.id, "grants");
+    if (!lr || !lr.columns || !lr.columns.length) { previewSpan.textContent = "run the query to preview"; return; }
+    if (!lr.rows || !lr.rows.length) { previewSpan.textContent = "no sample row"; return; }
+    if (!entry || (!entry.column && !entry.transform)) { previewSpan.textContent = "—"; return; }
+
+    previewSpan.textContent = "…";
+    previewSpan._seq = (previewSpan._seq || 0) + 1;
+    var mySeq = previewSpan._seq;
+    previewField(rt.id, "grants", entry).then(function (res) {
+      if (previewSpan._seq !== mySeq) return; // superseded by a newer edit
+      if (!res || res.skipped) { previewSpan.textContent = "—"; return; }
+      if (res.error) {
+        previewSpan.textContent = res.error;
+        previewSpan.classList.add("map-preview-error");
+        return;
+      }
+      previewSpan.textContent = "→ " + (res.value !== undefined ? res.value : "");
+    });
+  }
+
+  // buildGrantFieldControl() renders one mapping row's principal_id or
+  // skip_if control: a column <select> sourced from the grants query's
+  // last run + a recipe <select> (+ its args) + a live preview — the same
+  // column+recipe+preview trio buildMappingRow() builds for List/
+  // Entitlements, but reading/writing `mapping[key]` (a bare FieldMapping)
+  // directly instead of going through fieldsFor()/upsertFieldMapping()
+  // (which key a SHARED fields[] array by field name — every mapping row
+  // would collide on the same "principal_id"/"skip_if" key, so that
+  // machinery can't be reused as-is here). `def.required` controls what an
+  // emptied control commits: principal_id always stays a (possibly-
+  // unmapped) FieldMapping stub, since GrantMapping.PrincipalID isn't a
+  // pointer and the shape requires it present; skip_if is deleted outright
+  // so its optional `*FieldMapping` stays nil/omitted rather than an empty
+  // object.
+  function buildGrantFieldControl(container, rt, mapping, key, def) {
+    container.innerHTML = "";
+    container.setAttribute("data-grant-map-field", key);
+    var fm = mapping[key] || null;
+    var lr = getLastRun(rt.id, "grants");
+    var columns = (lr && lr.columns) || [];
+
+    var label = document.createElement("label");
+    label.className = "field-label";
+    label.textContent = def.label + (def.hint ? " " + def.hint : "");
+    if (def.required) {
+      var star = document.createElement("span");
+      star.className = "field-required";
+      star.title = "Required";
+      star.textContent = " *";
+      label.appendChild(star);
+    }
+    container.appendChild(label);
+
+    var controlsRow = document.createElement("div");
+    controlsRow.className = "grant-map-field-controls";
+
+    var colSelect = document.createElement("select");
+    colSelect.className = "control";
+    colSelect.setAttribute("data-map-column", "");
+    var noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = "— none —";
+    colSelect.appendChild(noneOpt);
+    columns.forEach(function (c) {
+      var o = document.createElement("option");
+      o.value = c;
+      o.textContent = c;
+      colSelect.appendChild(o);
+    });
+    colSelect.value = (fm && fm.column) || "";
+    controlsRow.appendChild(colSelect);
+
+    var recipeSelect = document.createElement("select");
+    recipeSelect.className = "control";
+    recipeSelect.setAttribute("data-map-recipe", "");
+    RECIPES.forEach(function (r) {
+      var o = document.createElement("option");
+      o.value = r.value;
+      o.textContent = r.label;
+      recipeSelect.appendChild(o);
+    });
+    recipeSelect.value = (fm && fm.transform && fm.transform.recipe) || "";
+    controlsRow.appendChild(recipeSelect);
+    container.appendChild(controlsRow);
+
+    var argsContainer = document.createElement("div");
+    argsContainer.className = "recipe-args";
+    container.appendChild(argsContainer);
+
+    var previewSpan = document.createElement("span");
+    previewSpan.className = "map-preview";
+    previewSpan.setAttribute("data-map-preview", "");
+    container.appendChild(previewSpan);
+
+    function commit() {
+      var column = colSelect.value || "";
+      var transform = readTransformFromArgs(recipeSelect.value, argsContainer);
+      if (!column && !transform) {
+        if (def.required) {
+          mapping[key] = { field: key };
+        } else {
+          delete mapping[key];
+        }
+      } else {
+        var entry = { field: key };
+        if (column) entry.column = column;
+        if (transform) entry.transform = transform;
+        mapping[key] = entry;
+      }
+      previewGrantMappingField(rt, mapping[key], previewSpan);
+    }
+
+    renderRecipeArgs(argsContainer, recipeSelect.value, fm && fm.transform, commit);
+    colSelect.addEventListener("change", commit);
+    recipeSelect.addEventListener("change", function () {
+      renderRecipeArgs(argsContainer, recipeSelect.value, null, commit);
+      commit();
+    });
+
+    previewGrantMappingField(rt, fm, previewSpan);
+  }
+
+  // renderGrantMappingRow() renders one full grants[0].mappings[idx] card:
+  // the principal_id column/recipe/preview control, the principal_type
+  // dropdown (sourced from currently-declared resource-type ids, defaulting
+  // to "users" when present — brief), the entitlement picker (reused
+  // as-is: GrantMapping and the old flat grant shape both just have an
+  // `.entitlement` string field), and an optional/collapsible skip_if
+  // hidden behind a toggle until the row already has one (or the user asks
+  // for one), since most grants don't need it. A Remove button splices
+  // this row out of g.mappings and rebuilds the whole tab (structural
+  // change, not a keystroke, so a full rebuild is safe) — every row keeps
+  // a Remove button; the "seed one row on first setup" default
+  // (ensureGrant/newGrantMapping) is what keeps the common single-
+  // principal case to zero extra clicks, not a floor on how many rows can
+  // be removed.
+  function renderGrantMappingRow(container, rt, g, idx) {
+    var mapping = g.mappings[idx];
+    var card = document.createElement("div");
+    card.className = "grant-mapping-row";
+    card.setAttribute("data-grant-mapping", "");
+    card.setAttribute("data-grant-mapping-index", String(idx));
+
+    var header = document.createElement("div");
+    header.className = "grant-mapping-row-header";
+    var title = document.createElement("span");
+    title.className = "grant-mapping-row-title";
+    title.textContent = "Mapping " + (idx + 1);
+    header.appendChild(title);
+
+    var removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn btn-danger-ghost";
+    removeBtn.setAttribute("data-remove-grant-mapping", "");
+    removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", function () {
+      g.mappings.splice(idx, 1);
+      renderRail();
+      renderGrantsTab(rt);
+    });
+    header.appendChild(removeBtn);
+    card.appendChild(header);
+
+    // --- principal_id ---------------------------------------------------
+    var pidContainer = document.createElement("div");
+    buildGrantFieldControl(pidContainer, rt, mapping, "principal_id", GRANT_FIELD_DEFS[0]);
+    card.appendChild(pidContainer);
+
+    // --- principal_type --------------------------------------------------
+    var ptSection = document.createElement("div");
+    var ptLabel = document.createElement("label");
+    ptLabel.className = "field-label";
+    ptLabel.setAttribute("for", "grant-principal-type-" + idx);
+    ptLabel.textContent = "Principal type";
+    ptSection.appendChild(ptLabel);
+    var ptSelect = document.createElement("select");
+    ptSelect.className = "control grant-field";
+    ptSelect.id = "grant-principal-type-" + idx;
+    ptSelect.setAttribute("data-grant-principal-type", "");
+    var ptBlank = document.createElement("option");
+    ptBlank.value = "";
+    ptBlank.textContent = "— select —";
+    ptSelect.appendChild(ptBlank);
+    state.resource_types.forEach(function (candidate) {
+      var o = document.createElement("option");
+      o.value = candidate.id;
+      o.textContent = candidate.name + " (" + candidate.id + ")";
+      ptSelect.appendChild(o);
+    });
+    ptSelect.value = mapping.principal_type || "";
+    ptSelect.addEventListener("change", function (evt) {
+      mapping.principal_type = evt.target.value;
+      renderRail();
+    });
+    ptSection.appendChild(ptSelect);
+    var ptHint = document.createElement("p");
+    ptHint.className = "hint";
+    ptHint.textContent = "The resource-type id of who receives this grant (usually Users).";
+    ptSection.appendChild(ptHint);
+    card.appendChild(ptSection);
+
+    // --- entitlement -------------------------------------------------
+    var entSection = document.createElement("div");
+    entSection.setAttribute("data-grant-entitlement-picker", "");
+    renderEntitlementPicker(entSection, rt, mapping, "-" + idx);
+    card.appendChild(entSection);
+
+    // --- skip_if (optional, collapsible) --------------------------------
+    var skipSection = document.createElement("div");
+    if (mapping.skip_if) {
+      var skipContainer = document.createElement("div");
+      buildGrantFieldControl(skipContainer, rt, mapping, "skip_if", GRANT_FIELD_DEFS[1]);
+      skipSection.appendChild(skipContainer);
+      var removeSkipBtn = document.createElement("button");
+      removeSkipBtn.type = "button";
+      removeSkipBtn.className = "btn btn-ghost grant-skip-if-toggle";
+      removeSkipBtn.setAttribute("data-grant-skip-if-toggle", "");
+      removeSkipBtn.textContent = "Remove skip_if";
+      removeSkipBtn.addEventListener("click", function () {
+        delete mapping.skip_if;
+        renderGrantsTab(rt);
+      });
+      skipSection.appendChild(removeSkipBtn);
+    } else {
+      var addSkipBtn = document.createElement("button");
+      addSkipBtn.type = "button";
+      addSkipBtn.className = "btn btn-ghost grant-skip-if-toggle";
+      addSkipBtn.setAttribute("data-grant-skip-if-toggle", "");
+      addSkipBtn.textContent = "+ Add skip_if (optional)";
+      addSkipBtn.addEventListener("click", function () {
+        mapping.skip_if = { field: "skip_if" };
+        renderGrantsTab(rt);
+      });
+      skipSection.appendChild(addSkipBtn);
+    }
+    card.appendChild(skipSection);
+
+    container.appendChild(card);
+  }
+
+  // renderGrantMappingsSection() renders the "Principal mappings" heading,
+  // one renderGrantMappingRow() card per grants[0].mappings[] entry, and
+  // the "+ Add principal mapping" button that appends a fresh
+  // newGrantMapping() row — the only way this list grows beyond the one
+  // row ensureGrant() seeds automatically.
+  function renderGrantMappingsSection(container, rt, g) {
+    container.innerHTML = "";
+    container.setAttribute("data-grant-mappings-section", "");
+
+    var heading = document.createElement("h3");
+    heading.className = "mapping-heading grant-mappings-heading";
+    heading.textContent = "Principal mappings";
+    container.appendChild(heading);
+
+    var hint = document.createElement("p");
+    hint.className = "hint-block";
+    hint.textContent = "Each row grants one principal_type + entitlement combination to the principal_id this query returns. Most grants need only one row.";
+    container.appendChild(hint);
+
+    g.mappings.forEach(function (mapping, idx) {
+      renderGrantMappingRow(container, rt, g, idx);
+    });
+
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn btn-ghost add-grant-mapping-btn";
+    addBtn.setAttribute("data-add-grant-mapping-btn", "");
+    addBtn.textContent = "+ Add principal mapping";
+    addBtn.addEventListener("click", function () {
+      g.mappings.push(newGrantMapping(rt));
+      renderRail();
+      renderGrantsTab(rt);
+    });
+    container.appendChild(addBtn);
+  }
+
   // renderGrantsTab() is the Grants tab's entry point (called from
   // renderWorkspace()): the who-has-what query + Run, the resource-binding
   // control (detected ?<var> tokens as clickable chips, or type one in
-  // directly — either writes grants[0].resource_var), the principal_id /
-  // skip_if mapping widget, the principal_type dropdown (sourced from
-  // currently-declared resource-type ids), and the entitlement picker.
+  // directly — either writes grants[0].resource_var), and the Principal
+  // mappings section (renderGrantMappingsSection) — 1..N rows, each with
+  // its own principal_id, principal_type, entitlement, and optional
+  // skip_if.
   function renderGrantsTab(rt) {
     var g = ensureGrant(rt);
 
@@ -3096,55 +3447,10 @@
     wrap.appendChild(resultsSection);
     renderResultsPanel(resultsSection, rt, "grants");
 
-    // --- principal_id / skip_if mapping --------------------------------
-    var mappingSection = document.createElement("div");
-    wrap.appendChild(mappingSection);
-    renderMappingTable(mappingSection, {
-      rtId: rt.id,
-      tab: "grants",
-      fieldDefs: GRANT_FIELD_DEFS,
-      query: g.query,
-      allowProfileFields: false
-    });
-
-    // --- principal_type --------------------------------------------------
-    var ptSection = document.createElement("div");
-    var ptLabel = document.createElement("label");
-    ptLabel.className = "field-label";
-    ptLabel.setAttribute("for", "grant-principal-type");
-    ptLabel.textContent = "Principal type";
-    ptSection.appendChild(ptLabel);
-    var ptSelect = document.createElement("select");
-    ptSelect.className = "control grant-field";
-    ptSelect.id = "grant-principal-type";
-    ptSelect.setAttribute("data-grant-principal-type", "");
-    var ptBlank = document.createElement("option");
-    ptBlank.value = "";
-    ptBlank.textContent = "— select —";
-    ptSelect.appendChild(ptBlank);
-    state.resource_types.forEach(function (candidate) {
-      var o = document.createElement("option");
-      o.value = candidate.id;
-      o.textContent = candidate.name + " (" + candidate.id + ")";
-      ptSelect.appendChild(o);
-    });
-    ptSelect.value = g.principal_type || "";
-    ptSelect.addEventListener("change", function (evt) {
-      g.principal_type = evt.target.value;
-      renderRail();
-    });
-    ptSection.appendChild(ptSelect);
-    var ptHint = document.createElement("p");
-    ptHint.className = "hint";
-    ptHint.textContent = "The resource-type id of who receives this grant (usually Users).";
-    ptSection.appendChild(ptHint);
-    wrap.appendChild(ptSection);
-
-    // --- entitlement -------------------------------------------------
-    var entSection = document.createElement("div");
-    entSection.setAttribute("data-grant-entitlement-picker", "");
-    renderEntitlementPicker(entSection, rt, g);
-    wrap.appendChild(entSection);
+    // --- Principal mappings (1..N) --------------------------------------
+    var mappingsSection = document.createElement("div");
+    wrap.appendChild(mappingsSection);
+    renderGrantMappingsSection(mappingsSection, rt, g);
 
     body.appendChild(wrap);
   }
@@ -3869,11 +4175,14 @@
     setEntitlementsMode: setEntitlementsMode,
     renderGrantableToMultiselect: renderGrantableToMultiselect,
     ENTITLEMENT_FIELD_DEFS: ENTITLEMENT_FIELD_DEFS,
-    // Task 5 (Grants tab) — exposed so a DB-less Playwright pass can inject
-    // a fake last-run for the "grants" tab key and exercise the
-    // resource-var binding + principal_type/entitlement pickers directly.
+    // Grants tab — exposed so a DB-less Playwright pass can inject a fake
+    // last-run for the "grants" tab key and exercise the resource-var
+    // binding + the 1..N principal-mapping rows (each its own
+    // principal_id/principal_type/entitlement/skip_if) directly.
     renderGrantsTab: renderGrantsTab,
     ensureGrant: ensureGrant,
+    newGrantMapping: newGrantMapping,
+    renderGrantMappingsSection: renderGrantMappingsSection,
     extractVarTokens: extractVarTokens,
     runGrantQuery: runGrantQuery,
     GRANT_FIELD_DEFS: GRANT_FIELD_DEFS,
