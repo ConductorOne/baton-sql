@@ -718,7 +718,146 @@
     color: var(--ink-muted);
     font-size: 0.88rem;
     line-height: 1.6;
-    max-width: 60ch;
+  }
+  .tab-body .placeholder-copy { max-width: 60ch; }
+
+  /* ---------------------------------------------------------------------
+     List tab (Task 3) — query editor, results panel, column mapping.
+     ------------------------------------------------------------------- */
+  .list-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 1.6rem;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    margin-bottom: 0.35rem;
+  }
+
+  .query-editor {
+    min-height: 7.5rem;
+    resize: vertical;
+    line-height: 1.5;
+  }
+
+  .query-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.7rem;
+  }
+
+  /* Run/preview status pills reuse .status-pill's base look, adding
+     proven/stale/error color variants (unproven falls back to the base
+     muted styling, same as topbar's disconnected state). */
+  .status-pill[data-state="proven"] {
+    border-color: rgba(var(--good-rgb), 0.4);
+    background: rgba(var(--good-rgb), 0.1);
+    color: var(--good);
+  }
+  .status-pill[data-state="proven"] .dot { background: var(--good); }
+  .status-pill[data-state="stale"] {
+    border-color: rgba(var(--warn-rgb), 0.4);
+    background: rgba(var(--warn-rgb), 0.1);
+    color: var(--warn);
+  }
+  .status-pill[data-state="stale"] .dot { background: var(--warn); }
+  .status-pill[data-state="error"] {
+    border-color: rgba(var(--crit-rgb), 0.4);
+    background: rgba(var(--crit-rgb), 0.1);
+    color: var(--crit);
+  }
+  .status-pill[data-state="error"] .dot { background: var(--crit); }
+
+  /* A horizontally- AND vertically-scrolling container: results tables and
+     the mapping table can both exceed the workspace panel's width or
+     height, but must never force the page body to scroll horizontally. */
+  .table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .results-scroll { max-height: 18rem; overflow-y: auto; }
+
+  .results-table, .mapping-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+  .results-table th, .results-table td,
+  .mapping-table th, .mapping-table td {
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+  .results-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--surface-alt);
+    color: var(--ink-muted);
+    font-weight: 650;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .results-table tbody tr:last-child td,
+  .mapping-table tbody tr:last-child td { border-bottom: none; }
+  .results-table td { color: var(--ink); font-family: var(--font-mono); }
+
+  .mapping-heading {
+    font-size: 0.92rem;
+    font-weight: 650;
+    margin-bottom: 0.7rem;
+  }
+  .mapping-table thead th {
+    background: var(--surface-alt);
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .mapping-table td { white-space: normal; vertical-align: top; }
+  .mapping-table select.control, .mapping-table input.control { min-width: 11rem; }
+  .map-field-name { font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .map-field-name .field-required { color: var(--crit); }
+  .map-field-code {
+    font-size: 0.72rem;
+    color: var(--ink-muted);
+    margin-top: 0.15rem;
+  }
+  .recipe-args {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+  }
+  .recipe-arg-input { min-width: 11rem; }
+  .map-preview {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--ink);
+  }
+  .map-preview.map-preview-error { color: var(--crit); }
+
+  .add-profile-field {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.9rem;
+    max-width: 26rem;
+  }
+
+  .hint-block {
+    color: var(--ink-muted);
+    font-size: 0.82rem;
+    padding: 0.4rem 0;
   }
 
   /* Responsive: collapse the rail to a horizontal strip; wrap, never
@@ -928,7 +1067,22 @@
     connecting: false,
     restoredSession: false,
     selectedRT: null,      // id of the resource type whose workspace is open, or null
-    activeTab: "list"      // "list" | "entitlements" | "grants" — tab within the workspace
+    activeTab: "list",     // "list" | "entitlements" | "grants" — tab within the workspace
+
+    // lastRun[rtId + "/" + tab] = {query, columns, rows, rowCount, truncated, error}
+    // — the last /api/run result for that resource type's query in that tab,
+    // keyed so entitlements' own query mode (Task 4) can share the same
+    // machinery without colliding with the List tab's run. `query` records
+    // the query text AT THE TIME OF THE RUN so a later edit can be detected
+    // as "stale" without a second round-trip.
+    lastRun: {},
+
+    // extraProfileFields[rtId + "/" + tab] = ["profile.department", ...] —
+    // user-added "profile.<key>" mapping rows. Kept in ui (not state)
+    // because it's presentational: a row for an as-yet-unmapped profile key
+    // has no state.resource_types[].list.fields entry until a column or
+    // transform is actually set on it (see upsertFieldMapping).
+    extraProfileFields: {}
   };
 
   var STEPS = [
@@ -947,6 +1101,61 @@
     { name: "Groups", trait: "group" },
     { name: "Databases / Schemas / Permissions", trait: "none" },
     { name: "Applications", trait: "app" }
+  ];
+
+  // -----------------------------------------------------------------------
+  // Canonical field vocabulary + recipes (List tab, Task 3) — these MUST
+  // match the exact strings pkg/studio/generate.go's genResourceType()
+  // switches on (id/display_name/description/emails/status/account_type/
+  // login/last_login/status_details/manager_id/manager_email/employee_ids,
+  // plus "profile.<key>" for anything else) and the recipe names
+  // pkg/studio/recipes.go's CompileTransform() switches on. A field or
+  // recipe string that doesn't match those switches exactly is silently
+  // dropped (default case) rather than erroring, so an off-by-one-string
+  // mismatch here would fail invisibly at /api/generate time, not here.
+  var USER_FIELD_DEFS = [
+    { field: "id", label: "ID", required: true },
+    { field: "display_name", label: "Display name", required: true },
+    { field: "emails", label: "Email", hint: "→ emails[]" },
+    { field: "status", label: "Status" },
+    { field: "account_type", label: "Account type" },
+    { field: "login", label: "Login" },
+    { field: "last_login", label: "Last login" },
+    { field: "manager_id", label: "Manager ID" },
+    { field: "manager_email", label: "Manager email" },
+    { field: "employee_ids", label: "Employee IDs" }
+  ];
+
+  var GENERIC_FIELD_DEFS = [
+    { field: "id", label: "ID", required: true },
+    { field: "display_name", label: "Display name", required: true },
+    { field: "description", label: "Description" }
+  ];
+
+  // fieldDefsForTrait() returns the canonical field defs for a resource
+  // type's trait: the fuller Users vocabulary for trait "user", and the
+  // generic id/display_name/description set for everything else
+  // (group/role/app/none) per the brief.
+  function fieldDefsForTrait(trait) {
+    var base = trait === "user" ? USER_FIELD_DEFS : GENERIC_FIELD_DEFS;
+    return base.map(function (d) {
+      return { field: d.field, label: d.label, required: !!d.required, hint: d.hint || "" };
+    });
+  }
+
+  // RECIPES lists the transform choices offered in the mapping widget's
+  // recipe <select>, in the value/label shape it consumes. Values are the
+  // exact studio.Recipe* constants from pkg/studio/recipes.go.
+  var RECIPES = [
+    { value: "", label: "— none —" },
+    { value: "slugify", label: "Slugify" },
+    { value: "title_case", label: "Title case" },
+    { value: "coerce_string", label: "Coerce to string" },
+    { value: "null_default", label: "Null default" },
+    { value: "composite_id", label: "Composite ID…" },
+    { value: "status_ternary", label: "Status ternary…" },
+    { value: "account_type_ternary", label: "Account-type ternary…" },
+    { value: "raw", label: "Raw CEL…" }
   ];
 
   // -----------------------------------------------------------------------
@@ -1031,12 +1240,20 @@
     });
   }
 
-  // rtTabState() derives a per-tab dot state from state alone (no server
-  // round-trip yet — Tasks 3-5 will layer in proven/stale/error signals from
-  // actual runs). "empty" = nothing authored; "draft" = something authored
-  // but not yet validated.
+  // rtTabState() derives a per-tab dot state from state (+ ui.lastRun for
+  // List, Task 3's live-run signal). "empty" = nothing authored; "draft" =
+  // authored but not (yet) proven; "ok" = proven by a successful run whose
+  // columns match the current query; "error" = last run for this query
+  // failed. Tasks 4-5 will layer the same proven/stale/error signals into
+  // entitlements/grants once those tabs gain their own runs.
   function rtTabState(rt, tab) {
-    if (tab === "list") return (rt.list && rt.list.query) ? "draft" : "empty";
+    if (tab === "list") {
+      if (!rt.list || !rt.list.query) return "empty";
+      var status = runStatusLabel(rt, "list");
+      if (status.state === "error") return "error";
+      if (status.state === "proven") return "ok";
+      return "draft"; // unproven or stale, but a query is authored
+    }
     if (tab === "entitlements") return (rt.entitlements && rt.entitlements.mode && rt.entitlements.mode !== "none") ? "draft" : "empty";
     if (tab === "grants") return (rt.grants && rt.grants.length > 0) ? "draft" : "empty";
     return "empty";
@@ -1185,12 +1402,21 @@
       document.getElementById("tab-" + tab).setAttribute("aria-selected", ui.activeTab === tab ? "true" : "false");
     });
 
+    if (ui.activeTab === "list") {
+      renderListTab(rt);
+      return;
+    }
+
     var messages = {
-      list: "List mapping — coming in the next step. You'll write the SQL query that lists " + rt.name.toLowerCase() + " and map its columns to fields.",
       entitlements: "Entitlements — coming in a later step. You'll define what can be granted on " + rt.name.toLowerCase() + " (a static list, or one derived from a query).",
       grants: "Grants — coming in a later step. You'll define who has which entitlement, scoped to a resource of this type."
     };
-    document.getElementById("tab-body").textContent = messages[ui.activeTab] || "";
+    var body = document.getElementById("tab-body");
+    body.innerHTML = "";
+    var p = document.createElement("p");
+    p.className = "placeholder-copy";
+    p.textContent = messages[ui.activeTab] || "";
+    body.appendChild(p);
   }
 
   function render() {
@@ -1200,6 +1426,539 @@
     renderStepPanels();
     renderDeclarePanel();
     renderWorkspace();
+  }
+
+  // -----------------------------------------------------------------------
+  // List tab (Task 3) — query editor, live run, column→field mapping with
+  // recipes and live preview. The mapping widget (renderMappingTable +
+  // previewField) is written to be reusable: Tasks 4-5 call it again for
+  // Entitlements' query mode and Grants' field mappings.
+  // -----------------------------------------------------------------------
+
+  // mapKey() namespaces both ui.lastRun and ui.extraProfileFields by
+  // resource type + tab, so entitlements' own query/run (Task 4) can share
+  // this same machinery without colliding with the List tab's.
+  function mapKey(rtId, tab) { return rtId + "/" + tab; }
+
+  function getLastRun(rtId, tab) { return ui.lastRun[mapKey(rtId, tab)] || null; }
+
+  // queryForTab()/fieldsFor() are the only two places that know where a
+  // given tab's query text / field-mapping array live on a resource type.
+  // "list" is fully wired today; "entitlements" is wired far enough (query
+  // mode's own query + fields) for Task 4 to reuse runQuery/renderMappingTable
+  // without re-deriving this. "grants" isn't handled here since each grant is
+  // its own query with its own fields array (a list, not a single slot) —
+  // Task 5 will need its own accessor rather than extending this one.
+  function queryForTab(rt, tab) {
+    if (tab === "list") return (rt.list && rt.list.query) || "";
+    if (tab === "entitlements") return (rt.entitlements && rt.entitlements.query) || "";
+    return "";
+  }
+
+  function fieldsFor(rt, tab) {
+    if (tab === "list") return rt.list.fields;
+    if (tab === "entitlements") {
+      if (!rt.entitlements.fields) rt.entitlements.fields = [];
+      return rt.entitlements.fields;
+    }
+    return [];
+  }
+
+  function findFieldMapping(rt, tab, field) {
+    var fields = fieldsFor(rt, tab);
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].field === field) return fields[i];
+    }
+    return null;
+  }
+
+  // upsertFieldMapping() is the single place state.resource_types[].list.fields
+  // (or .entitlements.fields) gets mutated: an entry with neither a column
+  // nor a transform is removed outright (mapping back to "unmapped") rather
+  // than left behind as an empty {field:"..."} stub.
+  function upsertFieldMapping(rt, tab, field, column, transform) {
+    var fields = fieldsFor(rt, tab);
+    var idx = -1;
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i].field === field) { idx = i; break; }
+    }
+    if (!column && !transform) {
+      if (idx >= 0) fields.splice(idx, 1);
+      return null;
+    }
+    var entry = { field: field };
+    if (column) entry.column = column;
+    if (transform) entry.transform = transform;
+    if (idx >= 0) fields[idx] = entry; else fields.push(entry);
+    return entry;
+  }
+
+  function splitCSV(s) {
+    return String(s || "")
+      .split(",")
+      .map(function (v) { return v.trim(); })
+      .filter(function (v) { return v.length > 0; });
+  }
+
+  // readTransformFromArgs() reads whatever recipe-args inputs renderRecipeArgs
+  // built inside argsContainer and assembles the studio.Transform{recipe,args,
+  // raw_cel} shape the server expects — the exact inverse of renderRecipeArgs.
+  function readTransformFromArgs(recipe, argsContainer) {
+    if (!recipe) return null;
+    if (recipe === "composite_id") {
+      var colsEl = argsContainer.querySelector("[data-map-arg-columns]");
+      var sepEl = argsContainer.querySelector("[data-map-arg-sep]");
+      return { recipe: recipe, args: { columns: splitCSV(colsEl && colsEl.value), sep: (sepEl && sepEl.value) || "." } };
+    }
+    if (recipe === "status_ternary") {
+      var enEl = argsContainer.querySelector("[data-map-arg-enabled]");
+      return { recipe: recipe, args: { enabled: splitCSV(enEl && enEl.value) } };
+    }
+    if (recipe === "account_type_ternary") {
+      var pfxEl = argsContainer.querySelector("[data-map-arg-prefix]");
+      return { recipe: recipe, args: { system_prefix: (pfxEl && pfxEl.value) || "" } };
+    }
+    if (recipe === "raw") {
+      var rawEl = argsContainer.querySelector("[data-map-arg-raw-cel]");
+      return { recipe: recipe, raw_cel: (rawEl && rawEl.value) || "" };
+    }
+    // slugify | title_case | coerce_string | null_default take no args.
+    return { recipe: recipe };
+  }
+
+  // renderRecipeArgs() (re)populates argsContainer with whatever extra inputs
+  // `recipe` needs, seeded from existingTransform when the row already has
+  // one. onInput fires on every keystroke so the live preview can keep up
+  // without requiring the row to lose focus via a full rebuild.
+  function renderRecipeArgs(argsContainer, recipe, existingTransform, onInput) {
+    argsContainer.innerHTML = "";
+    function addInput(placeholder, value, attr) {
+      var input = document.createElement("input");
+      input.className = "control recipe-arg-input";
+      input.type = "text";
+      input.placeholder = placeholder;
+      input.value = value || "";
+      input.setAttribute(attr, "");
+      input.addEventListener("input", onInput);
+      argsContainer.appendChild(input);
+      return input;
+    }
+    var args = (existingTransform && existingTransform.args) || {};
+    if (recipe === "composite_id") {
+      addInput("Columns, in order (comma-separated)", (args.columns || []).join(","), "data-map-arg-columns");
+      addInput("Separator", args.sep || ".", "data-map-arg-sep");
+    } else if (recipe === "status_ternary") {
+      addInput("Enabled values (comma-separated)", (args.enabled || []).join(","), "data-map-arg-enabled");
+    } else if (recipe === "account_type_ternary") {
+      addInput("System-account prefix", args.system_prefix || "", "data-map-arg-prefix");
+    } else if (recipe === "raw") {
+      var ta = document.createElement("textarea");
+      ta.className = "control mono recipe-arg-input";
+      ta.rows = 2;
+      ta.placeholder = "CEL expression, e.g. .status == 'A' ? 'enabled' : 'disabled'";
+      ta.value = (existingTransform && existingTransform.raw_cel) || "";
+      ta.setAttribute("data-map-arg-raw-cel", "");
+      ta.addEventListener("input", onInput);
+      argsContainer.appendChild(ta);
+    }
+  }
+
+  // buildRowObject() zips a /api/run result's columns+one row into the
+  // {col: val} shape POST /api/preview expects.
+  function buildRowObject(columns, row) {
+    var obj = {};
+    if (!columns || !row) return obj;
+    columns.forEach(function (c, i) { obj[c] = row[i]; });
+    return obj;
+  }
+
+  // previewField() is the reusable half of live preview: given a last-run
+  // result for rtId/tab and a well-formed {field,column,transform} entry, it
+  // calls POST /api/preview against the first returned row and resolves the
+  // server's {value, error} response. It resolves {skipped:true} (never
+  // rejects) when there's nothing to preview yet — no run, no rows, or an
+  // unmapped field — so callers never need a try/catch.
+  async function previewField(rtId, tab, fieldEntry) {
+    var lr = getLastRun(rtId, tab);
+    if (!lr || !lr.columns || !lr.columns.length || !lr.rows || !lr.rows.length) return { skipped: true };
+    if (!fieldEntry || (!fieldEntry.column && !fieldEntry.transform)) return { skipped: true };
+    var row = buildRowObject(lr.columns, lr.rows[0]);
+    return api("/api/preview", { field: fieldEntry, row: row });
+  }
+
+  // previewFieldRow() drives one mapping row's preview <span>: it resolves
+  // the right placeholder text for "no run yet" / "no rows", and otherwise
+  // fires previewField() and writes the result in. previewSpan._seq guards
+  // against an in-flight request from an earlier keystroke overwriting a
+  // later one (scoped to this span, not global, so other rows' previews
+  // aren't blocked while one is in flight).
+  function previewFieldRow(rt, tab, field, previewSpan) {
+    var fm = findFieldMapping(rt, tab, field);
+    previewSpan.classList.remove("map-preview-error");
+    if (!fm) { previewSpan.textContent = "—"; return; }
+    var lr = getLastRun(rt.id, tab);
+    if (!lr || !lr.columns || !lr.columns.length) { previewSpan.textContent = "run the query to preview"; return; }
+    if (!lr.rows || !lr.rows.length) { previewSpan.textContent = "no sample row"; return; }
+
+    previewSpan.textContent = "…";
+    previewSpan._seq = (previewSpan._seq || 0) + 1;
+    var mySeq = previewSpan._seq;
+    previewField(rt.id, tab, fm).then(function (res) {
+      if (previewSpan._seq !== mySeq) return; // superseded by a newer edit
+      if (!res || res.skipped) { previewSpan.textContent = "—"; return; }
+      if (res.error) {
+        previewSpan.textContent = res.error;
+        previewSpan.classList.add("map-preview-error");
+        return;
+      }
+      previewSpan.textContent = "→ " + (res.value !== undefined ? res.value : "");
+    });
+  }
+
+  // buildMappingRow() populates one <tr data-map-field="..."> in place: a
+  // read-only field label, a column <select> sourced from the last run's
+  // columns, a recipe <select> (+ its args, via renderRecipeArgs), and a
+  // live preview cell. Every edit upserts state via upsertFieldMapping and
+  // re-fires the preview; only a recipe change rebuilds the args sub-form
+  // (its shape depends on the recipe), so typing in an arg input or picking
+  // a column never rebuilds the row's DOM out from under the user.
+  function buildMappingRow(tr, rt, tab, def) {
+    tr.innerHTML = "";
+    tr.setAttribute("data-map-field", def.field);
+    var fm = findFieldMapping(rt, tab, def.field);
+    var lr = getLastRun(rt.id, tab);
+    var columns = (lr && lr.columns) || [];
+
+    var tdField = document.createElement("td");
+    tdField.className = "map-field-name";
+    tdField.appendChild(document.createTextNode(def.label + (def.hint ? " " + def.hint : "")));
+    if (def.required) {
+      var star = document.createElement("span");
+      star.className = "field-required";
+      star.title = "Required";
+      star.textContent = " *";
+      tdField.appendChild(star);
+    }
+    var code = document.createElement("div");
+    code.className = "map-field-code mono";
+    code.textContent = def.field;
+    tdField.appendChild(code);
+    tr.appendChild(tdField);
+
+    var tdColumn = document.createElement("td");
+    var colSelect = document.createElement("select");
+    colSelect.className = "control";
+    colSelect.setAttribute("data-map-column", "");
+    var noneOpt = document.createElement("option");
+    noneOpt.value = "";
+    noneOpt.textContent = "— none —";
+    colSelect.appendChild(noneOpt);
+    columns.forEach(function (c) {
+      var o = document.createElement("option");
+      o.value = c;
+      o.textContent = c;
+      colSelect.appendChild(o);
+    });
+    colSelect.value = (fm && fm.column) || "";
+    tdColumn.appendChild(colSelect);
+    tr.appendChild(tdColumn);
+
+    var tdTransform = document.createElement("td");
+    var recipeSelect = document.createElement("select");
+    recipeSelect.className = "control";
+    recipeSelect.setAttribute("data-map-recipe", "");
+    RECIPES.forEach(function (r) {
+      var o = document.createElement("option");
+      o.value = r.value;
+      o.textContent = r.label;
+      recipeSelect.appendChild(o);
+    });
+    recipeSelect.value = (fm && fm.transform && fm.transform.recipe) || "";
+    tdTransform.appendChild(recipeSelect);
+
+    var argsContainer = document.createElement("div");
+    argsContainer.className = "recipe-args";
+    tdTransform.appendChild(argsContainer);
+    tr.appendChild(tdTransform);
+
+    var tdPreview = document.createElement("td");
+    var previewSpan = document.createElement("span");
+    previewSpan.className = "map-preview";
+    previewSpan.setAttribute("data-map-preview", "");
+    tdPreview.appendChild(previewSpan);
+    tr.appendChild(tdPreview);
+
+    function commit() {
+      var column = colSelect.value || "";
+      var transform = readTransformFromArgs(recipeSelect.value, argsContainer);
+      upsertFieldMapping(rt, tab, def.field, column, transform);
+      previewFieldRow(rt, tab, def.field, previewSpan);
+    }
+
+    renderRecipeArgs(argsContainer, recipeSelect.value, fm && fm.transform, commit);
+    colSelect.addEventListener("change", commit);
+    recipeSelect.addEventListener("change", function () {
+      renderRecipeArgs(argsContainer, recipeSelect.value, null, commit);
+      commit();
+    });
+
+    previewFieldRow(rt, tab, def.field, previewSpan);
+  }
+
+  // renderMappingTable() — the reusable mapping widget. Renders one row per
+  // fieldDefs entry plus any "profile.<key>" rows the user has added for
+  // this rtId/tab (tracked in ui.extraProfileFields, and re-derived from any
+  // already-mapped profile.* fields so injected/restored state round-trips).
+  // opts: {rtId, tab, fieldDefs, query} — `query` isn't read directly (the
+  // column list already reflects the last run), it documents the query this
+  // mapping is FOR, for callers/tests that want to assert consistency.
+  function renderMappingTable(container, opts) {
+    var rt = state.resource_types.find(function (r) { return r.id === opts.rtId; });
+    container.innerHTML = "";
+    if (!rt) return;
+
+    var heading = document.createElement("h3");
+    heading.className = "mapping-heading";
+    heading.textContent = "Map columns";
+    container.appendChild(heading);
+
+    var key = mapKey(opts.rtId, opts.tab);
+    var extra = (ui.extraProfileFields[key] || []).slice();
+    fieldsFor(rt, opts.tab).forEach(function (fm) {
+      if (fm.field.indexOf("profile.") === 0 && extra.indexOf(fm.field) < 0) extra.push(fm.field);
+    });
+    ui.extraProfileFields[key] = extra;
+
+    var defs = opts.fieldDefs.concat(extra.map(function (f) {
+      return { field: f, label: f.slice("profile.".length), required: false, hint: "" };
+    }));
+
+    var scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    var table = document.createElement("table");
+    table.className = "mapping-table";
+    var thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th>Field</th><th>Column</th><th>Transform</th><th>Preview</th></tr>";
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    defs.forEach(function (def) {
+      var tr = document.createElement("tr");
+      tbody.appendChild(tr);
+      buildMappingRow(tr, rt, opts.tab, def);
+    });
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    container.appendChild(scroll);
+
+    var addRow = document.createElement("div");
+    addRow.className = "add-profile-field";
+    var addInput = document.createElement("input");
+    addInput.className = "control";
+    addInput.type = "text";
+    addInput.placeholder = "profile key, e.g. department";
+    addInput.setAttribute("data-add-profile-input", "");
+    var addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn btn-ghost";
+    addBtn.setAttribute("data-add-profile-btn", "");
+    addBtn.textContent = "+ Add profile field";
+    addBtn.addEventListener("click", function () {
+      var raw = (addInput.value || "").trim();
+      if (!raw) return;
+      var field = "profile." + raw;
+      if (ui.extraProfileFields[key].indexOf(field) < 0) ui.extraProfileFields[key].push(field);
+      renderMappingTable(container, opts);
+    });
+    addRow.appendChild(addInput);
+    addRow.appendChild(addBtn);
+    container.appendChild(addRow);
+  }
+
+  // runStatusLabel() derives the status pill's {state, text} from ui.lastRun,
+  // comparing the run's captured query text against the tab's current query
+  // to detect "stale" (edited-since-run) without another round-trip.
+  function runStatusLabel(rt, tab) {
+    var lr = getLastRun(rt.id, tab);
+    if (!lr) return { state: "unproven", text: "Unproven" };
+    if (lr.error) return { state: "error", text: "Error: " + lr.error };
+    if (lr.query !== queryForTab(rt, tab)) return { state: "stale", text: "Stale — query changed since last run" };
+    var text = "Proven · " + lr.rowCount + (lr.rowCount === 1 ? " row" : " rows");
+    if (lr.truncated) text += " · truncated";
+    return { state: "proven", text: text };
+  }
+
+  function applyRunStatus(pillEl, rt, tab) {
+    var status = runStatusLabel(rt, tab);
+    pillEl.setAttribute("data-state", status.state);
+    var textEl = pillEl.querySelector(".status-text");
+    if (textEl) textEl.textContent = status.text;
+  }
+
+  // renderResultsPanel() shows the last run's columns+rows as a table that
+  // scrolls inside its own container (never the page body), or the
+  // appropriate empty/error state when there isn't one yet.
+  function renderResultsPanel(container, rt, tab) {
+    container.innerHTML = "";
+    var lr = getLastRun(rt.id, tab);
+    if (!lr) {
+      var empty = document.createElement("p");
+      empty.className = "hint-block";
+      empty.textContent = "Run the query to preview its columns and sample rows.";
+      container.appendChild(empty);
+      return;
+    }
+    if (lr.error) {
+      var err = document.createElement("div");
+      err.className = "inline-error visible";
+      err.textContent = lr.error;
+      container.appendChild(err);
+      return;
+    }
+    if (!lr.columns.length) {
+      var noCols = document.createElement("p");
+      noCols.className = "hint-block";
+      noCols.textContent = "Query ran successfully but returned no columns.";
+      container.appendChild(noCols);
+      return;
+    }
+    if (!lr.rows.length) {
+      var noRows = document.createElement("p");
+      noRows.className = "hint-block";
+      noRows.textContent = "Query ran successfully but returned no rows — mapping preview needs at least one sample row.";
+      container.appendChild(noRows);
+      return;
+    }
+
+    var scroll = document.createElement("div");
+    scroll.className = "table-scroll results-scroll";
+    var table = document.createElement("table");
+    table.className = "results-table";
+    var thead = document.createElement("thead");
+    var headRow = document.createElement("tr");
+    lr.columns.forEach(function (c) {
+      var th = document.createElement("th");
+      th.textContent = c;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    lr.rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      row.forEach(function (cell) {
+        var td = document.createElement("td");
+        td.textContent = (cell === null || cell === undefined) ? "" : String(cell);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    container.appendChild(scroll);
+  }
+
+  // runQuery() POSTs the tab's current query to /api/run, records the
+  // result (or error) in ui.lastRun, and — only if the user hasn't
+  // navigated away from this rt/tab while the request was in flight —
+  // re-renders the workspace and rail so the results panel, mapping
+  // dropdowns, and dot state all pick up the new run.
+  async function runQuery(rtId, tab) {
+    var rt = state.resource_types.find(function (r) { return r.id === rtId; });
+    if (!rt) return;
+    var query = queryForTab(rt, tab);
+    var key = mapKey(rtId, tab);
+
+    var runBtn = document.getElementById("list-run-btn");
+    if (runBtn && tab === "list") runBtn.disabled = true;
+
+    var res = await api("/api/run", { query: query });
+
+    if (res && res.error) {
+      ui.lastRun[key] = { query: query, error: res.error, columns: [], rows: [], rowCount: 0, truncated: false };
+    } else {
+      ui.lastRun[key] = {
+        query: query,
+        columns: (res && res.columns) || [],
+        rows: (res && res.rows) || [],
+        rowCount: (res && typeof res.row_count === "number") ? res.row_count : ((res && res.rows) || []).length,
+        truncated: !!(res && res.truncated)
+      };
+    }
+
+    if (runBtn && tab === "list") runBtn.disabled = false;
+    if (ui.selectedRT === rtId && ui.activeTab === tab) renderWorkspace();
+    renderRail();
+  }
+
+  // renderListTab() builds the List tab's whole body: query editor + Run,
+  // results panel, and the mapping table. Rebuilt on every renderWorkspace()
+  // call for this tab, which is fine because the query textarea's own
+  // "input" handler mutates state directly and only touches the status pill
+  // + rail (never re-renders the tab body), so typing never loses focus.
+  function renderListTab(rt) {
+    var body = document.getElementById("tab-body");
+    body.innerHTML = "";
+
+    var wrap = document.createElement("div");
+    wrap.className = "list-tab";
+
+    var querySection = document.createElement("div");
+    var qLabel = document.createElement("label");
+    qLabel.className = "field-label";
+    qLabel.setAttribute("for", "list-query-editor");
+    qLabel.textContent = "SQL query";
+    var qTextarea = document.createElement("textarea");
+    qTextarea.className = "control mono query-editor";
+    qTextarea.id = "list-query-editor";
+    qTextarea.placeholder = "SELECT id, ... FROM " + (rt.name ? rt.name.toLowerCase() : "your_table");
+    qTextarea.value = rt.list.query || "";
+
+    var actions = document.createElement("div");
+    actions.className = "query-actions";
+    var runBtn = document.createElement("button");
+    runBtn.type = "button";
+    runBtn.className = "btn btn-primary";
+    runBtn.id = "list-run-btn";
+    runBtn.textContent = "Run";
+    runBtn.addEventListener("click", function () { runQuery(rt.id, "list"); });
+
+    var statusPill = document.createElement("span");
+    statusPill.className = "status-pill";
+    var statusDot = document.createElement("span");
+    statusDot.className = "dot";
+    var statusText = document.createElement("span");
+    statusText.className = "status-text";
+    statusPill.appendChild(statusDot);
+    statusPill.appendChild(statusText);
+    applyRunStatus(statusPill, rt, "list");
+
+    qTextarea.addEventListener("input", function (evt) {
+      rt.list.query = evt.target.value;
+      applyRunStatus(statusPill, rt, "list");
+      renderRail(); // keeps the card's List dot in sync without touching focus
+    });
+
+    actions.appendChild(runBtn);
+    actions.appendChild(statusPill);
+    querySection.appendChild(qLabel);
+    querySection.appendChild(qTextarea);
+    querySection.appendChild(actions);
+    wrap.appendChild(querySection);
+
+    var resultsSection = document.createElement("div");
+    wrap.appendChild(resultsSection);
+    renderResultsPanel(resultsSection, rt, "list");
+
+    var mappingSection = document.createElement("div");
+    wrap.appendChild(mappingSection);
+    renderMappingTable(mappingSection, {
+      rtId: rt.id,
+      tab: "list",
+      fieldDefs: fieldDefsForTrait(rt.trait),
+      query: rt.list.query
+    });
+
+    body.appendChild(wrap);
   }
 
   // -----------------------------------------------------------------------
@@ -1487,7 +2246,16 @@
     render: render,
     addResourceType: addResourceType,
     selectRT: selectRT,
-    selectTab: selectTab
+    selectTab: selectTab,
+    // Task 3 (List tab) — exposed so a DB-less Playwright pass can inject a
+    // fake last-run (ui.lastRun[rtId+"/"+tab] = {...}) and exercise the
+    // mapping widget, and so Tasks 4-5 can reuse the same functions.
+    runQuery: runQuery,
+    getLastRun: getLastRun,
+    mapKey: mapKey,
+    previewField: previewField,
+    renderMappingTable: renderMappingTable,
+    fieldDefsForTrait: fieldDefsForTrait
   };
 })();
 </script>

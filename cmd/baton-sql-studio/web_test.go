@@ -31,6 +31,15 @@ func TestWeb_IndexHTML(t *testing.T) {
 		">List<",
 		">Entitlements<",
 		">Grants<",
+		// Task 3: List tab — query editor, live run, column mapping.
+		"/api/run",
+		"/api/preview",
+		"Map columns",
+		"data-map-field",
+		"Run",
+		"data-map-column",
+		"data-map-recipe",
+		"data-map-preview",
 	}
 	for _, marker := range requiredMarkers {
 		if !strings.Contains(body, marker) {

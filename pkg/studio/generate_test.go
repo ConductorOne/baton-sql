@@ -87,6 +87,45 @@ func TestGenerate_ManagerIDFromDifferentColumn_ProfileUsesRealCEL(t *testing.T) 
 	}
 }
 
+// TestGenerate_EmployeeIDsEmitted guards against employee_ids (a canonical
+// FieldMapping field the Studio web UI's List-tab mapping widget offers for
+// the user trait, mirroring bsql.UserTraitMapping.EmployeeIDs) being silently
+// dropped by the generator's field switch, the way an unrecognized field
+// falls through to profileKey() and is discarded when it doesn't match
+// "profile.*".
+func TestGenerate_EmployeeIDsEmitted(t *testing.T) {
+	spec := &Spec{
+		AppName: "Finance DB",
+		Connect: ConnectConfig{Scheme: "mysql", Host: "db", Port: "3306", Database: "finance"},
+		ResourceTypes: []ResourceTypeSpec{{
+			ID: "users", Name: "Users", Trait: "user",
+			List: ListSpec{
+				Query: "SELECT id, email, emp_id FROM employees",
+				Fields: []FieldMapping{
+					{Field: "id", Column: "id"},
+					{Field: "emails", Column: "email"},
+					{Field: "employee_ids", Column: "emp_id"},
+				},
+			},
+			Entitlements: EntitlementsSpec{Mode: "none"},
+		}},
+	}
+	out, err := Generate(spec)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := bsql.Parse(out); err != nil {
+		t.Fatalf("bsql.Parse rejected generated yaml: %v\n---\n%s", err, out)
+	}
+	s := string(out)
+	if !strings.Contains(s, "employee_ids:") {
+		t.Errorf("expected employee_ids to be emitted as a trait field; yaml:\n%s", s)
+	}
+	if !strings.Contains(s, ".emp_id") {
+		t.Errorf("expected employee_ids CEL to reference the mapped column .emp_id; yaml:\n%s", s)
+	}
+}
+
 // TestGenerate_ManagerEmailOnly_NoHardcodedManagerID guards against the same
 // regression for the manager_email-only case: no manager_id field is mapped at
 // all, so the fallback must key off manager_email (and never emit a bogus

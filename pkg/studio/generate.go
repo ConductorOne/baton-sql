@@ -48,6 +48,8 @@ func genResourceType(rt *ResourceTypeSpec) (*yaml.Node, error) {
 			putScalar(mp, fm.Field, cel)
 		case "emails":
 			putSeq(traits, "emails", cel)
+		case "employee_ids":
+			putSeq(traits, "employee_ids", cel)
 		case "status", "account_type", "login", "last_login", "status_details":
 			putScalar(traits, fm.Field, cel)
 		case "manager_id", "manager_email":
