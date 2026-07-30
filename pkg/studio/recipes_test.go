@@ -25,3 +25,37 @@ func TestCompileField_SimpleRecipes(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileTransform_CompositeAndTernary(t *testing.T) {
+	comp := &Transform{Recipe: RecipeCompositeID, Args: map[string]any{
+		"columns": []any{"database_name", "schema_name", "table_name"}, "sep": ".",
+	}}
+	got, err := CompileTransform(comp, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "string(.database_name) + '.' + string(.schema_name) + '.' + string(.table_name)"
+	if got != want {
+		t.Errorf("composite: got %q want %q", got, want)
+	}
+
+	st := &Transform{Recipe: RecipeStatusTernary, Args: map[string]any{
+		"column": "status", "enabled": []any{"1"},
+	}}
+	got, err = CompileTransform(st, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "string(.status) == '1' ? 'enabled' : 'disabled'" {
+		t.Errorf("status ternary: got %q", got)
+	}
+
+	at := &Transform{Recipe: RecipeAccountTypeTernary, Args: map[string]any{"system_prefix": "_SYS"}}
+	got, err = CompileTransform(at, "user_name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "string(.user_name).startsWith('_SYS') ? 'system' : 'human'" {
+		t.Errorf("account_type ternary: got %q", got)
+	}
+}

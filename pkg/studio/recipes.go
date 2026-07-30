@@ -1,6 +1,9 @@
 package studio
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	RecipeSlugify            = "slugify"
@@ -40,7 +43,57 @@ func CompileTransform(t *Transform, column string) (string, error) {
 		return fmt.Sprintf("slugify(%s)", colRef(column)), nil
 	case RecipeTitleCase:
 		return fmt.Sprintf("titleCase(%s)", colRef(column)), nil
+	case RecipeCompositeID:
+		cols := argStrings(t.Args, "columns")
+		if len(cols) == 0 {
+			return "", fmt.Errorf("composite_id requires args.columns")
+		}
+		sep := argString(t.Args, "sep", ".")
+		parts := make([]string, 0, len(cols))
+		for _, c := range cols {
+			parts = append(parts, fmt.Sprintf("string(%s)", colRef(c)))
+		}
+		return strings.Join(parts, fmt.Sprintf(" + '%s' + ", sep)), nil
+	case RecipeStatusTernary:
+		col := argString(t.Args, "column", column)
+		enabled := argStrings(t.Args, "enabled")
+		if col == "" || len(enabled) == 0 {
+			return "", fmt.Errorf("status_ternary requires args.column and args.enabled")
+		}
+		conds := make([]string, 0, len(enabled))
+		for _, v := range enabled {
+			conds = append(conds, fmt.Sprintf("string(%s) == '%s'", colRef(col), v))
+		}
+		return fmt.Sprintf("%s ? 'enabled' : 'disabled'", strings.Join(conds, " || ")), nil
+	case RecipeAccountTypeTernary:
+		col := argString(t.Args, "column", column)
+		prefix := argString(t.Args, "system_prefix", "")
+		if col == "" || prefix == "" {
+			return "", fmt.Errorf("account_type_ternary requires args.column and args.system_prefix")
+		}
+		return fmt.Sprintf("string(%s).startsWith('%s') ? 'system' : 'human'", colRef(col), prefix), nil
 	default:
 		return "", fmt.Errorf("unknown or non-simple recipe %q", t.Recipe)
 	}
+}
+
+func argString(args map[string]any, key, def string) string {
+	if v, ok := args[key].(string); ok && v != "" {
+		return v
+	}
+	return def
+}
+
+func argStrings(args map[string]any, key string) []string {
+	raw, ok := args[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		if s, ok := r.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
