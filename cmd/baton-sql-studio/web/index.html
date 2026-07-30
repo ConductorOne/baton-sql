@@ -24,6 +24,7 @@
        (#22b3c4) is much lighter, so white text there is only ~2.5:1 — a
        dark ink instead gets ~7.4:1 (see the dark-theme overrides below). */
     --on-accent: #ffffff;
+    --on-accent-rgb: 255, 255, 255;
     --good: #1f9d5b;
     --good-rgb: 31, 157, 91;
     --warn: #b9791a;
@@ -50,6 +51,7 @@
       --accent-rgb: 34, 179, 196;
       /* ~7.4:1 against #22b3c4 (vs. ~2.5:1 for white) — meets WCAG AA (4.5:1). */
       --on-accent: #0d1219;
+      --on-accent-rgb: 13, 18, 25;
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
       color-scheme: dark;
     }
@@ -65,6 +67,7 @@
     --accent: #0d7d8a;
     --accent-rgb: 13, 125, 138;
     --on-accent: #ffffff;
+    --on-accent-rgb: 255, 255, 255;
     --shadow: 0 1px 2px rgba(19, 26, 34, 0.06), 0 8px 24px rgba(19, 26, 34, 0.06);
     color-scheme: light;
   }
@@ -80,6 +83,7 @@
     --accent-rgb: 34, 179, 196;
     /* ~7.4:1 against #22b3c4 (vs. ~2.5:1 for white) — meets WCAG AA (4.5:1). */
     --on-accent: #0d1219;
+    --on-accent-rgb: 13, 18, 25;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
     color-scheme: dark;
   }
@@ -473,8 +477,11 @@
     width: 0.85rem;
     height: 0.85rem;
     border-radius: 999px;
-    border: 2px solid rgba(255, 255, 255, 0.4);
-    border-top-color: #fff;
+    /* Uses --on-accent (same token as .btn-primary's text color) rather than
+       hardcoded white: the dark-theme accent is light, so a white spinner on
+       it fails non-text contrast the same way white text would. */
+    border: 2px solid rgba(var(--on-accent-rgb), 0.4);
+    border-top-color: var(--on-accent);
     animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -1317,8 +1324,8 @@
   // Canonical field vocabulary + recipes (List tab, Task 3) — these MUST
   // match the exact strings pkg/studio/generate.go's genResourceType()
   // switches on (id/display_name/description/emails/status/account_type/
-  // login/last_login/status_details/manager_id/manager_email/employee_ids,
-  // plus "profile.<key>" for anything else) and the recipe names
+  // login/last_login/status_details/manager_id/manager_email/employee_ids/
+  // login_aliases, plus "profile.<key>" for anything else) and the recipe names
   // pkg/studio/recipes.go's CompileTransform() switches on. A field or
   // recipe string that doesn't match those switches exactly is silently
   // dropped (default case) rather than erroring, so an off-by-one-string
@@ -1333,7 +1340,8 @@
     { field: "last_login", label: "Last login" },
     { field: "manager_id", label: "Manager ID" },
     { field: "manager_email", label: "Manager email" },
-    { field: "employee_ids", label: "Employee IDs" }
+    { field: "employee_ids", label: "Employee IDs" },
+    { field: "login_aliases", label: "Login aliases", hint: "→ login_aliases[]" }
   ];
 
   var GENERIC_FIELD_DEFS = [
@@ -2180,7 +2188,13 @@
       var tr = document.createElement("tr");
       row.forEach(function (cell) {
         var td = document.createElement("td");
-        td.textContent = (cell === null || cell === undefined) ? "" : String(cell);
+        if (cell === null || cell === undefined) {
+          td.textContent = "";
+        } else if (typeof cell === "object") {
+          td.textContent = JSON.stringify(cell);
+        } else {
+          td.textContent = String(cell);
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
