@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/connect", s.handleConnect)
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/generate", s.handleGenerate)
+	mux.HandleFunc("/api/import", s.handleImport)
 	mux.HandleFunc("/api/validate", s.handleValidate)
 	mux.HandleFunc("/api/preview", s.handlePreview)
 	mux.HandleFunc("/api/status", s.handleStatus)
