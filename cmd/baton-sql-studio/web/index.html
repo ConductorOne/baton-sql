@@ -1250,6 +1250,7 @@
           <span class="dot" aria-hidden="true"></span>
           <span id="topbar-status-text">Not connected</span>
         </span>
+        <button type="button" class="btn btn-primary" id="topbar-connect-btn" style="display:none" title="Connect to a database">Connect</button>
         <button type="button" class="btn btn-ghost" id="topbar-load-yaml-btn" data-import-yaml-btn title="Load an existing baton-sql config to continue editing it here">Load YAML</button>
         <button type="button" class="btn btn-ghost" id="topbar-review-btn" style="display:none" title="Review and validate the configuration">Validate</button>
         <button type="button" class="btn btn-ghost" id="topbar-edit-connect-btn" style="display:none" title="Change the database connection without losing your resource types">Edit connection</button>
@@ -1900,6 +1901,18 @@
     document.getElementById("topbar-disconnect-btn").style.display = showTopbarNav ? "" : "none";
     document.getElementById("topbar-review-btn").style.display = showTopbarNav ? "" : "none";
     document.getElementById("topbar-edit-connect-btn").style.display = showTopbarNav ? "" : "none";
+
+    // FIX (import-before-connect dead end): Load YAML can be used before ever
+    // connecting, and applyImportedSpec() drives ui.step to
+    // "resource-types" regardless of ui.connected — which used to leave a
+    // not-yet-connected user with NO top-bar nav at all (showTopbarNav above
+    // requires ui.connected) and no other way back to the Connect step. This
+    // affordance is the mirror image of showTopbarNav: it's shown exactly
+    // when there's no live connection but the Connect panel isn't already on
+    // screen, and just returns to it (see goToConnectStep()) without
+    // touching state.resource_types.
+    var showConnectAffordance = !ui.connected && ui.step !== "connect" && !ui.editingConnection;
+    document.getElementById("topbar-connect-btn").style.display = showConnectAffordance ? "" : "none";
   }
 
   // updateConnectButtonLabel() keeps the submit button's idle/in-flight text
@@ -4666,6 +4679,24 @@
     render();
   }
 
+  // goToConnectStep() — the "Connect" top-bar affordance's handler (see
+  // showConnectAffordance in renderTopbarStatus()). Only ever reachable
+  // while !ui.connected, so unlike startEditConnection() there's no live
+  // connection to preserve via the editingConnection flag: just drive
+  // ui.step back to "connect" so renderStepPanels()/renderRail() show the
+  // Connect panel and 3-stage rail again. state.resource_types (e.g. from
+  // an import-before-connect) and ui.selectedRT are left untouched so
+  // they're still there once the user connects. fillConnectFormFromState()
+  // re-syncs the form fields from state.connect in case they were set
+  // (e.g. by applyImportedSpec()) while this panel was hidden.
+  function goToConnectStep() {
+    if (ui.connected) return;
+    ui.step = "connect";
+    clearConnectError();
+    render();
+    fillConnectFormFromState();
+  }
+
   async function handleTestConnection(evt) {
     evt.preventDefault();
     clearConnectError();
@@ -4925,6 +4956,9 @@
     // branch.
     document.getElementById("topbar-edit-connect-btn").addEventListener("click", startEditConnection);
     document.getElementById("edit-connect-cancel-btn").addEventListener("click", cancelEditConnection);
+    // FIX (import-before-connect dead end): see showConnectAffordance in
+    // renderTopbarStatus() and goToConnectStep().
+    document.getElementById("topbar-connect-btn").addEventListener("click", goToConnectStep);
 
     // Load YAML — reachable from any step, so it isn't gated behind
     // ui.connected like Validate/Edit connection/Disconnect are.

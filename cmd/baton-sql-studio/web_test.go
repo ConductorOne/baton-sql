@@ -29,6 +29,11 @@ func TestWeb_IndexHTML(t *testing.T) {
 		"Edit connection",
 		`id="topbar-edit-connect-btn"`,
 		`id="edit-connect-cancel-btn"`,
+		// FIX: a top-bar "Connect" affordance reachable whenever there's no
+		// live connection and the Connect panel isn't already on screen (e.g.
+		// after importing YAML before ever connecting), so there's always a
+		// way back to the Connect step.
+		`id="topbar-connect-btn"`,
 		// Task 2: resource-type declaration + card rail + workspace tab shell.
 		"Declare resource types",
 		"What do people get access to?",
