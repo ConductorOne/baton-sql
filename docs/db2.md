@@ -104,11 +104,24 @@ db2://username:password@hostname:port/database
 db2://db2inst1:pass123@localhost:50000/TESTDB
 ```
 
+For **DB2 for i** (IBM i / AS-400), use the `db2i://` scheme. It behaves identically to
+`db2://` and uses the same engine and driver — the only difference is the default port,
+**446** (DRDA) instead of `50000`:
+
+```
+db2i://username:password@hostname/rdb-name
+db2i://svc:pass123@ibmi.corp/MYRDB
+```
+
+For IBM i the database segment is the RDB directory entry name (see `WRKRDBDIRE`), and a
+direct connection over DRDA requires a DB2 Connect license (see the licensing note above).
+
 Query parameters are forwarded as additional DB2 connection keywords
 (e.g. `db2://user:pass@host:50000/DB?Security=SSL` adds `SECURITY=SSL`). Values containing
 `;` are brace-quoted automatically; parameters that would override the URL-derived keywords
-(`HOSTNAME`, `DATABASE`, `PORT`, `PROTOCOL`, `UID`, `PWD`) are rejected — use the native
-form below for full control.
+(`HOSTNAME`, `DATABASE`, `PORT`, `UID`, `PWD`) are rejected — use the native
+form below for full control. `PROTOCOL` is the exception: it defaults to `TCPIP` but may be
+overridden with a `?PROTOCOL=` query parameter (needed by some DB2 for i connection modes).
 
 DB2's native form is also accepted as-is:
 
