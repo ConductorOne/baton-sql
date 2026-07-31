@@ -2266,7 +2266,9 @@
     var columnNames = (entry && entry.columns && entry.columns.length)
       ? entry.columns.map(function (c) { return c.name; })
       : ["*"];
-    el.value = "SELECT " + columnNames.join(", ") + " FROM " + schemaName + "." + tableName + " LIMIT 50";
+    // No LIMIT: this query becomes the connector's list/grants query, so a LIMIT
+    // would silently cap the real sync. The live preview runner caps rows at 100 server-side.
+    el.value = "SELECT " + columnNames.join(", ") + " FROM " + schemaName + "." + tableName;
     el.focus();
     el.dispatchEvent(new Event("input", { bubbles: true }));
   }
