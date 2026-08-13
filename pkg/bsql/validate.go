@@ -212,5 +212,16 @@ func (l *ActionConfig) staticValidate(ctx context.Context, s *SQLSyncer) error {
 		availableVars[k] = config.Type
 	}
 
+	// An action defines either `query` or `queries`; both forms are accepted by
+	// ActionConfig.Validate and by the action handler, so validate whichever is set.
+	if len(l.Queries) > 0 {
+		for _, query := range l.Queries {
+			if err := validateVarsInQuery(s, query, availableVars); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	return validateVarsInQuery(s, l.Query, availableVars)
 }
