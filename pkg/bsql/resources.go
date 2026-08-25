@@ -714,5 +714,18 @@ func (s *SQLSyncer) getMappedResource(ctx context.Context, r *v2.Resource, rowMa
 		r.Description = v
 	}
 
+	if mapping.SkipEntitlementsAndGrants != "" {
+		skip, err := s.env.EvaluateBool(ctx, mapping.SkipEntitlementsAndGrants, inputs)
+		if err != nil {
+			return err
+		}
+
+		if skip {
+			annos := annotations.Annotations(r.Annotations)
+			annos.Update(&v2.SkipEntitlementsAndGrants{})
+			r.Annotations = annos
+		}
+	}
+
 	return nil
 }

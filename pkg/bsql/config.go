@@ -168,6 +168,9 @@ type ResourceMapping struct {
 
 	// Annotations includes additional metadata such as entitlement immutability and external links.
 	Annotations *Annotations `yaml:"annotations" json:"annotations"`
+
+	// SkipEntitlementsAndGrants is a CEL expression that skips entitlement and grant processing when true.
+	SkipEntitlementsAndGrants string `yaml:"skip_entitlements_and_grants" json:"skip_entitlements_and_grants"`
 }
 
 // NonHumanIdentityMapping declares that a resource is a non-human identity (K3).

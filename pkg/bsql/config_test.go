@@ -276,3 +276,53 @@ resource_types:
 		})
 	}
 }
+
+func TestParse_SparseACLs(t *testing.T) {
+	configYAML := `
+app_name: Sparse ACL Test
+connect:
+  dsn: "postgres://localhost/test"
+resource_types:
+  database:
+    name: "Database"
+    list:
+      query: "SELECT id, name, is_public FROM databases LIMIT ?<Limit> OFFSET ?<Offset>"
+      map:
+        id: ".id"
+        display_name: ".name"
+        skip_entitlements_and_grants: ".is_public == true"
+        traits:
+          app:
+            profile:
+              name: ".name"
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+  user:
+    name: "User"
+    skip_entitlements_and_grants: true
+    list:
+      query: "SELECT id, name FROM users LIMIT ?<Limit> OFFSET ?<Offset>"
+      map:
+        id: ".id"
+        display_name: ".name"
+        traits:
+          user:
+            emails:
+              - ".email"
+            status: "active"
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+`
+	c, err := Parse([]byte(configYAML))
+	require.NoError(t, err)
+
+	dbRT := c.ResourceTypes["database"]
+	require.Equal(t, ".is_public == true", dbRT.List.Map.SkipEntitlementsAndGrants)
+	require.False(t, dbRT.SkipEntitlementsAndGrants)
+
+	userRT := c.ResourceTypes["user"]
+	require.Empty(t, userRT.List.Map.SkipEntitlementsAndGrants)
+	require.True(t, userRT.SkipEntitlementsAndGrants)
+}
