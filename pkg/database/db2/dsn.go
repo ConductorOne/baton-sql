@@ -9,11 +9,12 @@ import (
 
 // Keywords derived from the URL itself; query parameters may not override them.
 // Anyone needing full control over these can pass a native DB2 DSN instead.
+// PROTOCOL is intentionally NOT reserved: it defaults to TCPIP but may be
+// overridden via a ?PROTOCOL= query parameter (needed by some DB2-for-i paths).
 var reservedDSNKeywords = map[string]bool{
 	"HOSTNAME": true,
 	"DATABASE": true,
 	"PORT":     true,
-	"PROTOCOL": true,
 	"UID":      true,
 	"PWD":      true,
 }
@@ -35,7 +36,7 @@ func quoteDB2Value(v string) (string, error) {
 func convertToDB2DSN(dsn string) (string, error) {
 	// If it's already in DB2 format (contains HOSTNAME= or DATABASE=), return as-is.
 	// URL-format DSNs are exempt from this check so those markers may appear in credentials.
-	if !strings.HasPrefix(dsn, "db2://") && (strings.Contains(dsn, "HOSTNAME=") || strings.Contains(dsn, "DATABASE=")) {
+	if !strings.HasPrefix(dsn, "db2://") && !strings.HasPrefix(dsn, "db2i://") && (strings.Contains(dsn, "HOSTNAME=") || strings.Contains(dsn, "DATABASE=")) {
 		return dsn, nil
 	}
 
@@ -44,9 +45,12 @@ func convertToDB2DSN(dsn string) (string, error) {
 		return "", fmt.Errorf("invalid DSN format: %w", err)
 	}
 
-	if parsedURL.Scheme != "db2" {
-		return "", fmt.Errorf("expected db2:// scheme, got %s", parsedURL.Scheme)
+	// "db2" targets DB2 LUW; "db2i" targets DB2 for i (IBM i / AS-400), which
+	// differs only in its default DRDA port. All other handling is identical.
+	if parsedURL.Scheme != "db2" && parsedURL.Scheme != "db2i" {
+		return "", fmt.Errorf("expected db2:// or db2i:// scheme, got %s", parsedURL.Scheme)
 	}
+	isIBMi := parsedURL.Scheme == "db2i"
 
 	hostname, err := quoteDB2Value(parsedURL.Hostname())
 	if err != nil {
@@ -54,7 +58,12 @@ func convertToDB2DSN(dsn string) (string, error) {
 	}
 	port := parsedURL.Port()
 	if port == "" {
-		port = "50000" // Default DB2 port
+		// DB2 LUW defaults to 50000; DB2 for i (DRDA) defaults to 446.
+		if isIBMi {
+			port = "446"
+		} else {
+			port = "50000"
+		}
 	}
 
 	database := strings.TrimPrefix(parsedURL.Path, "/")
@@ -78,7 +87,19 @@ func convertToDB2DSN(dsn string) (string, error) {
 	dsnParts = append(dsnParts, fmt.Sprintf("HOSTNAME=%s", hostname))
 	dsnParts = append(dsnParts, fmt.Sprintf("DATABASE=%s", quotedDatabase))
 	dsnParts = append(dsnParts, fmt.Sprintf("PORT=%s", port))
-	dsnParts = append(dsnParts, "PROTOCOL=TCPIP")
+	// PROTOCOL defaults to TCPIP but is overridable via a ?PROTOCOL= query param
+	// (appended, uppercased, by the query-parameter loop below). Only set the
+	// default here when the caller did not supply one.
+	hasProtocol := false
+	for k := range parsedURL.Query() {
+		if strings.EqualFold(k, "PROTOCOL") {
+			hasProtocol = true
+			break
+		}
+	}
+	if !hasProtocol {
+		dsnParts = append(dsnParts, "PROTOCOL=TCPIP")
+	}
 
 	if username != "" {
 		quoted, err := quoteDB2Value(username)

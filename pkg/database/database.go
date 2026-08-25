@@ -456,7 +456,9 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 		}
 		return db, Vertica, nil
 
-	case "db2":
+	case "db2", "db2i":
+		// "db2" = DB2 LUW; "db2i" = DB2 for i (IBM i / AS-400). Same engine/driver;
+		// they differ only in the default DRDA port (see db2.convertToDB2DSN).
 		db, err := db2.Connect(ctx, parsedDsn.String())
 		if err != nil {
 			return nil, Unknown, err
