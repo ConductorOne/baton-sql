@@ -109,7 +109,7 @@ type LookupFunc = database.LookupFunc
 
 // New returns a new instance of the connector.
 func New(ctx context.Context, configFilePath string) (*Connector, error) {
-	c, err := bsql.LoadConfigFromFile(configFilePath)
+	c, err := bsql.LoadConfigFromFile(ctx, configFilePath)
 	if err != nil {
 		return nil, err
 	}
