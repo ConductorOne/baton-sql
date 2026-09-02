@@ -26,6 +26,7 @@
 - SAP HANA
 - Vertica
 - Amazon Redshift
+- WordPress (MySQL-based)
 - IBM DB2 — opt-in: requires a binary built with the `db2` tag and IBM's native CLI driver; see [docs/db2.md](docs/db2.md)
 
 ## Configuration
