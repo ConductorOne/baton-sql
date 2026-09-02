@@ -120,6 +120,18 @@ func TestRevoke_ValidationNoRowsReportsAlreadyRevoked(t *testing.T) {
 	require.True(t, ok)
 }
 
+// On a non-DDL engine, validation "no rows" is a failed precondition, not idempotency:
+// Revoke must return an error rather than reporting GrantAlreadyRevoked.
+func TestRevoke_ValidationNoRowsOnNonDDLEngineFailsLoudly(t *testing.T) {
+	s, _ := newRevokeProvisioningTestSyncer(t)
+	withValidationQueryConfig(s)
+	// nothing seeded: the revoke validation query returns no rows
+
+	annos, err := s.Revoke(t.Context(), revokeGrantFor("user-1", "admin"))
+	require.Error(t, err)
+	require.Nil(t, annos)
+}
+
 func TestRevoke_ValidationRowsAppliesRevoke(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	withValidationQueryConfig(s)
