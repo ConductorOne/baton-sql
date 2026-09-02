@@ -422,7 +422,11 @@ type EntitlementProvisioningQueries struct {
 	// NoTransaction indicates whether the provisioning queries should be executed without a transaction.
 	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
 
-	// ValidationQueries is a list of SQL statements to execute for validating the provisioning operation before execution.
+	// ValidationQueries is a list of SQL statements run before the provisioning queries.
+	// On engines that report rows-affected, a query returning no rows fails the operation
+	// (an existence precondition). On DDL-based engines (Db2) that don't report rows-affected,
+	// a query returning no rows instead means the state is already as desired, so the operation
+	// is reported as an idempotent success (GrantAlreadyExists / GrantAlreadyRevoked).
 	ValidationQueries []string `yaml:"validation_queries,omitempty" json:"validation_queries,omitempty"`
 
 	// Queries is a list of SQL statements to execute for the provisioning operation.

@@ -5,6 +5,7 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
+	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/stretchr/testify/require"
 )
 
@@ -56,6 +57,8 @@ func userPrincipal(userID string) *v2.Resource {
 func TestGrant_ValidationNoRowsReportsAlreadyExists(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	withValidationQueryConfig(s)
+	// validation "no rows" only signals idempotency on DDL engines (Db2)
+	s.dbEngine = database.DB2
 	// membership already present: the grant validation query returns no rows
 	seedUserWithRoles(t, db, "user-1", "admin")
 
@@ -65,6 +68,22 @@ func TestGrant_ValidationNoRowsReportsAlreadyExists(t *testing.T) {
 	ok, err := annos.Pick(&v2.GrantAlreadyExists{})
 	require.NoError(t, err)
 	require.True(t, ok)
+
+	// the INSERT never ran, so no duplicate row was created
+	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
+}
+
+// On a non-DDL engine, validation "no rows" is a failed precondition, not idempotency:
+// Grant must return an error rather than reporting GrantAlreadyExists.
+func TestGrant_ValidationNoRowsOnNonDDLEngineFailsLoudly(t *testing.T) {
+	s, db := newRevokeProvisioningTestSyncer(t)
+	withValidationQueryConfig(s)
+	// membership already present: the grant validation query returns no rows
+	seedUserWithRoles(t, db, "user-1", "admin")
+
+	annos, err := s.Grant(t.Context(), userPrincipal("user-1"), memberEntitlementFor("admin"))
+	require.Error(t, err)
+	require.Nil(t, annos)
 
 	// the INSERT never ran, so no duplicate row was created
 	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
@@ -89,6 +108,8 @@ func TestGrant_ValidationRowsAppliesGrant(t *testing.T) {
 func TestRevoke_ValidationNoRowsReportsAlreadyRevoked(t *testing.T) {
 	s, _ := newRevokeProvisioningTestSyncer(t)
 	withValidationQueryConfig(s)
+	// validation "no rows" only signals idempotency on DDL engines (Db2)
+	s.dbEngine = database.DB2
 	// nothing seeded: the revoke validation query returns no rows
 
 	annos, err := s.Revoke(t.Context(), revokeGrantFor("user-1", "admin"))
@@ -118,6 +139,8 @@ func TestRevoke_ValidationRowsAppliesRevoke(t *testing.T) {
 // can detect idempotency with errors.Is.
 func TestRunProvisioningQueriesWithExecutor_ValidationNoRowsWrapsSentinel(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
+	// validation "no rows" only signals idempotency on DDL engines (Db2)
+	s.dbEngine = database.DB2
 
 	err := s.RunProvisioningQueriesWithExecutor(
 		t.Context(),

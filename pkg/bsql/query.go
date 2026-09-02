@@ -602,6 +602,16 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 	return exists, nil
 }
 
+// validationNoRowsMeansIdempotent reports whether a validation query returning no
+// rows should be treated as "already in the desired state" rather than a failed
+// precondition. Only DDL-based engines (Db2) need this: their GRANT/REVOKE statements
+// don't report rows-affected, so the validation query is the only zero-effect signal
+// available. Engines that report rows-affected keep using validation queries as
+// existence preconditions that fail loudly.
+func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
+	return s.dbEngine == database.DB2
+}
+
 func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 	ctx context.Context,
 	queries,
@@ -641,9 +651,10 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 		}
 
 		if !valid {
-			// Wrap the sentinel so the idempotency path reports already-applied instead of
-			// failing; validation "no rows" is the only zero-effect signal DDL dialects (Db2) emit.
-			return fmt.Errorf("validation query returned no rows: %w", ErrQueryAffectedZeroRows)
+			if s.validationNoRowsMeansIdempotent() {
+				return fmt.Errorf("validation query returned no rows: %w", ErrQueryAffectedZeroRows)
+			}
+			return fmt.Errorf("validation query returned no rows")
 		}
 	}
 
@@ -1073,9 +1084,10 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 
 		if !valid {
-			// Wrap the sentinel so the caller reports GrantAlreadyExists instead of failing;
-			// validation "no rows" is the only zero-effect signal DDL dialects (Db2) emit.
-			return anno, fmt.Errorf("grant provisioning: validation query returned no rows: %w", ErrQueryAffectedZeroRows)
+			if s.validationNoRowsMeansIdempotent() {
+				return anno, fmt.Errorf("grant provisioning: validation query returned no rows: %w", ErrQueryAffectedZeroRows)
+			}
+			return anno, fmt.Errorf("grant provisioning: validation query returned no rows")
 		}
 	}
 
