@@ -10,7 +10,7 @@
 
 ## Key Features
 
-- **Multi-Database Support**: Works with MySQL, PostgreSQL, Oracle, SQL Server, Vertica, SQLite, and WordPress
+- **Multi-Database Support**: Works with MySQL, PostgreSQL, Oracle, SQL Server, SAP HANA, Vertica, and Amazon Redshift, plus opt-in IBM DB2 (see [Supported Database Engines](#supported-database-engines))
 - **Account Provisioning**: Create user accounts with automatic random password generation
 - **Secure Password Management**: Database-appropriate password hashing (SHA2, bcrypt, MD5)
 - **Flexible Configuration**: Map any SQL query results to resources and entitlements
@@ -23,6 +23,7 @@
 - Microsoft SQL Server
 - Oracle
 - PostgreSQL
+- SAP HANA
 - Vertica
 - Amazon Redshift
 - IBM DB2 — opt-in: requires a binary built with the `db2` tag and IBM's native CLI driver; see [docs/db2.md](docs/db2.md)

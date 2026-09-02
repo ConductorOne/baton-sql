@@ -1,6 +1,6 @@
 # Baton SQL Connector Documentation
 
-While developing the connector, please fill out this form. This information is needed to write docs and to help other users set up the connector.
+This document describes the Baton SQL connector's capabilities and the credentials needed to set it up.
 
 ## Connector capabilities
 
@@ -12,6 +12,10 @@ While developing the connector, please fill out this form. This information is n
    > - PostgreSQL
    > - Oracle Database
    > - SQL Server
+   > - SAP HANA
+   > - Vertica
+   > - Amazon Redshift
+   > - IBM DB2 (opt-in; requires a binary built with the `db2` tag — see [docs/db2.md](db2.md))
    > - WordPress (MySQL-based)
    >
    > The connector can sync custom user tables, role hierarchies, entitlements, and permissions based on configurable SQL queries.

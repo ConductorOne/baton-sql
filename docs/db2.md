@@ -116,6 +116,82 @@ DB2's native form is also accepted as-is:
 HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=db2inst1;PWD=pass123;PROTOCOL=TCPIP
 ```
 
+## Writing a Db2 spec
+
+Db2 needs two things in every spec that the other engines don't. Both fail loudly, but the
+error names neither the column nor the query, so they're easy to miss when adapting another
+engine's spec.
+
+### Wrap every column reference in `string()`
+
+A bare column reference inside a CEL concatenation or comparison aborts the whole sync at
+`list-resources`, before any resource is emitted:
+
+```
+error: listing resources failed: no such overload
+```
+
+The error names neither the column nor the expression. Wrap each reference in `string()`:
+
+```yaml
+id: "string(.database_name) + '.' + string(.schema_name)"
+```
+
+`examples/redshift-test.yml` uses this form throughout — copy it when adapting a spec to Db2.
+
+### Alias columns to double-quoted lowercase names
+
+Db2 returns column names uppercase, and the engine keys each row on the driver's names, so
+`SELECT GRANTEE` yields `.GRANTEE`, not `.grantee`. Alias every selected column to the
+lowercase name the CEL expressions reference:
+
+```sql
+SELECT RTRIM(GRANTEE) AS "grantee" FROM SYSCAT.DBAUTH
+```
+
+The double quotes are required; without them Db2 folds the alias back to uppercase.
+
+## Provisioning support
+
+Entitlement provisioning works normally: `GRANT`/`REVOKE` of roles, authorities and object
+privileges behave the same as on any other engine.
+
+**Account creation and deletion are not available for Db2.** Db2 LUW has no `CREATE USER`
+statement — authorization IDs are operating-system, LDAP or Kerberos identities managed
+outside the database, and `GRANT ... TO USER <authid>` succeeds even for names Db2 has never
+seen. A create-account request against a `db2://` DSN has nothing to call.
+
+**Group principals can't be synced or provisioned.** Db2 has no in-database group table;
+group membership is reachable only through the per-authorization-ID function
+`SYSPROC.AUTH_LIST_GROUPS_FOR_AUTHID`, which a YAML resource list can't express. A grant
+emitted with `principal_type: group` is dropped at ingest (visible as `grants_dropped` and
+`ingest_quality.reason_flags` in the sync token), and `group` is omitted from `grantableTo`
+even if a spec declares it. This is a property of Db2, not a limitation of the connector.
+
+## Running the Db2 tests
+
+Like the build, the test and vet targets carry the CGO flags inline:
+
+```bash
+make test-db2                          # go test -tags db2 ./...
+make vet-db2                           # go vet  -tags db2 ./...
+DB2HOME=/opt/clidriver make test-db2   # clidriver elsewhere
+```
+
+Running the raw commands instead of the make targets needs the same two CGO variables the
+`build-db2` target sets, plus a library path — `go test` builds and runs its own binary,
+which the build-time install-name/rpath rewrite never touches:
+
+```bash
+CGO_CFLAGS="-I$DB2HOME/include" CGO_LDFLAGS="-L$DB2HOME/lib" \
+  DYLD_LIBRARY_PATH="$DB2HOME/lib" \
+  go test -tags db2 ./...
+```
+
+Use `LD_LIBRARY_PATH` instead of `DYLD_LIBRARY_PATH` on Linux. Without the CGO flags you get
+`fatal error: 'sqlcli1.h' file not found`; without the library path on macOS,
+`Library not loaded: libdb2.dylib` (both covered under Troubleshooting).
+
 ## Troubleshooting
 
 **`'sqlcli1.h' file not found`** — clidriver missing or `DB2HOME` wrong. Check that

@@ -6,6 +6,10 @@
 *.dylib
 *.c1z
 
+# Root build output (go build ./cmd/baton-sql without -o)
+/baton-sql
+/baton-sql.exe
+
 # Test binary, built with `go test -c`
 *.test
 
