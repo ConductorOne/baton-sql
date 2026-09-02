@@ -361,11 +361,47 @@ func ResolveDatabaseName(opts ConnectOptions) string {
 			return expanded
 		}
 	}
+	if nativeDSN, isNativeDB2, err := nativeDB2DSN(opts); err == nil && isNativeDB2 {
+		return db2DSNDatabase(nativeDSN)
+	}
 	parsedUrl, err := buildConnectionURL(opts)
 	if err != nil || parsedUrl == nil {
 		return ""
 	}
 	return strings.TrimPrefix(parsedUrl.Path, "/")
+}
+
+func db2DSNDatabase(dsn string) string {
+	for _, part := range splitDB2DSN(dsn) {
+		if value, found := strings.CutPrefix(part, "DATABASE="); found {
+			if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
+				value = value[1 : len(value)-1]
+			}
+			return value
+		}
+	}
+	return ""
+}
+
+// splitDB2DSN splits a native DB2 DSN on ';', ignoring separators inside {} quoting.
+func splitDB2DSN(dsn string) []string {
+	var parts []string
+	start := 0
+	inBraces := false
+	for i, r := range dsn {
+		switch r {
+		case '{':
+			inBraces = true
+		case '}':
+			inBraces = false
+		case ';':
+			if !inBraces {
+				parts = append(parts, dsn[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, dsn[start:])
 }
 
 // ConnectMany opens one *sql.DB per name in dbNames. On any per-database failure,
@@ -404,6 +440,21 @@ func ConnectMany(ctx context.Context, opts ConnectOptions, dbNames []string) (ma
 }
 
 func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error) {
+	// A native DB2 DSN is an opaque ODBC keyword=value string, not a URL. Routing it
+	// through buildConnectionURL corrupts it (url.Parse/.String mangles the opaque form),
+	// so hand it to the driver verbatim. See docs/db2.md.
+	nativeDSN, isNativeDB2, err := nativeDB2DSN(opts)
+	if err != nil {
+		return nil, Unknown, err
+	}
+	if isNativeDB2 {
+		db, err := db2.Connect(ctx, nativeDSN)
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, DB2, nil
+	}
+
 	parsedDsn, err := buildConnectionURL(opts)
 	if err != nil {
 		return nil, Unknown, err
@@ -466,6 +517,38 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
+}
+
+// nativeDB2DSN reports whether opts carries a native DB2 DSN: an opaque ODBC
+// keyword=value string (e.g. "HOSTNAME=...;DATABASE=...") rather than a db2:// URL.
+// When it does, the env-expanded string is returned for verbatim handoff to the driver.
+// The scheme, when set, must be db2; a URL-shaped DSN or foreign scheme is left to the
+// normal URL path. Markers match db2.convertToDB2DSN's passthrough.
+func nativeDB2DSN(opts ConnectOptions) (string, bool, error) {
+	if opts.DSN == "" {
+		return "", false, nil
+	}
+	lookup := opts.resolveLookup()
+
+	scheme, err := expandValue(opts.Scheme, lookup)
+	if err != nil {
+		return "", false, err
+	}
+	if scheme != "" && scheme != "db2" {
+		return "", false, nil
+	}
+
+	dsn, err := expandValue(opts.DSN, lookup)
+	if err != nil {
+		return "", false, err
+	}
+	if strings.Contains(dsn, "://") {
+		return "", false, nil
+	}
+	if !strings.Contains(dsn, "HOSTNAME=") && !strings.Contains(dsn, "DATABASE=") {
+		return "", false, nil
+	}
+	return dsn, true, nil
 }
 
 func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
