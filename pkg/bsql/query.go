@@ -641,7 +641,9 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 		}
 
 		if !valid {
-			return fmt.Errorf("validation query returned no rows")
+			// Wrap the sentinel so the idempotency path reports already-applied instead of
+			// failing; validation "no rows" is the only zero-effect signal DDL dialects (Db2) emit.
+			return fmt.Errorf("validation query returned no rows: %w", ErrQueryAffectedZeroRows)
 		}
 	}
 
@@ -1071,7 +1073,9 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 
 		if !valid {
-			return anno, fmt.Errorf("grant provisioning: validation query returned no rows")
+			// Wrap the sentinel so the caller reports GrantAlreadyExists instead of failing;
+			// validation "no rows" is the only zero-effect signal DDL dialects (Db2) emit.
+			return anno, fmt.Errorf("grant provisioning: validation query returned no rows: %w", ErrQueryAffectedZeroRows)
 		}
 	}
 
