@@ -110,11 +110,19 @@ Query parameters are forwarded as additional DB2 connection keywords
 (`HOSTNAME`, `DATABASE`, `PORT`, `PROTOCOL`, `UID`, `PWD`) are rejected — use the native
 form below for full control.
 
-DB2's native form is also accepted as-is:
+DB2's native form is also accepted as-is (ODBC keywords are case-insensitive and may carry
+spaces after each `;`):
 
 ```
 HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=db2inst1;PWD=pass123;PROTOCOL=TCPIP
 ```
+
+The native form is self-contained: it already carries the host, port, credentials, params and
+target database. It is therefore mutually exclusive with the structured `connect` fields
+(`host`, `port`, `user`, `password`, `params`) and with a per-database override (`connect.database`
+or the `databases` block for multi-database sync). Combining them is rejected with an explicit
+error rather than silently ignoring the extra settings, so use the `db2://` URL form when you
+need multi-database discovery or want to supply fields separately.
 
 ## Troubleshooting
 
