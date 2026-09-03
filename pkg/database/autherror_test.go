@@ -29,7 +29,7 @@ func TestAuthError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := AuthError(tt.err)
+			got := AuthError(tt.err, "testdb")
 			if tt.want == codes.OK {
 				if got != nil {
 					t.Fatalf("want nil, got %v", got)
