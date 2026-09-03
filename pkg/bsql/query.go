@@ -604,9 +604,10 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 
 // validationNoRowsMeansIdempotent reports whether a validation query returning no
 // rows should be treated as "already in the desired state" rather than a failed
-// precondition. DDL-based engines (Db2, Oracle) need this: an already-applied GRANT or
-// REVOKE raises an error (Db2 SQL0556N, Oracle ORA-01951) instead of affecting rows, so
-// the validation query is the only zero-effect signal available. Engines that report
+// precondition. DDL-based engines (Db2, Oracle) need this: their GRANT/REVOKE don't
+// report rows-affected, so a repeat statement looks identical to a fresh one and the
+// validation query is the only zero-effect signal. (On Oracle a repeat GRANT succeeds
+// silently while an already-applied REVOKE raises ORA-01951.) Engines that report
 // rows-affected keep using validation queries as existence preconditions that fail loudly.
 func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
 	switch s.dbEngine {
