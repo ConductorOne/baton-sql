@@ -118,9 +118,10 @@ HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=db2inst1;PWD=pass123;PROTOCOL=
 
 ## Writing a Db2 spec
 
-Db2 needs two things in every spec that the other engines don't. Both fail loudly, but the
-error names neither the column nor the query, so they're easy to miss when adapting another
-engine's spec.
+Db2 needs two things in every spec. Other engines need them only in spots (Oracle folds
+unquoted identifiers to uppercase; Redshift needs `string()` around columns in CEL
+concatenations), but Db2 needs both everywhere. Both fail loudly, but the error names neither
+the column nor the query, so they're easy to miss when adapting another engine's spec.
 
 ### Wrap every column reference in `string()`
 
@@ -163,10 +164,14 @@ seen. A create-account request against a `db2://` DSN has nothing to call.
 
 **Group principals can't be synced or provisioned.** Db2 has no in-database group table;
 group membership is reachable only through the per-authorization-ID function
-`SYSPROC.AUTH_LIST_GROUPS_FOR_AUTHID`, which a YAML resource list can't express. A grant
-emitted with `principal_type: group` is dropped at ingest (visible as `grants_dropped` and
-`ingest_quality.reason_flags` in the sync token), and `group` is omitted from `grantableTo`
-even if a spec declares it. This is a property of Db2, not a limitation of the connector.
+`SYSPROC.AUTH_LIST_GROUPS_FOR_AUTHID`, which a YAML resource list can't express, so a Db2
+spec should not declare `group` in an entitlement's `grantable_to`.
+
+Two caveats on how this surfaces. `grantableTo` is spec-driven: the connector copies whatever
+the spec declares and does not filter by engine, so a spec that still lists `group` will
+advertise it as grantable even on Db2. Enforcement happens at ingest instead. A grant emitted
+with `principal_type: group` is dropped (visible as `grants_dropped` and
+`ingest_quality.reason_flags` in the sync token).
 
 ## Running the Db2 tests
 

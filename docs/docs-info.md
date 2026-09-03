@@ -50,6 +50,10 @@ This document describes the Baton SQL connector's capabilities and the credentia
    > - PostgreSQL: `postgres://username:password@host:port/database`
    > - Oracle: `oracle://username:password@host:port/service`
    > - SQL Server: `sqlserver://username:password@host:port?database=dbname`
+   > - SAP HANA: `hdb://username:password@host:port/database`
+   > - Vertica: `vertica://username:password@host:port/database`
+   > - Amazon Redshift: `postgres://username:password@host:port/database` (uses the PostgreSQL scheme)
+   > - IBM DB2: `db2://username:password@host:port/database` (opt-in; see [docs/db2.md](db2.md))
 
 2. For each item in the list above:
 
@@ -151,6 +155,9 @@ The connector includes example configurations for common scenarios:
 - `examples/oracle-test.yml` - Oracle with SHA2-256
 - `examples/wordpress-test.yml` - WordPress user and role management
 - `examples/sqlserver-test.yml` - SQL Server with SHA2-256 password hashing
+- `examples/sap-hana-test.yml` - SAP HANA user and role management
+- `examples/vertica-test.yml` - Vertica user and role management
+- `examples/redshift-test.yml` - Amazon Redshift schema and role management
 
 Each example demonstrates:
 

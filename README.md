@@ -10,7 +10,7 @@
 
 ## Key Features
 
-- **Multi-Database Support**: Works with MySQL, PostgreSQL, Oracle, SQL Server, SAP HANA, Vertica, and Amazon Redshift, plus opt-in IBM DB2 (see [Supported Database Engines](#supported-database-engines))
+- **Multi-Database Support**: Works with a range of SQL engines (see [Supported Database Engines](#supported-database-engines) below)
 - **Account Provisioning**: Create user accounts with automatic random password generation
 - **Secure Password Management**: Database-appropriate password hashing (SHA2, bcrypt, MD5)
 - **Flexible Configuration**: Map any SQL query results to resources and entitlements
