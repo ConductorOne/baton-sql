@@ -112,3 +112,47 @@ func TestConvertToDB2DSN(t *testing.T) {
 		})
 	}
 }
+
+func TestIsNativeDSN(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want bool
+	}{
+		{name: "native markers", dsn: "HOSTNAME=h;DATABASE=X", want: true},
+		{name: "lowercase keywords", dsn: "hostname=h;database=x", want: true},
+		{name: "whitespace after separator", dsn: "HOSTNAME=h; DATABASE=X", want: true},
+		{name: "db2 url", dsn: "db2://u:p@h:50000/db", want: false},
+		{name: "postgres url", dsn: "postgres://h/db", want: false},
+		{name: "value carrying :// is not a url", dsn: "HOSTNAME=h;PWD=my://secret", want: true},
+		// DATABASE= appears only inside a braced PWD value, so the brace-aware split keeps it
+		// as one PWD part: not a native marker. Routing and passthrough now agree here.
+		{name: "database marker only inside braced value", dsn: "UID=u;PWD={x;DATABASE=y}", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, IsNativeDSN(tt.dsn))
+		})
+	}
+}
+
+func TestDSNDatabase(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want string
+	}{
+		{name: "plain", dsn: "HOSTNAME=h;DATABASE=TESTDB;UID=u", want: "TESTDB"},
+		{name: "braced value with semicolon", dsn: "HOSTNAME=h;DATABASE={my;db}", want: "my;db"},
+		{name: "lowercase", dsn: "hostname=h;database=testdb", want: "testdb"},
+		{name: "whitespace before keyword", dsn: "HOSTNAME=h; DATABASE=TESTDB", want: "TESTDB"},
+		// A literal '{' mid-value (not ODBC quoting) must not swallow the following ';'.
+		{name: "unquoted brace in earlier value", dsn: "HOSTNAME=h;PWD=p{q;DATABASE=TESTDB", want: "TESTDB"},
+		{name: "absent", dsn: "HOSTNAME=h;UID=u", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, DSNDatabase(tt.dsn))
+		})
+	}
+}

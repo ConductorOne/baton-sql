@@ -22,11 +22,6 @@ import (
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
-// urlSchemeDSNRegex matches a DSN that begins with a URL scheme (e.g. "db2://").
-// Anchored to the start so a native ODBC DSN carrying "://" inside a value
-// (e.g. PWD=my://secret) is not misread as a URL.
-var urlSchemeDSNRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
-
 // LookupFunc resolves ${KEY} placeholders during DSN/connect field expansion.
 // When nil is passed to expand helpers, os.LookupEnv is used (CLI compatibility).
 // Library embedders should pass a map-backed LookupFunc and never mutate process env.
@@ -367,40 +362,13 @@ func ResolveDatabaseName(opts ConnectOptions) string {
 		}
 	}
 	if nativeDSN, isNativeDB2, err := nativeDB2DSN(opts); err == nil && isNativeDB2 {
-		return db2DSNDatabase(nativeDSN)
+		return db2.DSNDatabase(nativeDSN)
 	}
 	parsedUrl, err := buildConnectionURL(opts)
 	if err != nil || parsedUrl == nil {
 		return ""
 	}
 	return strings.TrimPrefix(parsedUrl.Path, "/")
-}
-
-func db2DSNDatabase(dsn string) string {
-	for _, part := range splitDB2DSN(dsn) {
-		keyword, value, found := strings.Cut(strings.TrimSpace(part), "=")
-		if !found || !strings.EqualFold(keyword, "DATABASE") {
-			continue
-		}
-		if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
-			value = value[1 : len(value)-1]
-		}
-		return value
-	}
-	return ""
-}
-
-// hasDB2Marker reports whether any ';'-separated part of dsn is a HOSTNAME= or
-// DATABASE= keyword. ODBC keywords are case-insensitive and parts often carry
-// whitespace after the ';', so both are normalized before comparison.
-func hasDB2Marker(dsn string) bool {
-	for _, part := range splitDB2DSN(dsn) {
-		keyword, _, found := strings.Cut(strings.TrimSpace(part), "=")
-		if found && (strings.EqualFold(keyword, "HOSTNAME") || strings.EqualFold(keyword, "DATABASE")) {
-			return true
-		}
-	}
-	return false
 }
 
 // hasStructuredConnectFields reports whether opts carries any structured connect
@@ -411,27 +379,6 @@ func hasDB2Marker(dsn string) bool {
 func hasStructuredConnectFields(opts ConnectOptions) bool {
 	return opts.Host != "" || opts.Port != "" || opts.User != "" ||
 		opts.Password != "" || opts.Database != "" || len(opts.Params) > 0
-}
-
-// splitDB2DSN splits a native DB2 DSN on ';', ignoring separators inside {} quoting.
-func splitDB2DSN(dsn string) []string {
-	var parts []string
-	start := 0
-	inBraces := false
-	for i, r := range dsn {
-		switch r {
-		case '{':
-			inBraces = true
-		case '}':
-			inBraces = false
-		case ';':
-			if !inBraces {
-				parts = append(parts, dsn[start:i])
-				start = i + 1
-			}
-		}
-	}
-	return append(parts, dsn[start:])
 }
 
 // ConnectMany opens one *sql.DB per name in dbNames. On any per-database failure,
@@ -566,7 +513,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 // keyword=value string (e.g. "HOSTNAME=...;DATABASE=...") rather than a db2:// URL.
 // When it does, the env-expanded string is returned for verbatim handoff to the driver.
 // The scheme, when set, must be db2; a URL-shaped DSN or foreign scheme is left to the
-// normal URL path. Markers match db2.convertToDB2DSN's passthrough.
+// normal URL path. Detection is db2.IsNativeDSN, shared with convertToDB2DSN's passthrough.
 func nativeDB2DSN(opts ConnectOptions) (string, bool, error) {
 	if opts.DSN == "" {
 		return "", false, nil
@@ -585,10 +532,7 @@ func nativeDB2DSN(opts ConnectOptions) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	if urlSchemeDSNRegex.MatchString(dsn) {
-		return "", false, nil
-	}
-	if !hasDB2Marker(dsn) {
+	if !db2.IsNativeDSN(dsn) {
 		return "", false, nil
 	}
 	return dsn, true, nil
