@@ -126,3 +126,37 @@ func TestGrant_ReplaceCommittedReportsGrantReplaced(t *testing.T) {
 	// the replace revoke committed, so the old membership is gone
 	require.Equal(t, 0, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "viewer"))
 }
+
+// withGrantReplaceDB2Config is the grant_replace config with a revoke validation
+// query that never matches. On Db2 a no-rows validation means "nothing to revoke",
+// so the revoke aborts before its DELETE runs but the flow still reports GrantReplaced.
+func withGrantReplaceDB2Config(s *SQLSyncer) {
+	withGrantReplaceConfig(s, true) // no_transaction: the replace stands on its own
+	revoke := s.config.StaticEntitlements[0].Provisioning.Revoke
+	revoke.ValidationQueries = []string{
+		`SELECT 1 FROM user_roles WHERE user_id = ?<user_id> AND role = 'does-not-exist'`,
+	}
+}
+
+// Db2 path: the revoke validation query returns no rows, so the revoke DELETE never
+// runs, yet GrantReplaced is still reported because on Db2 a no-rows validation means
+// the old grant is already gone. The old viewer row must survive (revoke never ran).
+func TestGrant_ReplaceDB2RevokeValidationNoRowsStillReportsGrantReplaced(t *testing.T) {
+	s, db := newGrantReplaceTestSyncer(t)
+	s.dbEngine = database.DB2
+	withGrantReplaceDB2Config(s)
+	_, err := db.ExecContext(t.Context(), `INSERT INTO user_roles (user_id, role) VALUES ('user-1','viewer')`)
+	require.NoError(t, err)
+
+	annos, err := s.Grant(t.Context(), userPrincipal("user-1"), memberEntitlementFor("admin"))
+	require.NoError(t, err)
+
+	replaced, err := annos.Pick(&v2.GrantReplaced{})
+	require.NoError(t, err)
+	require.True(t, replaced, "GrantReplaced must be reported: on Db2 a no-rows revoke validation means the old grant is already gone")
+
+	// the revoke validation aborted the revoke before its DELETE ran, so viewer survives
+	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "viewer"))
+	// the main grant still ran
+	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
+}

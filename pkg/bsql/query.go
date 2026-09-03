@@ -1062,6 +1062,9 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				executor,
 			)
 			if err != nil {
+				// On DDL engines (Db2) a zero-rows revoke means "nothing to revoke": the
+				// old grant is already gone, which is the state a replace aims for. Treat
+				// that as success and still report GrantReplaced. Any other error aborts.
 				if !errors.Is(err, ErrQueryAffectedZeroRows) {
 					return anno, err
 				}
