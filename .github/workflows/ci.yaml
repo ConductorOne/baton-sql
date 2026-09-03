@@ -48,7 +48,7 @@ jobs:
           baton-principal: john.smith
           baton-principal-type: user
       - name: Run account provisioning tests
-        uses: ConductorOne/github-workflows/actions/account-provisioning@v3
+        uses: ConductorOne/github-workflows/actions/account-provisioning@v4
         with:
           connector: ./baton-sql
           account-email: robert.tables2@example.com

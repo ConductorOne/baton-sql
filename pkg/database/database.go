@@ -22,6 +22,11 @@ import (
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 
+// urlSchemeDSNRegex matches a DSN that begins with a URL scheme (e.g. "db2://").
+// Anchored to the start so a native ODBC DSN carrying "://" inside a value
+// (e.g. PWD=my://secret) is not misread as a URL.
+var urlSchemeDSNRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
+
 // LookupFunc resolves ${KEY} placeholders during DSN/connect field expansion.
 // When nil is passed to expand helpers, os.LookupEnv is used (CLI compatibility).
 // Library embedders should pass a map-backed LookupFunc and never mutate process env.
@@ -373,14 +378,39 @@ func ResolveDatabaseName(opts ConnectOptions) string {
 
 func db2DSNDatabase(dsn string) string {
 	for _, part := range splitDB2DSN(dsn) {
-		if value, found := strings.CutPrefix(part, "DATABASE="); found {
-			if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
-				value = value[1 : len(value)-1]
-			}
-			return value
+		keyword, value, found := strings.Cut(strings.TrimSpace(part), "=")
+		if !found || !strings.EqualFold(keyword, "DATABASE") {
+			continue
 		}
+		if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
+			value = value[1 : len(value)-1]
+		}
+		return value
 	}
 	return ""
+}
+
+// hasDB2Marker reports whether any ';'-separated part of dsn is a HOSTNAME= or
+// DATABASE= keyword. ODBC keywords are case-insensitive and parts often carry
+// whitespace after the ';', so both are normalized before comparison.
+func hasDB2Marker(dsn string) bool {
+	for _, part := range splitDB2DSN(dsn) {
+		keyword, _, found := strings.Cut(strings.TrimSpace(part), "=")
+		if found && (strings.EqualFold(keyword, "HOSTNAME") || strings.EqualFold(keyword, "DATABASE")) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasStructuredConnectFields reports whether opts carries any structured connect
+// field that a native DB2 DSN would make redundant. A native DSN is self-contained;
+// combining it with these (or a per-database override) silently drops them, so the
+// caller rejects the combination. Scheme is excluded: "db2" alongside a native DSN
+// is a supported, explicit hint.
+func hasStructuredConnectFields(opts ConnectOptions) bool {
+	return opts.Host != "" || opts.Port != "" || opts.User != "" ||
+		opts.Password != "" || opts.Database != "" || len(opts.Params) > 0
 }
 
 // splitDB2DSN splits a native DB2 DSN on ';', ignoring separators inside {} quoting.
@@ -448,6 +478,19 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 		return nil, Unknown, err
 	}
 	if isNativeDB2 {
+		// A native DSN already carries host, port, credentials, params and the target
+		// database. Structured fields or a per-database override (set directly, or by
+		// ConnectMany for databases.static / discovery_query) would be silently dropped
+		// on the verbatim path, so reject the combination instead of connecting to the
+		// wrong database. See docs/db2.md.
+		if hasStructuredConnectFields(opts) {
+			return nil, Unknown, errors.New(
+				"native DB2 DSN is self-contained and cannot be combined with structured " +
+					"connect fields (host, port, user, password, params) or a per-database " +
+					"override (connect.database, databases); put every setting in the DSN or " +
+					"use the db2:// URL form",
+			)
+		}
 		db, err := db2.Connect(ctx, nativeDSN)
 		if err != nil {
 			return nil, Unknown, err
@@ -542,10 +585,10 @@ func nativeDB2DSN(opts ConnectOptions) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	if strings.Contains(dsn, "://") {
+	if urlSchemeDSNRegex.MatchString(dsn) {
 		return "", false, nil
 	}
-	if !strings.Contains(dsn, "HOSTNAME=") && !strings.Contains(dsn, "DATABASE=") {
+	if !hasDB2Marker(dsn) {
 		return "", false, nil
 	}
 	return dsn, true, nil

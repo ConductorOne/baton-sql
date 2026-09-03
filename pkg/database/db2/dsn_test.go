@@ -29,6 +29,16 @@ func TestConvertToDB2DSN(t *testing.T) {
 			want: "HOSTNAME=dbhost;PORT=50000;DATABASE=testdb;UID=user;PWD=pass",
 		},
 		{
+			name: "lowercase native dsn passed through",
+			dsn:  "hostname=dbhost;port=50000;database=testdb;uid=user;pwd=pass",
+			want: "hostname=dbhost;port=50000;database=testdb;uid=user;pwd=pass",
+		},
+		{
+			name: "native dsn with whitespace passed through",
+			dsn:  "HOSTNAME=dbhost; DATABASE=testdb; UID=user",
+			want: "HOSTNAME=dbhost; DATABASE=testdb; UID=user",
+		},
+		{
 			name:    "wrong scheme",
 			dsn:     "postgres://dbhost/testdb",
 			wantErr: "expected db2:// scheme",

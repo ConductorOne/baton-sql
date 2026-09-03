@@ -24,6 +24,24 @@ func TestNativeDB2DSN(t *testing.T) {
 		{name: "native form with scheme db2", opts: ConnectOptions{DSN: native, Scheme: "db2"}, wantDSN: native, wantOk: true},
 		{name: "database marker only", opts: ConnectOptions{DSN: "DATABASE=TESTDB;HOST=x"}, wantDSN: "DATABASE=TESTDB;HOST=x", wantOk: true},
 		{
+			name:    "lowercase keywords",
+			opts:    ConnectOptions{DSN: "hostname=h;port=50000;database=X;uid=u;pwd=p"},
+			wantDSN: "hostname=h;port=50000;database=X;uid=u;pwd=p",
+			wantOk:  true,
+		},
+		{
+			name:    "whitespace after separators",
+			opts:    ConnectOptions{DSN: "HOSTNAME=h; DATABASE=X; UID=u"},
+			wantDSN: "HOSTNAME=h; DATABASE=X; UID=u",
+			wantOk:  true,
+		},
+		{
+			name:    "value containing :// is not a url",
+			opts:    ConnectOptions{DSN: "HOSTNAME=h;DATABASE=X;PWD=my://secret"},
+			wantDSN: "HOSTNAME=h;DATABASE=X;PWD=my://secret",
+			wantOk:  true,
+		},
+		{
 			name: "native form with placeholders",
 			opts: ConnectOptions{
 				DSN:    "HOSTNAME=${DB_HOST};PORT=50000;DATABASE=${DB_NAME};UID=u;PWD=p",
@@ -81,6 +99,16 @@ func TestResolveDatabaseNameNativeDB2(t *testing.T) {
 			name: "native form braced database",
 			opts: ConnectOptions{DSN: "HOSTNAME=h;DATABASE={my;db};UID=u"},
 			want: "my;db",
+		},
+		{
+			name: "lowercase database keyword",
+			opts: ConnectOptions{DSN: "hostname=h;database=testdb;uid=u"},
+			want: "testdb",
+		},
+		{
+			name: "whitespace before database keyword",
+			opts: ConnectOptions{DSN: "HOSTNAME=h; DATABASE=TESTDB; UID=u"},
+			want: "TESTDB",
 		},
 		{
 			name: "equivalent url form",
