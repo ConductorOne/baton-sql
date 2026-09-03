@@ -612,9 +612,8 @@ func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
 	return s.dbEngine == database.DB2
 }
 
-func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
+func (s *SQLSyncer) runValidationQueries(
 	ctx context.Context,
-	queries,
 	validationQueries []string,
 	vars map[string]any,
 	executor executor,
@@ -642,11 +641,11 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 		valid := result.Next()
 
 		if err := result.Err(); err != nil {
+			_ = result.Close()
 			return fmt.Errorf("failed to read validation query result: %w", err)
 		}
 
-		err = result.Close()
-		if err != nil {
+		if err := result.Close(); err != nil {
 			return fmt.Errorf("failed to close validation query result: %w", err)
 		}
 
@@ -656,6 +655,22 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 			}
 			return fmt.Errorf("validation query returned no rows")
 		}
+	}
+
+	return nil
+}
+
+func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	executor executor,
+) error {
+	l := ctxzap.Extract(ctx)
+
+	if err := s.runValidationQueries(ctx, validationQueries, vars, executor); err != nil {
+		return err
 	}
 
 	zeroRowCount := 0
@@ -1060,35 +1075,8 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 	}
 
-	for _, q := range validationQueries {
-		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
-		if err != nil {
-			return anno, fmt.Errorf("failed to prepare validation query: %w", err)
-		}
-
-		result, err := executor.QueryContext(ctx, q, qArgs...)
-		if err != nil {
-			return anno, fmt.Errorf("failed to execute validation query: %w", err)
-		}
-
-		valid := result.Next()
-
-		if err := result.Err(); err != nil {
-			_ = result.Close()
-			return anno, fmt.Errorf("failed to read validation query result: %w", err)
-		}
-
-		err = result.Close()
-		if err != nil {
-			return anno, fmt.Errorf("failed to close validation query result: %w", err)
-		}
-
-		if !valid {
-			if s.validationNoRowsMeansIdempotent() {
-				return anno, fmt.Errorf("grant provisioning: validation query returned no rows: %w", ErrQueryAffectedZeroRows)
-			}
-			return anno, fmt.Errorf("grant provisioning: validation query returned no rows")
-		}
+	if err := s.runValidationQueries(ctx, validationQueries, vars, executor); err != nil {
+		return anno, err
 	}
 
 	zeroRowCount := 0

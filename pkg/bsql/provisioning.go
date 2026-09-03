@@ -88,7 +88,8 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 	if err != nil {
 		if errors.Is(err, ErrQueryAffectedZeroRows) {
 			l.Debug("entitlement is already granted", zap.String("entitlement_id", entitlement.GetId()))
-			anno := annotations.Annotations{}
+			// Reuse the returned annotations so a GrantReplaced from an already-committed
+			// grant_replace revoke survives; a fresh set would drop it.
 			anno.Update(&v2.GrantAlreadyExists{})
 			return anno, nil
 		}
