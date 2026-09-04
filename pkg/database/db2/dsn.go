@@ -13,43 +13,51 @@ import (
 // (e.g. PWD=my://secret) is not misread as a URL.
 var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
-// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form rather than
-// a URL. Shared by pkg/database routing and convertToDB2DSN passthrough so they can't
-// drift. A third, separate check (pkg/bsql/offline_validate.go resolveConnectScheme,
-// ad-hoc "://") stays dormant while v1 validation allows only postgres; keep it in sync
-// if that ever accepts DB2. ODBC keywords are case-insensitive and keyword/value may
-// carry surrounding whitespace, so both are normalized.
-func IsNativeDSN(dsn string) bool {
+// ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (rather
+// than a URL) and, when it is, returns its DATABASE value ("" if the DSN omits one).
+// One pass over the DSN; IsNativeDSN and DSNDatabase are thin wrappers so all callers
+// (pkg/database routing, convertToDB2DSN passthrough, pkg/bsql offline scheme check)
+// share one decision and cannot drift. ODBC keywords are case-insensitive and
+// keyword/value may carry surrounding whitespace, so both are normalized.
+func ParseNativeDSN(dsn string) (string, bool) {
 	if urlSchemeRegex.MatchString(dsn) {
-		return false
+		return "", false
 	}
+	var database string
+	native, haveDB := false, false
 	for _, part := range splitDB2DSN(dsn) {
-		keyword, _, found := strings.Cut(part, "=")
+		keyword, value, found := strings.Cut(part, "=")
 		if !found {
 			continue
 		}
 		keyword = strings.TrimSpace(keyword)
-		if strings.EqualFold(keyword, "HOSTNAME") || strings.EqualFold(keyword, "DATABASE") {
-			return true
+		switch {
+		case strings.EqualFold(keyword, "HOSTNAME"):
+			native = true
+		case strings.EqualFold(keyword, "DATABASE"):
+			native = true
+			if !haveDB { // first DATABASE= wins
+				value = strings.TrimSpace(value)
+				if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
+					value = value[1 : len(value)-1]
+				}
+				database, haveDB = value, true
+			}
 		}
 	}
-	return false
+	return database, native
+}
+
+// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form.
+func IsNativeDSN(dsn string) bool {
+	_, native := ParseNativeDSN(dsn)
+	return native
 }
 
 // DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent.
 func DSNDatabase(dsn string) string {
-	for _, part := range splitDB2DSN(dsn) {
-		keyword, value, found := strings.Cut(part, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(keyword), "DATABASE") {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
-			value = value[1 : len(value)-1]
-		}
-		return value
-	}
-	return ""
+	database, _ := ParseNativeDSN(dsn)
+	return database
 }
 
 // splitDB2DSN splits a native DB2 DSN on ';', ignoring separators inside {} quoting.

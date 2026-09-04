@@ -361,8 +361,8 @@ func ResolveDatabaseName(opts ConnectOptions) string {
 			return expanded
 		}
 	}
-	if nativeDSN, isNativeDB2, err := nativeDB2DSN(opts); err == nil && isNativeDB2 {
-		return db2.DSNDatabase(nativeDSN)
+	if _, database, isNativeDB2, err := nativeDB2DSN(opts); err == nil && isNativeDB2 {
+		return database
 	}
 	parsedUrl, err := buildConnectionURL(opts)
 	if err != nil || parsedUrl == nil {
@@ -420,7 +420,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 	// A native DB2 DSN is an opaque ODBC keyword=value string, not a URL. Routing it
 	// through buildConnectionURL corrupts it (url.Parse/.String mangles the opaque form),
 	// so hand it to the driver verbatim. See docs/db2.md.
-	nativeDSN, isNativeDB2, err := nativeDB2DSN(opts)
+	nativeDSN, _, isNativeDB2, err := nativeDB2DSN(opts)
 	if err != nil {
 		return nil, Unknown, err
 	}
@@ -511,31 +511,33 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 
 // nativeDB2DSN reports whether opts carries a native DB2 DSN: an opaque ODBC
 // keyword=value string (e.g. "HOSTNAME=...;DATABASE=...") rather than a db2:// URL.
-// When it does, the env-expanded string is returned for verbatim handoff to the driver.
-// The scheme, when set, must be db2; a URL-shaped DSN or foreign scheme is left to the
-// normal URL path. Detection is db2.IsNativeDSN, shared with convertToDB2DSN's passthrough.
-func nativeDB2DSN(opts ConnectOptions) (string, bool, error) {
+// When it does, the env-expanded string (for verbatim handoff to the driver) and its
+// DATABASE value are returned. The scheme, when set, must be db2; a URL-shaped DSN or
+// foreign scheme is left to the normal URL path. Detection is db2.ParseNativeDSN, shared
+// with convertToDB2DSN's passthrough, so one pass yields both facts without re-splitting.
+func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
 	if opts.DSN == "" {
-		return "", false, nil
+		return "", "", false, nil
 	}
 	lookup := opts.resolveLookup()
 
 	scheme, err := expandValue(opts.Scheme, lookup)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if scheme != "" && scheme != "db2" {
-		return "", false, nil
+		return "", "", false, nil
 	}
 
 	dsn, err := expandValue(opts.DSN, lookup)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
-	if !db2.IsNativeDSN(dsn) {
-		return "", false, nil
+	database, native := db2.ParseNativeDSN(dsn)
+	if !native {
+		return "", "", false, nil
 	}
-	return dsn, true, nil
+	return dsn, database, true, nil
 }
 
 func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
