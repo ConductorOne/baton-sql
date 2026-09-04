@@ -20,7 +20,7 @@ var (
 	Config = field.NewConfiguration(
 		ConfigurationFields,
 		field.WithConnectorDisplayName("SQL"),
-		field.WithHelpUrl("/docs/baton/sql"),
+		field.WithHelpUrl("/docs/baton/baton-sql"),
 		field.WithIconUrl("/static/app-icons/sql.svg"),
 	)
 )
