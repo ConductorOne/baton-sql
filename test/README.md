@@ -2,9 +2,11 @@
 
 This directory contains comprehensive testing infrastructure for the baton-sql connector, including database initialization scripts and Docker configurations for random password generation across multiple database engines.
 
-## Supported Databases
+## Databases with a local test harness
 
-The testing environment supports all major database engines:
+This directory provides Docker-based test harnesses for the engines below. For the full set
+of database engines the connector supports (including SAP HANA, Vertica, Amazon Redshift, and
+opt-in IBM DB2), see [Supported Database Engines](../README.md#supported-database-engines).
 
 - **MySQL** - With SHA2-256 password hashing and account provisioning
 - **PostgreSQL** - With bcrypt password hashing via pgcrypto extension
