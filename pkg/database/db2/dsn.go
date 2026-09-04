@@ -13,17 +13,23 @@ import (
 // (e.g. PWD=my://secret) is not misread as a URL.
 var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
-// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form rather
-// than a URL. Shared by pkg/database's routing and convertToDB2DSN's passthrough so
-// the two decisions cannot drift. ODBC keywords are case-insensitive and parts may
-// carry whitespace after the ';', so both are normalized.
+// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form rather than
+// a URL. Shared by pkg/database routing and convertToDB2DSN passthrough so they can't
+// drift. A third, separate check (pkg/bsql/offline_validate.go resolveConnectScheme,
+// ad-hoc "://") stays dormant while v1 validation allows only postgres; keep it in sync
+// if that ever accepts DB2. ODBC keywords are case-insensitive and keyword/value may
+// carry surrounding whitespace, so both are normalized.
 func IsNativeDSN(dsn string) bool {
 	if urlSchemeRegex.MatchString(dsn) {
 		return false
 	}
 	for _, part := range splitDB2DSN(dsn) {
-		keyword, _, found := strings.Cut(strings.TrimSpace(part), "=")
-		if found && (strings.EqualFold(keyword, "HOSTNAME") || strings.EqualFold(keyword, "DATABASE")) {
+		keyword, _, found := strings.Cut(part, "=")
+		if !found {
+			continue
+		}
+		keyword = strings.TrimSpace(keyword)
+		if strings.EqualFold(keyword, "HOSTNAME") || strings.EqualFold(keyword, "DATABASE") {
 			return true
 		}
 	}
@@ -33,10 +39,11 @@ func IsNativeDSN(dsn string) bool {
 // DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent.
 func DSNDatabase(dsn string) string {
 	for _, part := range splitDB2DSN(dsn) {
-		keyword, value, found := strings.Cut(strings.TrimSpace(part), "=")
-		if !found || !strings.EqualFold(keyword, "DATABASE") {
+		keyword, value, found := strings.Cut(part, "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(keyword), "DATABASE") {
 			continue
 		}
+		value = strings.TrimSpace(value)
 		if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
 			value = value[1 : len(value)-1]
 		}
@@ -46,20 +53,23 @@ func DSNDatabase(dsn string) string {
 }
 
 // splitDB2DSN splits a native DB2 DSN on ';', ignoring separators inside {} quoting.
-// ODBC only treats '{' as quoting when a value starts with it (right after '='); a '{'
-// anywhere else is literal, so PWD=p{q does not swallow the following ';'.
+// A '{' quotes only when it starts a value (right after '=', across any whitespace) AND
+// is closed by a later '}'. A '{' elsewhere, or one left unterminated, is literal, so
+// PWD=p{q keeps the following ';' and an unclosed '{' does not swallow the rest of the
+// DSN (its HOSTNAME/DATABASE markers stay visible and the malformed value reaches the
+// driver's own error rather than a silent misroute).
 func splitDB2DSN(dsn string) []string {
 	var parts []string
 	start := 0
 	braced := false       // inside a {...} quoted value
-	atValueStart := false // previous char was '=' outside braces
+	atValueStart := false // at a value position (right after '=', across whitespace) outside braces
 	for i := 0; i < len(dsn); i++ {
 		switch dsn[i] {
 		case '}':
 			braced = false
 			atValueStart = false
 		case '{':
-			if atValueStart {
+			if atValueStart && strings.IndexByte(dsn[i:], '}') != -1 {
 				braced = true
 			}
 			atValueStart = false
@@ -73,6 +83,8 @@ func splitDB2DSN(dsn string) []string {
 				start = i + 1
 			}
 			atValueStart = false
+		case ' ', '\t':
+			// keep atValueStart so "DATABASE= {my;db}" still brace-detects.
 		default:
 			atValueStart = false
 		}

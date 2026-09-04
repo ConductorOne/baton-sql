@@ -125,9 +125,13 @@ func TestIsNativeDSN(t *testing.T) {
 		{name: "db2 url", dsn: "db2://u:p@h:50000/db", want: false},
 		{name: "postgres url", dsn: "postgres://h/db", want: false},
 		{name: "value carrying :// is not a url", dsn: "HOSTNAME=h;PWD=my://secret", want: true},
+		{name: "space before the =", dsn: "DATABASE = X", want: true},
 		// DATABASE= appears only inside a braced PWD value, so the brace-aware split keeps it
 		// as one PWD part: not a native marker. Routing and passthrough now agree here.
 		{name: "database marker only inside braced value", dsn: "UID=u;PWD={x;DATABASE=y}", want: false},
+		// Unterminated '{' is literal, so the ';' still splits and DATABASE= stays visible;
+		// the malformed value then reaches the driver instead of silently misrouting.
+		{name: "unterminated brace keeps marker visible", dsn: "PWD={oops;DATABASE=X", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -146,6 +150,11 @@ func TestDSNDatabase(t *testing.T) {
 		{name: "braced value with semicolon", dsn: "HOSTNAME=h;DATABASE={my;db}", want: "my;db"},
 		{name: "lowercase", dsn: "hostname=h;database=testdb", want: "testdb"},
 		{name: "whitespace before keyword", dsn: "HOSTNAME=h; DATABASE=TESTDB", want: "TESTDB"},
+		{name: "space after the =", dsn: "HOSTNAME=h;DATABASE= TESTDB", want: "TESTDB"},
+		{name: "space before the =", dsn: "HOSTNAME=h;DATABASE = TESTDB", want: "TESTDB"},
+		// Space between '=' and a braced value must still brace-detect, else the ';'
+		// inside the braces splits and the database name comes back truncated.
+		{name: "space before braced value", dsn: "HOSTNAME=h;DATABASE= {my;db}", want: "my;db"},
 		// A literal '{' mid-value (not ODBC quoting) must not swallow the following ';'.
 		{name: "unquoted brace in earlier value", dsn: "HOSTNAME=h;PWD=p{q;DATABASE=TESTDB", want: "TESTDB"},
 		{name: "absent", dsn: "HOSTNAME=h;UID=u", want: ""},
