@@ -424,7 +424,7 @@ type EntitlementProvisioningQueries struct {
 
 	// ValidationQueries is a list of SQL statements run before the provisioning queries.
 	// On engines that report rows-affected, a query returning no rows fails the operation
-	// (an existence precondition). On DDL-based engines (Db2, Oracle) that don't report rows-affected,
+	// (an existence precondition). On DDL-based engines (Db2) that don't report rows-affected,
 	// a query returning no rows instead means the state is already as desired, so the operation
 	// is reported as an idempotent success (GrantAlreadyExists / GrantAlreadyRevoked).
 	//

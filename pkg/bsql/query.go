@@ -616,20 +616,14 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 	return exists, nil
 }
 
-// validationNoRowsMeansIdempotent reports whether a validation query returning no
-// rows should be treated as "already in the desired state" rather than a failed
-// precondition. DDL-based engines (Db2, Oracle) need this: their GRANT/REVOKE don't
-// report rows-affected, so a repeat statement looks identical to a fresh one and the
-// validation query is the only zero-effect signal. (On Oracle a repeat GRANT succeeds
-// silently while an already-applied REVOKE raises ORA-01951.) Engines that report
-// rows-affected keep using validation queries as existence preconditions that fail loudly.
+// validationNoRowsMeansIdempotent reports whether a validation query returning no rows
+// means "already in the desired state" rather than a failed precondition. Only Db2 needs
+// it today: its DDL GRANT/REVOKE don't report rows-affected, so the validation query is the
+// only zero-effect signal, and Db2 ships opt-in behind the db2 build tag. Oracle and other
+// DDL engines are a follow-up: they ship default-on, so flipping this would break existing
+// configs that use validation_queries as loud preconditions, and need a per-config opt-in first.
 func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
-	switch s.dbEngine {
-	case database.DB2, database.Oracle:
-		return true
-	default:
-		return false
-	}
+	return s.dbEngine == database.DB2
 }
 
 func (s *SQLSyncer) runValidationQueries(
@@ -671,7 +665,8 @@ func (s *SQLSyncer) runValidationQueries(
 
 		if !valid {
 			if s.validationNoRowsMeansIdempotent() {
-				return ErrValidationNoRows
+				l.Warn("validation query returned no rows; treating as idempotent success", zap.String("query", q))
+				return fmt.Errorf("validation query %q returned no rows: %w", q, ErrValidationNoRows)
 			}
 			return fmt.Errorf("validation query %q returned no rows", q)
 		}
