@@ -124,6 +124,27 @@ func TestRejectNonV1_NonPostgresScheme(t *testing.T) {
 	require.Contains(t, strings.ToLower(err.Error()), "postgres")
 }
 
+func TestRejectNonV1_NativeDB2DSNRejectedAsDB2(t *testing.T) {
+	// A native DB2 DSN carries no scheme prefix; it must be classified as "db2" (via the
+	// shared detector), so v1 rejects it with the scheme message rather than the confusing
+	// "scheme missing from dsn". Also guards against a "://" inside a value misclassifying it.
+	for _, dsn := range []string{
+		"HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=u;PWD=p;PROTOCOL=TCPIP",
+		"HOSTNAME=localhost;DATABASE=TESTDB;PWD=my://secret",
+	} {
+		cfg, err := Parse([]byte(minimalPostgresYAML()))
+		require.NoError(t, err)
+		cfg.Connect.Scheme = ""
+		cfg.Connect.DSN = dsn
+		s, err := resolveConnectScheme(&cfg.Connect)
+		require.NoError(t, err)
+		require.Equal(t, "db2", s)
+		err = RejectNonV1ProductFeatures(cfg)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "db2")
+	}
+}
+
 func TestRejectNonV1_PostgresqlAliasRejected(t *testing.T) {
 	cfg, err := Parse([]byte(minimalPostgresYAML()))
 	require.NoError(t, err)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/conductorone/baton-sql/pkg/database/db2"
 )
 
 // OfflineValidate performs YAML-level structural checks without opening a DB or
@@ -101,6 +103,12 @@ func resolveConnectScheme(c *DatabaseConfig) (string, error) {
 	dsn := strings.TrimSpace(c.DSN)
 	if dsn == "" {
 		return "", errors.New("connect: scheme or dsn is required")
+	}
+	// A native DB2 DSN (HOSTNAME=...;DATABASE=...) carries no scheme prefix. Classify it
+	// via the shared detector so this check matches pkg/database's routing and does not
+	// misread a "://" inside a value as a scheme.
+	if db2.IsNativeDSN(dsn) {
+		return "db2", nil
 	}
 	// Placeholders like postgres://${HOST}/db — peel scheme before parse when possible.
 	if idx := strings.Index(dsn, "://"); idx > 0 {
