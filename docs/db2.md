@@ -221,6 +221,15 @@ the OS libxml2 package: `apt-get install libxml2` / `yum install libxml2`.
 **`go vet` / `golangci-lint` with `-tags db2` fails** — type-checking the tagged path needs
 the clidriver headers too. Default-tag lint and vet need nothing.
 
+## Provisioning: `validation_queries` semantics
+
+Db2 is DDL-based: its `GRANT`/`REVOKE` don't report rows-affected, so a `validation_query`
+returning no rows is treated as an idempotent success, not a failed precondition. Db2 is the
+only engine with this behavior today, and it ships opt-in behind the `db2` build tag. It means
+you must not use `validation_queries` as existence preconditions on Db2. See
+[Provisioning: `validation_queries` semantics](provisioning.md) for the full explanation and
+examples.
+
 ## Docker
 
 - The default release pipeline (goreleaser, `CGO_ENABLED=0`) is unaffected — DB2 does not

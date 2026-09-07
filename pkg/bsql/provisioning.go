@@ -88,9 +88,15 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 	if err != nil {
 		if errors.Is(err, ErrQueryAffectedZeroRows) {
 			l.Debug("entitlement is already granted", zap.String("entitlement_id", entitlement.GetId()))
-			anno := annotations.Annotations{}
-			anno.Update(&v2.GrantAlreadyExists{})
-			return anno, nil
+			// On the transactional path the zero-rows return rolls the tx back, undoing any
+			// grant_replace revoke, so a reused GrantReplaced would misreport a removal the DB
+			// no longer reflects. Keep the returned annotations only on the no_transaction path,
+			// where the replace already committed.
+			if provisioningConfig.Grant.NoTransaction {
+				anno.Update(&v2.GrantAlreadyExists{})
+				return anno, nil
+			}
+			return annotations.New(&v2.GrantAlreadyExists{}), nil
 		}
 		return nil, err
 	}
