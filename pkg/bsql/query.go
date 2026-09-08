@@ -665,7 +665,7 @@ func (s *SQLSyncer) runValidationQueries(
 
 		if !valid {
 			if s.validationNoRowsMeansIdempotent() {
-				l.Warn("validation query returned no rows; treating as idempotent success", zap.String("query", q))
+				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q))
 				return fmt.Errorf("validation query %q returned no rows: %w", q, ErrValidationNoRows)
 			}
 			return fmt.Errorf("validation query %q returned no rows", q)
@@ -1077,10 +1077,10 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				executor,
 			)
 			if err != nil {
-				// A zero-rows sentinel means the replace revoke had nothing to remove: either
-				// its validation query found no rows on a DDL engine, or the revoke queries
-				// matched nothing on any engine. Either way the old grant is already gone, the
-				// state a replace aims for, so report GrantReplaced. Any other error aborts.
+				// A zero-rows sentinel means the replace revoke had nothing to remove: the revoke
+				// queries matched nothing, or (Db2 only) a validation query returned no rows. Reporting
+				// the latter as GrantReplaced is load-bearing on the Db2 validation_queries contract that
+				// no-rows means "already gone"; don't generalize it to existence-precondition queries.
 				if !errors.Is(err, ErrQueryAffectedZeroRows) {
 					return anno, err
 				}
