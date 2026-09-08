@@ -4,32 +4,36 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/conductorone/baton-sdk/pkg/uhttp"
+	"github.com/conductorone/baton-sql/pkg/database/db2"
 	"github.com/go-sql-driver/mysql"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const mysqlAccessDenied = 1045
 
-// AuthError returns an Unauthenticated gRPC status when err is a database
-// authentication/authorization failure, or nil otherwise. SQLSTATE class 28
-// ("invalid authorization") is the ANSI code drivers report on bad credentials
-// (Postgres/Redshift/Vertica/etc. surface it via SQLState()); MySQL is the
-// exception, reporting error 1045 with no SQLSTATE.
+// AuthError wraps err in an Unauthenticated gRPC status when it is a database
+// authentication failure, or returns nil otherwise. Each driver surfaces bad
+// credentials differently: SQLSTATE class 28 via a SQLState() method (Postgres/
+// Redshift/Vertica), MySQL error 1045 with no SQLSTATE, and DB2 in a driver-specific
+// field (see db2.IsAuthError). Wrapping keeps the original error for errors.As.
 func AuthError(err error) error {
-	if err == nil {
+	if err == nil || !isAuthFailure(err) {
 		return nil
 	}
+	return uhttp.WrapErrors(codes.Unauthenticated, "database authentication failed", err)
+}
 
+func isAuthFailure(err error) bool {
 	var sqlState interface{ SQLState() string }
 	if errors.As(err, &sqlState) && strings.HasPrefix(sqlState.SQLState(), "28") {
-		return status.Error(codes.Unauthenticated, "database authentication failed")
+		return true
 	}
 
 	var myErr *mysql.MySQLError
 	if errors.As(err, &myErr) && myErr.Number == mysqlAccessDenied {
-		return status.Error(codes.Unauthenticated, "database authentication failed")
+		return true
 	}
 
-	return nil
+	return db2.IsAuthError(err)
 }
