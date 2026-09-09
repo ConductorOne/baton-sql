@@ -18,6 +18,8 @@ import (
 	"github.com/conductorone/baton-sql/pkg/database/postgres"
 	"github.com/conductorone/baton-sql/pkg/database/sqlserver"
 	"github.com/conductorone/baton-sql/pkg/database/vertica"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
@@ -431,10 +433,10 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 		// on the verbatim path, so reject the combination instead of connecting to the
 		// wrong database. See docs/db2.md.
 		if hasStructuredConnectFields(opts) {
-			return nil, Unknown, errors.New(
-				"native DB2 DSN is self-contained and cannot be combined with structured " +
-					"connect fields (host, port, user, password, params) or a per-database " +
-					"override (connect.database, databases); put every setting in the DSN or " +
+			return nil, Unknown, status.Error(codes.InvalidArgument,
+				"native DB2 DSN is self-contained and cannot be combined with structured "+
+					"connect fields (host, port, user, password, params) or a per-database "+
+					"override (connect.database, databases); put every setting in the DSN or "+
 					"use the db2:// URL form",
 			)
 		}
@@ -451,7 +453,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 	}
 
 	if parsedDsn.Scheme == "" {
-		return nil, Unknown, errors.New("database scheme must be specified in DSN or configuration")
+		return nil, Unknown, status.Error(codes.InvalidArgument, "database scheme must be specified in DSN or configuration")
 	}
 
 	switch parsedDsn.Scheme {
@@ -533,11 +535,17 @@ func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
 	if err != nil {
 		return "", "", false, err
 	}
-	database, native := db2.ParseNativeDSN(dsn)
-	if !native {
+	if _, native := db2.ParseNativeDSN(dsn); !native {
 		return "", "", false, nil
 	}
-	return dsn, database, true, nil
+	// Confirmed native: re-expand with keyword-injection validation. The expansion above
+	// only decides routing; the driver gets this string verbatim.
+	safeDSN, err := expandNativeDSN(opts.DSN, lookup)
+	if err != nil {
+		return "", "", false, err
+	}
+	database, _ := db2.ParseNativeDSN(safeDSN)
+	return safeDSN, database, true, nil
 }
 
 func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
@@ -676,4 +684,40 @@ func expandValue(s string, lookup LookupFunc) (string, error) {
 		return updateFromLookup(s, lookup)
 	}
 	return s, nil
+}
+
+// expandNativeDSN expands ${KEY} placeholders in a native DB2 DSN, rejecting any expanded
+// value that carries an ODBC keyword separator (; { } =). The db2:// URL path quotes each
+// field with quoteDB2Value, but a native DSN is handed to the driver verbatim, so a
+// placeholder value here could otherwise inject or override DSN keywords.
+func expandNativeDSN(dsn string, lookup LookupFunc) (string, error) {
+	if !DSNREnvRegex.MatchString(dsn) {
+		return dsn, nil
+	}
+	// A DSN that is a single ${KEY} spanning the whole string is the full value, not a
+	// field embedded in literal structure, so its separators are legitimate: expand as-is.
+	if DSNREnvRegex.FindString(dsn) == dsn {
+		return expandValue(dsn, lookup)
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	var err error
+	result := DSNREnvRegex.ReplaceAllStringFunc(dsn, func(match string) string {
+		varName := match[2 : len(match)-1]
+		value, exists := lookup(varName)
+		if !exists {
+			err = errors.Join(err, fmt.Errorf("environment variable %s is not set", varName))
+			return match
+		}
+		if strings.ContainsAny(value, ";{}=") {
+			err = errors.Join(err, fmt.Errorf("value for %s must not contain ODBC keyword separators (; { } =)", varName))
+			return match
+		}
+		return value
+	})
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }

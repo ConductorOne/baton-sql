@@ -98,7 +98,7 @@ func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, erro
 	for name, db := range c.dbs {
 		if err := db.PingContext(ctx); err != nil {
 			if authErr := database.AuthError(err); authErr != nil {
-				return nil, authErr
+				return nil, fmt.Errorf("database %q: %w", name, authErr)
 			}
 			return nil, fmt.Errorf("database %q ping failed: %w", name, err)
 		}

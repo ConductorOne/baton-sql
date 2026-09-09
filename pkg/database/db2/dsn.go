@@ -15,10 +15,13 @@ var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
 // ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (rather
 // than a URL) and, when it is, returns its DATABASE value ("" if the DSN omits one).
-// One pass over the DSN; IsNativeDSN and DSNDatabase are thin wrappers so all callers
-// (pkg/database routing, convertToDB2DSN passthrough, pkg/bsql offline scheme check)
-// share one decision and cannot drift. ODBC keywords are case-insensitive and
-// keyword/value may carry surrounding whitespace, so both are normalized.
+// The HOSTNAME keyword is the native marker: DATABASE alone does not qualify, because
+// generic ODBC/ADO strings from other engines (e.g. "Server=x;Database=y") also carry
+// DATABASE and would otherwise be misrouted to the DB2 driver instead of failing with
+// the normal scheme-missing error. One pass over the DSN; IsNativeDSN and DSNDatabase
+// are thin wrappers so all callers (pkg/database routing, convertToDB2DSN passthrough,
+// pkg/bsql offline scheme check) share one decision and cannot drift. ODBC keywords are
+// case-insensitive and keyword/value may carry surrounding whitespace, so both are normalized.
 func ParseNativeDSN(dsn string) (string, bool) {
 	if urlSchemeRegex.MatchString(dsn) {
 		return "", false
@@ -35,7 +38,6 @@ func ParseNativeDSN(dsn string) (string, bool) {
 		case strings.EqualFold(keyword, "HOSTNAME"):
 			native = true
 		case strings.EqualFold(keyword, "DATABASE"):
-			native = true
 			if !haveDB { // first DATABASE= wins
 				value = strings.TrimSpace(value)
 				if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {

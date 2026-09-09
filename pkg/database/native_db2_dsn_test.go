@@ -22,7 +22,9 @@ func TestNativeDB2DSN(t *testing.T) {
 	}{
 		{name: "native form no scheme", opts: ConnectOptions{DSN: native}, wantDSN: native, wantOk: true},
 		{name: "native form with scheme db2", opts: ConnectOptions{DSN: native, Scheme: "db2"}, wantDSN: native, wantOk: true},
-		{name: "database marker only", opts: ConnectOptions{DSN: "DATABASE=TESTDB;HOST=x"}, wantDSN: "DATABASE=TESTDB;HOST=x", wantOk: true},
+		// DATABASE without HOSTNAME is a generic ODBC/ADO shape, not native DB2: it must
+		// fall through to the normal scheme check rather than route to the DB2 driver.
+		{name: "database marker only is not native", opts: ConnectOptions{DSN: "DATABASE=TESTDB;HOST=x"}, wantDSN: "", wantOk: false},
 		{
 			name:    "lowercase keywords",
 			opts:    ConnectOptions{DSN: "hostname=h;port=50000;database=X;uid=u;pwd=p"},
@@ -121,4 +123,29 @@ func TestResolveDatabaseNameNativeDB2(t *testing.T) {
 			require.Equal(t, tt.want, ResolveDatabaseName(tt.opts))
 		})
 	}
+}
+
+func TestExpandNativeDSN(t *testing.T) {
+	lookup := func(k string) (string, bool) {
+		m := map[string]string{"H": "dbhost", "PW": "secret", "BAD": "x;DATABASE=other"}
+		v, ok := m[k]
+		return v, ok
+	}
+
+	got, err := expandNativeDSN("HOSTNAME=${H};PWD=${PW}", lookup)
+	require.NoError(t, err)
+	require.Equal(t, "HOSTNAME=dbhost;PWD=secret", got)
+
+	// A placeholder value carrying ODBC separators can't inject extra keywords.
+	_, err = expandNativeDSN("HOSTNAME=${H};PWD=${BAD}", lookup)
+	require.ErrorContains(t, err, "ODBC keyword separators")
+
+	// A single ${KEY} spanning the whole DSN is the full value, so its separators are kept.
+	whole := func(k string) (string, bool) { return "HOSTNAME=h;DATABASE=d", k == "DSN" }
+	got, err = expandNativeDSN("${DSN}", whole)
+	require.NoError(t, err)
+	require.Equal(t, "HOSTNAME=h;DATABASE=d", got)
+
+	_, err = expandNativeDSN("HOSTNAME=${MISSING}", lookup)
+	require.ErrorContains(t, err, "is not set")
 }

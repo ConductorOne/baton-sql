@@ -125,13 +125,15 @@ func TestIsNativeDSN(t *testing.T) {
 		{name: "db2 url", dsn: "db2://u:p@h:50000/db", want: false},
 		{name: "postgres url", dsn: "postgres://h/db", want: false},
 		{name: "value carrying :// is not a url", dsn: "HOSTNAME=h;PWD=my://secret", want: true},
-		{name: "space before the =", dsn: "DATABASE = X", want: true},
-		// DATABASE= appears only inside a braced PWD value, so the brace-aware split keeps it
-		// as one PWD part: not a native marker. Routing and passthrough now agree here.
-		{name: "database marker only inside braced value", dsn: "UID=u;PWD={x;DATABASE=y}", want: false},
-		// Unterminated '{' is literal, so the ';' still splits and DATABASE= stays visible;
+		{name: "space before the =", dsn: "HOSTNAME = h;DATABASE=X", want: true},
+		// DATABASE without HOSTNAME is a generic ODBC/ADO shape (e.g. MSSQL), not native DB2.
+		{name: "database without hostname is not native", dsn: "Server=x;Database=y;User Id=u", want: false},
+		// HOSTNAME appears only inside a braced PWD value, so the brace-aware split keeps it
+		// as one PWD part: not a native marker.
+		{name: "hostname marker only inside braced value", dsn: "UID=u;PWD={x;HOSTNAME=y}", want: false},
+		// Unterminated '{' is literal, so the ';' still splits and HOSTNAME= stays visible;
 		// the malformed value then reaches the driver instead of silently misrouting.
-		{name: "unterminated brace keeps marker visible", dsn: "PWD={oops;DATABASE=X", want: true},
+		{name: "unterminated brace keeps marker visible", dsn: "PWD={oops;HOSTNAME=h", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -15,8 +15,10 @@ const mysqlAccessDenied = 1045
 // AuthError wraps err in an Unauthenticated gRPC status when it is a database
 // authentication failure, or returns nil otherwise. Each driver surfaces bad
 // credentials differently: SQLSTATE class 28 via a SQLState() method (Postgres/
-// Redshift/Vertica), MySQL error 1045 with no SQLSTATE, and DB2 in a driver-specific
-// field (see db2.IsAuthError). Wrapping keeps the original error for errors.As.
+// Redshift), MySQL error 1045 with no SQLSTATE, and DB2 in a driver-specific
+// field (see db2.IsAuthError). Drivers that expose SQLSTATE only as a struct field
+// (Vertica) or not at all (Oracle, MSSQL, SAP HDB) are not covered and fall through
+// to a generic ping error. Wrapping keeps the original error for errors.As.
 func AuthError(err error) error {
 	if err == nil || !isAuthFailure(err) {
 		return nil
