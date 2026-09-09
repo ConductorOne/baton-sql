@@ -428,6 +428,7 @@ func (s *SQLSyncer) RunProvisioningQueries(
 		ctx,
 		queries,
 		validationQueries,
+		"provisioning",
 		vars,
 		executor,
 	)
@@ -463,8 +464,9 @@ func (s *SQLSyncer) RunProvisioningQueries(
 //
 // When every revoke query affects zero rows the function still commits and
 // probes, then returns ErrQueryAffectedZeroRows so the caller can report
-// GrantAlreadyRevoked — combined with ResourceDeleted when the principal is
-// also gone, so retried revokes still surface the deletion.
+// GrantAlreadyRevoked, combined with ResourceDeleted when the principal is also
+// gone. Exception: when the zero-rows came from a DDL validation query no revoke
+// ran, so the probe is skipped and the deletion is not reported.
 func (s *SQLSyncer) RunRevokeProvisioning(
 	ctx context.Context,
 	queries,
@@ -551,7 +553,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	}
 
 	var allZero, fromValidation bool
-	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, vars, executor)
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", vars, executor)
 	if err != nil {
 		if !errors.Is(err, ErrQueryAffectedZeroRows) {
 			return false, false, err
@@ -629,6 +631,7 @@ func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
 func (s *SQLSyncer) runValidationQueries(
 	ctx context.Context,
 	validationQueries []string,
+	operation string,
 	vars map[string]any,
 	executor executor,
 ) error {
@@ -665,10 +668,10 @@ func (s *SQLSyncer) runValidationQueries(
 
 		if !valid {
 			if s.validationNoRowsMeansIdempotent() {
-				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q))
-				return fmt.Errorf("validation query %q returned no rows: %w", q, ErrValidationNoRows)
+				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q), zap.String("operation", operation))
+				return fmt.Errorf("%s: validation query %q returned no rows: %w", operation, q, ErrValidationNoRows)
 			}
-			return fmt.Errorf("validation query %q returned no rows", q)
+			return fmt.Errorf("%s: validation query %q returned no rows", operation, q)
 		}
 	}
 
@@ -679,12 +682,13 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
+	operation string,
 	vars map[string]any,
 	executor executor,
 ) error {
 	l := ctxzap.Extract(ctx)
 
-	if err := s.runValidationQueries(ctx, validationQueries, vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, operation, vars, executor); err != nil {
 		return err
 	}
 
@@ -1073,6 +1077,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				ctx,
 				provisioningConfig.Revoke.Queries,
 				provisioningConfig.Revoke.ValidationQueries,
+				"grant_replace revoke",
 				provisioningVars,
 				executor,
 			)
@@ -1094,7 +1099,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 	}
 
-	if err := s.runValidationQueries(ctx, validationQueries, vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", vars, executor); err != nil {
 		return anno, err
 	}
 

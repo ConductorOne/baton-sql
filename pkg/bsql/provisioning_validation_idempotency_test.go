@@ -158,6 +158,7 @@ func TestRunProvisioningQueriesWithExecutor_ValidationNoRowsWrapsSentinel(t *tes
 		t.Context(),
 		[]string{`DELETE FROM user_roles WHERE user_id = ?<principal_id>`},
 		[]string{revokeValidationQuery},
+		"revoke provisioning",
 		map[string]any{"principal_id": "user-1", "role": "admin"},
 		db,
 	)

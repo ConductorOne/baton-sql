@@ -230,6 +230,12 @@ you must not use `validation_queries` as existence preconditions on Db2. See
 [Provisioning: `validation_queries` semantics](provisioning.md) for the full explanation and
 examples.
 
+The same no-rows rule applies to the revoke inside a `grant_replace`. When a grant replaces an
+existing grant, its revoke runs first; if that revoke's `validation_query` returns no rows on
+Db2, the old grant is already gone, so the connector reports `GrantReplaced` (telling
+ConductorOne to drop the old grant) instead of failing. Write that `validation_query` to answer
+"is the old grant still present?" so no rows genuinely means "already removed".
+
 ## Docker
 
 - The default release pipeline (goreleaser, `CGO_ENABLED=0`) is unaffected — DB2 does not
