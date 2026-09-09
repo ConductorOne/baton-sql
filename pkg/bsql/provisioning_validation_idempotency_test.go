@@ -17,6 +17,10 @@ const grantValidationQuery = `SELECT 1 FROM users u WHERE u.id = ?<principal_id>
 const revokeValidationQuery = `SELECT 1 FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`
 
 func withValidationQueryConfig(s *SQLSyncer) {
+	withValidationQueryConfigSignal(s, true)
+}
+
+func withValidationQueryConfigSignal(s *SQLSyncer, signalIdempotency bool) {
 	s.config = ResourceType{
 		StaticEntitlements: []*EntitlementMapping{
 			{
@@ -28,14 +32,16 @@ func withValidationQueryConfig(s *SQLSyncer) {
 					},
 					Grant: &GrantEntitlementProvisioningQueries{
 						EntitlementProvisioningQueries: EntitlementProvisioningQueries{
-							ValidationQueries: []string{grantValidationQuery},
-							Queries:           []string{`INSERT INTO user_roles (user_id, role) VALUES (?<principal_id>, ?<role>)`},
+							ValidationQueries:                  []string{grantValidationQuery},
+							ValidationQueriesSignalIdempotency: signalIdempotency,
+							Queries:                            []string{`INSERT INTO user_roles (user_id, role) VALUES (?<principal_id>, ?<role>)`},
 						},
 					},
 					Revoke: &RevokeEntitlementProvisioningQueries{
 						EntitlementProvisioningQueries: EntitlementProvisioningQueries{
-							ValidationQueries: []string{revokeValidationQuery},
-							Queries:           []string{`DELETE FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`},
+							ValidationQueries:                  []string{revokeValidationQuery},
+							ValidationQueriesSignalIdempotency: signalIdempotency,
+							Queries:                            []string{`DELETE FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`},
 						},
 					},
 				},
@@ -159,10 +165,37 @@ func TestRunProvisioningQueriesWithExecutor_ValidationNoRowsWrapsSentinel(t *tes
 		[]string{`DELETE FROM user_roles WHERE user_id = ?<principal_id>`},
 		[]string{revokeValidationQuery},
 		"revoke provisioning",
+		true,
 		map[string]any{"principal_id": "user-1", "role": "admin"},
 		db,
 	)
 	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
 	// guard the operation prefix so a rebase can't silently drop it (it's the only per-call diagnostic once swallowed into an annotation)
 	require.Contains(t, err.Error(), "revoke provisioning")
+}
+
+// With the opt-in off, a no-rows validation result must fail loudly even on a DDL engine:
+// the default keeps validation_queries as a hard existence precondition.
+func TestGrant_ValidationNoRowsWithoutOptInFailsLoudly(t *testing.T) {
+	s, db := newRevokeProvisioningTestSyncer(t)
+	withValidationQueryConfigSignal(s, false)
+	s.dbEngine = database.DB2
+	// membership already present: the grant validation query returns no rows
+	seedUserWithRoles(t, db, "user-1", "admin")
+
+	annos, err := s.Grant(t.Context(), userPrincipal("user-1"), memberEntitlementFor("admin"))
+	require.Error(t, err)
+	require.Nil(t, annos)
+	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
+}
+
+func TestRevoke_ValidationNoRowsWithoutOptInFailsLoudly(t *testing.T) {
+	s, _ := newRevokeProvisioningTestSyncer(t)
+	withValidationQueryConfigSignal(s, false)
+	s.dbEngine = database.DB2
+	// nothing seeded: the revoke validation query returns no rows
+
+	annos, err := s.Revoke(t.Context(), revokeGrantFor("user-1", "admin"))
+	require.Error(t, err)
+	require.Nil(t, annos)
 }

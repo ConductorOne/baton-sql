@@ -391,6 +391,7 @@ func (s *SQLSyncer) RunProvisioningQueries(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
+	signalIdempotency bool,
 	vars map[string]any,
 	useTx bool,
 ) error {
@@ -429,6 +430,7 @@ func (s *SQLSyncer) RunProvisioningQueries(
 		queries,
 		validationQueries,
 		"provisioning",
+		signalIdempotency,
 		vars,
 		executor,
 	)
@@ -471,6 +473,7 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
+	signalIdempotency bool,
 	existsCheck *PrincipalExistsCheck,
 	vars map[string]any,
 	useTx bool,
@@ -486,7 +489,7 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 		return false, err
 	}
 
-	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, vars, useTx, target)
+	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, signalIdempotency, vars, useTx, target)
 	if err != nil {
 		return false, err
 	}
@@ -527,6 +530,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
+	signalIdempotency bool,
 	vars map[string]any,
 	useTx bool,
 	target *sql.DB,
@@ -553,7 +557,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	}
 
 	var allZero, fromValidation bool
-	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", vars, executor)
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", signalIdempotency, vars, executor)
 	if err != nil {
 		if !errors.Is(err, ErrQueryAffectedZeroRows) {
 			return false, false, err
@@ -618,20 +622,29 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 	return exists, nil
 }
 
-// validationNoRowsMeansIdempotent reports whether a validation query returning no rows
-// means "already in the desired state" rather than a failed precondition. Only Db2 needs
-// it today: its DDL GRANT/REVOKE don't report rows-affected, so the validation query is the
-// only zero-effect signal, and Db2 ships opt-in behind the db2 build tag. Oracle and other
-// DDL engines are a follow-up: they ship default-on, so flipping this would break existing
-// configs that use validation_queries as loud preconditions, and need a per-config opt-in first.
-func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
-	return s.dbEngine == database.DB2
+// validationNoRowsMeansIdempotent reports whether a validation query returning no rows means
+// "already in the desired state" (an idempotent success) rather than a failed precondition. It
+// is true only on DDL engines whose GRANT/REVOKE raise an error instead of reporting
+// rows-affected (Db2, Oracle) AND only when the entitlement opts in via
+// validation_queries_signal_idempotency. Default off, so a no-rows result keeps failing loudly:
+// swallowing it anywhere it could mean a missing or mistyped principal is a silent-access bug.
+func (s *SQLSyncer) validationNoRowsMeansIdempotent(signalIdempotency bool) bool {
+	if !signalIdempotency {
+		return false
+	}
+	switch s.dbEngine {
+	case database.DB2, database.Oracle:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *SQLSyncer) runValidationQueries(
 	ctx context.Context,
 	validationQueries []string,
 	operation string,
+	signalIdempotency bool,
 	vars map[string]any,
 	executor executor,
 ) error {
@@ -667,7 +680,7 @@ func (s *SQLSyncer) runValidationQueries(
 		}
 
 		if !valid {
-			if s.validationNoRowsMeansIdempotent() {
+			if s.validationNoRowsMeansIdempotent(signalIdempotency) {
 				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q), zap.String("operation", operation))
 				return fmt.Errorf("%s: validation query %q returned no rows: %w", operation, q, ErrValidationNoRows)
 			}
@@ -683,12 +696,13 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 	queries,
 	validationQueries []string,
 	operation string,
+	signalIdempotency bool,
 	vars map[string]any,
 	executor executor,
 ) error {
 	l := ctxzap.Extract(ctx)
 
-	if err := s.runValidationQueries(ctx, validationQueries, operation, vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, operation, signalIdempotency, vars, executor); err != nil {
 		return err
 	}
 
@@ -933,6 +947,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	resource *v2.Resource,
 	queries,
 	validationQueries []string,
+	signalIdempotency bool,
 	vars map[string]any,
 	useTx bool,
 	replace *GrantReplaceProvisioningQueries,
@@ -1078,14 +1093,16 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				provisioningConfig.Revoke.Queries,
 				provisioningConfig.Revoke.ValidationQueries,
 				"grant_replace revoke",
+				provisioningConfig.Revoke.ValidationQueriesSignalIdempotency,
 				provisioningVars,
 				executor,
 			)
 			if err != nil {
 				// A zero-rows sentinel means the replace revoke had nothing to remove: the revoke
-				// queries matched nothing, or (Db2 only) a validation query returned no rows. Reporting
-				// the latter as GrantReplaced is load-bearing on the Db2 validation_queries contract that
-				// no-rows means "already gone"; don't generalize it to existence-precondition queries.
+				// queries matched nothing, or a validation query returned no rows on a DDL engine
+				// that opted into validation_queries_signal_idempotency. Reporting the latter as
+				// GrantReplaced leans on that opt-in meaning "already gone"; the gate keeps it off
+				// for existence-precondition queries.
 				if !errors.Is(err, ErrQueryAffectedZeroRows) {
 					return anno, err
 				}
@@ -1099,7 +1116,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 	}
 
-	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", signalIdempotency, vars, executor); err != nil {
 		return anno, err
 	}
 

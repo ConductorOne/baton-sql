@@ -223,10 +223,11 @@ the clidriver headers too. Default-tag lint and vet need nothing.
 
 ## Provisioning: `validation_queries` semantics
 
-Db2 is DDL-based: its `GRANT`/`REVOKE` don't report rows-affected, so a `validation_query`
-returning no rows is treated as an idempotent success, not a failed precondition. Db2 is the
-only engine with this behavior today, and it ships opt-in behind the `db2` build tag. It means
-you must not use `validation_queries` as existence preconditions on Db2. See
+Db2 is DDL-based: its `GRANT`/`REVOKE` don't report rows-affected. When you set
+`validation_queries_signal_idempotency: true` on a grant or revoke, a `validation_query`
+returning no rows is treated as an idempotent success rather than a failed precondition. The
+flag is off by default, so you must opt in per entitlement; when it is on, you must not use
+`validation_queries` as existence preconditions. See
 [Provisioning: `validation_queries` semantics](provisioning.md) for the full explanation and
 examples.
 

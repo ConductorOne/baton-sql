@@ -136,6 +136,7 @@ func withGrantReplaceDB2Config(s *SQLSyncer) {
 	revoke.ValidationQueries = []string{
 		`SELECT 1 FROM user_roles WHERE user_id = ?<user_id> AND role = 'does-not-exist'`,
 	}
+	revoke.ValidationQueriesSignalIdempotency = true
 }
 
 // Db2 path: the revoke validation query returns no rows, so the revoke DELETE never

@@ -7,17 +7,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// validationNoRowsMeansIdempotent is the DDL-engine gate: validation "no rows" is only
-// treated as idempotency (not a failed precondition) for engines whose already-applied
-// GRANT/REVOKE raises an error instead of affecting rows. Only Db2 qualifies today, and it
-// ships opt-in behind the db2 build tag. Oracle and the other DDL engines stay false: they
-// ship default-on, so flipping the gate would silently reinterpret existing configs that use
-// validation_queries as loud existence preconditions. Adding one back needs a per-config
-// opt-in first, so this test guards against re-enabling any of them by accident.
+// validationNoRowsMeansIdempotent gates validation "no rows" onto idempotency (not a failed
+// precondition) only on DDL engines whose already-applied GRANT/REVOKE raises an error instead
+// of affecting rows (Db2, Oracle), AND only when the entitlement opts in. With the opt-in off,
+// every engine fails loudly; with it on, only the two DDL engines reinterpret no-rows. This
+// guards against re-enabling any engine by accident or dropping the opt-in requirement.
 func TestValidationNoRowsMeansIdempotent_EngineGate(t *testing.T) {
-	ddl := map[database.DbEngine]bool{
+	ddlEngines := map[database.DbEngine]bool{
 		database.DB2:        true,
-		database.Oracle:     false,
+		database.Oracle:     true,
 		database.SQLite:     false,
 		database.MySQL:      false,
 		database.PostgreSQL: false,
@@ -25,8 +23,9 @@ func TestValidationNoRowsMeansIdempotent_EngineGate(t *testing.T) {
 		database.HDB:        false,
 		database.Vertica:    false,
 	}
-	for engine, want := range ddl {
+	for engine, ddlOptIn := range ddlEngines {
 		s := &SQLSyncer{dbEngine: engine}
-		require.Equal(t, want, s.validationNoRowsMeansIdempotent(), "engine=%v", engine)
+		require.False(t, s.validationNoRowsMeansIdempotent(false), "opt-in off must never signal idempotency, engine=%v", engine)
+		require.Equal(t, ddlOptIn, s.validationNoRowsMeansIdempotent(true), "opt-in on, engine=%v", engine)
 	}
 }

@@ -49,6 +49,7 @@ func TestRunGrantProvisioning_RejectIfMatchReturnsGrantCancelledAndSkipsMutation
 		nil,
 		[]string{`INSERT INTO user_roles (user_id, role) VALUES (?<user_id>, ?<role>)`},
 		nil,
+		false,
 		map[string]any{
 			"user_id": "user-1",
 			"role":    "admin",
@@ -80,6 +81,7 @@ func TestRunGrantProvisioning_RejectIfNoMatchProceedsWithGrant(t *testing.T) {
 		nil,
 		[]string{`INSERT INTO user_roles (user_id, role) VALUES (?<user_id>, ?<role>)`},
 		nil,
+		false,
 		map[string]any{
 			"user_id": "user-1",
 			"role":    "admin",

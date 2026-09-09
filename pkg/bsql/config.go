@@ -423,15 +423,22 @@ type EntitlementProvisioningQueries struct {
 	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
 
 	// ValidationQueries is a list of SQL statements run before the provisioning queries.
-	// On engines that report rows-affected, a query returning no rows fails the operation
-	// (an existence precondition). On DDL-based engines (Db2) that don't report rows-affected,
-	// a query returning no rows instead means the state is already as desired, so the operation
-	// is reported as an idempotent success (GrantAlreadyExists / GrantAlreadyRevoked).
+	// A query returning no rows fails the operation (an existence precondition), unless
+	// ValidationQueriesSignalIdempotency opts into the DDL no-rows-means-idempotent behavior.
+	ValidationQueries []string `yaml:"validation_queries,omitempty" json:"validation_queries,omitempty"`
+
+	// ValidationQueriesSignalIdempotency opts this entitlement into treating a no-rows
+	// ValidationQueries result as an idempotent success (GrantAlreadyExists on grant,
+	// GrantAlreadyRevoked on revoke) instead of a failed precondition. It only takes effect
+	// on DDL engines whose GRANT/REVOKE don't report rows-affected (Db2, Oracle); on every
+	// other engine a no-rows result still fails loudly regardless of this flag. Default off.
 	//
-	// Warning: on DDL-based engines, do NOT use these as existence preconditions
+	// Warning: when enabled, do NOT use ValidationQueries as existence preconditions
 	// (e.g. "does this user/role exist?"). A no-rows result is reported as idempotent
 	// success, so a missing or mistyped principal is silently swallowed instead of erroring.
-	ValidationQueries []string `yaml:"validation_queries,omitempty" json:"validation_queries,omitempty"`
+	// Write the query so no-rows genuinely means "already in the desired state": for a grant,
+	// check the membership is missing; for a revoke, check it is present.
+	ValidationQueriesSignalIdempotency bool `yaml:"validation_queries_signal_idempotency,omitempty" json:"validation_queries_signal_idempotency,omitempty"`
 
 	// Queries is a list of SQL statements to execute for the provisioning operation.
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`

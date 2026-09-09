@@ -301,12 +301,29 @@ resource_types:
           grant:
             # Indicates that no database transaction is needed for the grant operation
             no_transaction: true
+            # Oracle GRANT is DDL with no rows-affected: opt into treating a no-rows validation
+            # result as an idempotent success so re-granting a held role reports GrantAlreadyExists.
+            validation_queries_signal_idempotency: true
+            # Returns a row only while the role is NOT yet granted (no rows => already granted).
+            validation_queries:
+              - |
+                SELECT 1 FROM dual WHERE NOT EXISTS (
+                  SELECT 1 FROM DBA_ROLE_PRIVS
+                  WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = UPPER(?<role_name>)
+                )
             queries:
               - |
                 GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
           revoke:
             # Indicates that the revoke operation runs without a transaction
             no_transaction: true
+            # Without this, a repeat revoke of an already-removed role fails with ORA-01951.
+            validation_queries_signal_idempotency: true
+            # Returns a row only while the role IS still granted (no rows => already revoked).
+            validation_queries:
+              - |
+                SELECT 1 FROM DBA_ROLE_PRIVS
+                WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = UPPER(?<role_name>)
             queries:
               - |
                 REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
@@ -391,6 +408,15 @@ resource_types:
             privilege_name: resource.ID # Maps the privilege identifier
           grant:
             no_transaction: true
+            # Oracle GRANT is DDL with no rows-affected: report a held privilege as GrantAlreadyExists.
+            validation_queries_signal_idempotency: true
+            # Returns a row only while the privilege is NOT yet granted (no rows => already granted).
+            validation_queries:
+              - |
+                SELECT 1 FROM dual WHERE NOT EXISTS (
+                  SELECT 1 FROM DBA_SYS_PRIVS
+                  WHERE GRANTEE = UPPER(?<principal_name>) AND PRIVILEGE = UPPER(?<privilege_name>)
+                )
             queries:
               - |
                 GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted>
@@ -398,6 +424,13 @@ resource_types:
           revoke:
             # no_transaction indicates this should execute outside a transaction block
             no_transaction: true
+            # Without this, a repeat revoke of an already-removed privilege fails loudly.
+            validation_queries_signal_idempotency: true
+            # Returns a row only while the privilege IS still granted (no rows => already revoked).
+            validation_queries:
+              - |
+                SELECT 1 FROM DBA_SYS_PRIVS
+                WHERE GRANTEE = UPPER(?<principal_name>) AND PRIVILEGE = UPPER(?<privilege_name>)
             # SQL queries to execute when revoking the privilege
             queries:
               - |
