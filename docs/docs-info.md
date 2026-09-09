@@ -1,6 +1,6 @@
 # Baton SQL Connector Documentation
 
-While developing the connector, please fill out this form. This information is needed to write docs and to help other users set up the connector.
+This document describes the Baton SQL connector's capabilities and the credentials needed to set it up.
 
 ## Connector capabilities
 
@@ -12,6 +12,10 @@ While developing the connector, please fill out this form. This information is n
    > - PostgreSQL
    > - Oracle Database
    > - SQL Server
+   > - SAP HANA
+   > - Vertica
+   > - Amazon Redshift
+   > - IBM DB2 (opt-in; requires a binary built with the `db2` tag — see [docs/db2.md](db2.md))
    > - WordPress (MySQL-based)
    >
    > The connector can sync custom user tables, role hierarchies, entitlements, and permissions based on configurable SQL queries.
@@ -46,6 +50,10 @@ While developing the connector, please fill out this form. This information is n
    > - PostgreSQL: `postgres://username:password@host:port/database`
    > - Oracle: `oracle://username:password@host:port/service`
    > - SQL Server: `sqlserver://username:password@host:port?database=dbname`
+   > - SAP HANA: `hdb://username:password@host:port/database`
+   > - Vertica: `vertica://username:password@host:port/database`
+   > - Amazon Redshift: `postgres://username:password@host:port/database` (uses the PostgreSQL scheme)
+   > - IBM DB2: `db2://username:password@host:port/database` (opt-in; see [docs/db2.md](db2.md))
 
 2. For each item in the list above:
 
@@ -147,6 +155,9 @@ The connector includes example configurations for common scenarios:
 - `examples/oracle-test.yml` - Oracle with SHA2-256
 - `examples/wordpress-test.yml` - WordPress user and role management
 - `examples/sqlserver-test.yml` - SQL Server with SHA2-256 password hashing
+- `examples/sap-hana-test.yml` - SAP HANA user and role management
+- `examples/vertica-test.yml` - Vertica user and role management
+- `examples/redshift-test.yml` - Amazon Redshift schema and role management
 
 Each example demonstrates:
 

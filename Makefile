@@ -39,6 +39,24 @@ ifeq ($(GOOS),darwin)
 	codesign -f -s - ${OUTPUT_PATH}
 endif
 
+# go test builds and runs its own binary, which the build-db2 install_name/rpath rewrite never
+# touches, so it needs the clidriver on the library path at run time (DYLD_ macOS, LD_ elsewhere).
+ifeq ($(GOOS),darwin)
+DB2_LIB_ENV = DYLD_LIBRARY_PATH=$(DB2HOME)/lib
+else
+DB2_LIB_ENV = LD_LIBRARY_PATH=$(DB2HOME)/lib
+endif
+
+.PHONY: test-db2
+test-db2:
+	CGO_CFLAGS='-I$(DB2HOME)/include' CGO_LDFLAGS='-L$(DB2HOME)/lib' $(DB2_LIB_ENV) \
+		go test -tags db2 ./...
+
+.PHONY: vet-db2
+vet-db2:
+	CGO_CFLAGS='-I$(DB2HOME)/include' CGO_LDFLAGS='-L$(DB2HOME)/lib' \
+		go vet -tags db2 ./...
+
 # Self-contained DB2 distribution: binary + clidriver (including its license/ directory,
 # which the IBM redistribution terms require shipping) in one archive. Untar and run —
 # no installation, no environment variables.

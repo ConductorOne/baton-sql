@@ -47,6 +47,7 @@ jobs:
           baton-entitlement: 'role:admin:member'
           baton-principal: john.smith
           baton-principal-type: user
+          bad-credentials: DB_PASSWORD=invalid
       - name: Run account provisioning tests
         uses: ConductorOne/github-workflows/actions/account-provisioning@v4
         with:
