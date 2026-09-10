@@ -163,4 +163,6 @@ func TestRunProvisioningQueriesWithExecutor_ValidationNoRowsWrapsSentinel(t *tes
 		db,
 	)
 	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
+	// guard the operation prefix so a rebase can't silently drop it (it's the only per-call diagnostic once swallowed into an annotation)
+	require.Contains(t, err.Error(), "revoke provisioning")
 }

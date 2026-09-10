@@ -236,6 +236,12 @@ Db2, the old grant is already gone, so the connector reports `GrantReplaced` (te
 ConductorOne to drop the old grant) instead of failing. Write that `validation_query` to answer
 "is the old grant still present?" so no rows genuinely means "already removed".
 
+Set `no_transaction: true` on every Db2 grant and revoke (as the shipped Oracle and Redshift DDL
+examples do). Because Db2 `GRANT`/`REVOKE` report no rows-affected, the default transactional path
+reads that as "affected zero rows" and rolls the statement back, so a real grant is undone and
+reported as `GrantAlreadyExists`. With `no_transaction: true` the statement commits on its own and
+the `validation_query` is the sole idempotency signal.
+
 ## Docker
 
 - The default release pipeline (goreleaser, `CGO_ENABLED=0`) is unaffected — DB2 does not
