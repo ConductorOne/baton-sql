@@ -31,6 +31,7 @@ const (
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
 	identifierKey   = "identifier"
+	keywordKey      = "keyword"
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
@@ -74,6 +75,29 @@ type queryTokenOpts struct {
 	// Identifier inlines as an engine-quoted SQL identifier (doubled embedded quotes).
 	// Use where parameter binding isn't allowed by the SQL grammar (GRANT, DDL).
 	Identifier bool
+
+	// Keyword inlines a fixed multiword SQL keyword clause (e.g. "CREATE SESSION") as-is,
+	// after collapsing internal whitespace. For system-privilege GRANT/REVOKE where the value
+	// is a keyword rather than an identifier: quoting would break it and Unquoted would strip
+	// the space. Rejects anything outside letters, digits, and single spaces, so it is not an
+	// injection vector.
+	Keyword bool
+}
+
+var keywordClauseRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9 ]*$`)
+
+var whitespaceRunRegex = regexp.MustCompile(`\s+`)
+
+// renderKeyword validates a fixed multiword SQL keyword clause (e.g. "CREATE SESSION") and
+// returns it with internal whitespace collapsed to single spaces. It reports false for anything
+// outside letters, digits, and single spaces (must start with a letter), so an injected value
+// like "SESSION; DROP TABLE x" is rejected rather than inlined.
+func renderKeyword(val string) (string, bool) {
+	collapsed := strings.TrimSpace(whitespaceRunRegex.ReplaceAllString(val, " "))
+	if !keywordClauseRegex.MatchString(collapsed) {
+		return "", false
+	}
+	return collapsed, true
 }
 
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)(?:\|([a-zA-Z0-9_]+))?\>`)
@@ -126,13 +150,21 @@ func parseToken(token string) (*queryTokenOpts, error) {
 			opts.Unquoted = true
 		case identifierKey:
 			opts.Identifier = true
+		case keywordKey:
+			opts.Keyword = true
 		default:
 			return nil, fmt.Errorf("unknown option %s", opt)
 		}
 	}
 
-	if opts.Unquoted && opts.Identifier {
-		return nil, fmt.Errorf("token options unquoted and identifier are mutually exclusive")
+	set := 0
+	for _, on := range []bool{opts.Unquoted, opts.Identifier, opts.Keyword} {
+		if on {
+			set++
+		}
+	}
+	if set > 1 {
+		return nil, fmt.Errorf("token options unquoted, identifier and keyword are mutually exclusive")
 	}
 
 	return opts, nil
@@ -204,6 +236,16 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 
 		if opts.Identifier {
 			return s.quoteIdentifier(fmt.Sprintf("%v", val))
+		}
+
+		if opts.Keyword {
+			strVal := fmt.Sprintf("%v", val)
+			rendered, ok := renderKeyword(strVal)
+			if !ok {
+				parseErr = errors.Join(parseErr, fmt.Errorf("token %s: value %q is not a valid SQL keyword clause", token, strVal))
+				return token
+			}
+			return rendered
 		}
 
 		qArgs = append(qArgs, val)
@@ -357,6 +399,16 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 
 		if opts.Identifier {
 			return s.quoteIdentifier(fmt.Sprintf("%v", v))
+		}
+
+		if opts.Keyword {
+			strVal := fmt.Sprintf("%v", v)
+			rendered, ok := renderKeyword(strVal)
+			if !ok {
+				parseErr = errors.Join(parseErr, fmt.Errorf("token %s: value %q is not a valid SQL keyword clause", token, strVal))
+				return token
+			}
+			return rendered
 		}
 
 		qArgs = append(qArgs, v)
@@ -622,19 +674,34 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 	return exists, nil
 }
 
+// isDDLEngine reports whether the engine applies GRANT/REVOKE as DDL that raises an error on
+// re-run instead of reporting rows-affected (Db2, Oracle).
+func isDDLEngine(e database.DbEngine) bool {
+	switch e {
+	case database.DB2, database.Oracle:
+		return true
+	default:
+		return false
+	}
+}
+
 // validationNoRowsMeansIdempotent reports whether a validation query returning no rows means
 // "already in the desired state" (an idempotent success) rather than a failed precondition. It
 // is true only on DDL engines whose GRANT/REVOKE raise an error instead of reporting
-// rows-affected (Db2, Oracle) AND only when the entitlement opts in via
-// validation_queries_signal_idempotency. Default off, so a no-rows result keeps failing loudly:
-// swallowing it anywhere it could mean a missing or mistyped principal is a silent-access bug.
+// rows-affected (Db2, Oracle). Db2 ships behind a build tag, so it stays on by engine (unchanged
+// from #151); Oracle ships in every binary, so it reinterprets no-rows only when the entitlement
+// opts in via validation_queries_signal_idempotency. Everywhere else a no-rows result keeps
+// failing loudly: swallowing it where it could mean a missing or mistyped principal is a
+// silent-access bug.
 func (s *SQLSyncer) validationNoRowsMeansIdempotent(signalIdempotency bool) bool {
-	if !signalIdempotency {
-		return false
-	}
 	switch s.dbEngine {
-	case database.DB2, database.Oracle:
+	case database.DB2:
+		// Db2 ships behind a build tag; no-rows-means-idempotent stays on by engine
+		// (unchanged from #151), no per-config opt-in required.
 		return true
+	case database.Oracle:
+		// Oracle ships in every binary, so the reinterpretation is opt-in only.
+		return signalIdempotency
 	default:
 		return false
 	}
@@ -649,6 +716,10 @@ func (s *SQLSyncer) runValidationQueries(
 	executor executor,
 ) error {
 	l := ctxzap.Extract(ctx)
+
+	if signalIdempotency && !isDDLEngine(s.dbEngine) {
+		l.Warn("validation_queries_signal_idempotency is set but ignored on this engine; only DDL engines (Db2, Oracle) reinterpret a no-rows validation as an idempotent success")
+	}
 
 	for _, q := range validationQueries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)

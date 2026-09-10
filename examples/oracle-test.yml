@@ -305,28 +305,31 @@ resource_types:
             # result as an idempotent success so re-granting a held role reports GrantAlreadyExists.
             validation_queries_signal_idempotency: true
             # Returns a row only while the role is NOT yet granted (no rows => already granted).
+            # Exact-match (no UPPER) is required: the GRANT quotes identifiers with |identifier, so
+            # the stored GRANTEE/GRANTED_ROLE are case-sensitive and must equal the bound value.
             validation_queries:
               - |
                 SELECT 1 FROM dual WHERE NOT EXISTS (
                   SELECT 1 FROM DBA_ROLE_PRIVS
-                  WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = UPPER(?<role_name>)
+                  WHERE GRANTEE = ?<principal_name> AND GRANTED_ROLE = ?<role_name>
                 )
             queries:
               - |
-                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
+                GRANT ?<role_name|identifier> TO ?<principal_name|identifier>
           revoke:
             # Indicates that the revoke operation runs without a transaction
             no_transaction: true
             # Without this, a repeat revoke of an already-removed role fails with ORA-01951.
             validation_queries_signal_idempotency: true
             # Returns a row only while the role IS still granted (no rows => already revoked).
+            # Exact-match (no UPPER) is required for the same reason as the grant validation.
             validation_queries:
               - |
                 SELECT 1 FROM DBA_ROLE_PRIVS
-                WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = UPPER(?<role_name>)
+                WHERE GRANTEE = ?<principal_name> AND GRANTED_ROLE = ?<role_name>
             queries:
               - |
-                REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
+                REVOKE ?<role_name|identifier> FROM ?<principal_name|identifier>
       - id: "admin" # Entitlement identifier for role administration privileges
         # Dynamic display name for admin entitlement, appending ' Role Admin'
         display_name: "resource.DisplayName + ' Role Admin'"
@@ -348,14 +351,14 @@ resource_types:
             no_transaction: true
             queries:
               - |
-                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted> WITH ADMIN OPTION
+                GRANT ?<role_name|identifier> TO ?<principal_name|identifier> WITH ADMIN OPTION
           revoke:
             no_transaction: true
             queries:
               - |
-                REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
+                REVOKE ?<role_name|identifier> FROM ?<principal_name|identifier>
               - |
-                GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
+                GRANT ?<role_name|identifier> TO ?<principal_name|identifier>
     # Dynamic grants based on SQL queries to associate users with roles
     grants:
       - query: |
@@ -420,8 +423,11 @@ resource_types:
                   WHERE GRANTEE = UPPER(?<principal_name>) AND PRIVILEGE = UPPER(?<privilege_name>)
                 )
             queries:
+              # System-privilege names are multiword keywords (e.g. CREATE SESSION), so they must
+              # use |keyword, not |identifier: quoting would break the clause and |unquoted would
+              # strip the space. The principal stays |unquoted to match the UPPER-based validation.
               - |
-                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted>
+                GRANT ?<privilege_name|keyword> TO ?<principal_name|unquoted>
           # Revoke section defines how to remove a privilege from a user
           revoke:
             # no_transaction indicates this should execute outside a transaction block
@@ -436,7 +442,7 @@ resource_types:
             # SQL queries to execute when revoking the privilege
             queries:
               - |
-                REVOKE ?<privilege_name|unquoted> FROM ?<principal_name|unquoted>
+                REVOKE ?<privilege_name|keyword> FROM ?<principal_name|unquoted>
       - id: "admin" # Entitlement identifier for administrative control over privileges
         display_name: "resource.DisplayName + ' Privilege Admin'" # Dynamic display name for admin privileges on the resource
         description: "'Can grant the ' + resource.DisplayName + ' privilege to other users'" # Describes the ability to manage privileges
@@ -453,21 +459,21 @@ resource_types:
             no_transaction: true
             queries:
               - |
-                # The ?<privilege_name|unquoted> placeholder will be replaced with the raw value of the privilege_name variable
-                # defined in the vars section above. The |unquoted flag means the value will be inserted directly into the SQL
-                # rather than using a prepared statement parameter. This is needed for DDL statements like GRANT that require
-                # the actual identifier names.
+                # System-privilege names are multiword keywords (e.g. CREATE SESSION), so the
+                # ?<privilege_name|keyword> placeholder inlines the clause as-is (collapsing internal
+                # whitespace) instead of quoting it. Use |keyword here, not |identifier: quoting
+                # would break the clause and |unquoted would strip the space.
                 #
-                # Similarly, ?<principal_name|unquoted> inserts the principal_name variable's value directly into the query.
-                # Without |unquoted, the values would be passed as bind parameters like: GRANT ? TO ? WITH ADMIN OPTION
-                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted> WITH ADMIN OPTION
+                # ?<principal_name|unquoted> inserts the principal directly; DDL like GRANT cannot
+                # bind these as prepared-statement parameters.
+                GRANT ?<privilege_name|keyword> TO ?<principal_name|unquoted> WITH ADMIN OPTION
           revoke:
             no_transaction: true
             queries:
               - |
-                REVOKE ?<privilege_name|unquoted> FROM ?<principal_name|unquoted>
+                REVOKE ?<privilege_name|keyword> FROM ?<principal_name|unquoted>
               - |
-                GRANT ?<privilege_name|unquoted> TO ?<principal_name|unquoted>
+                GRANT ?<privilege_name|keyword> TO ?<principal_name|unquoted>
     # Dynamic grants to map privilege assignments based on database queries
     grants:
       - query: |

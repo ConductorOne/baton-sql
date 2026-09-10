@@ -104,6 +104,21 @@ func Test_parseToken(t *testing.T) {
 			want:    nil,
 			wantErr: true,
 		},
+		{
+			name:  "Token with keyword option",
+			token: "?<privilege_name|keyword>",
+			want: &queryTokenOpts{
+				Key:     "privilege_name",
+				Keyword: true,
+			},
+			wantErr: false,
+		},
+		{ //nolint:gosec // G101 false positive: "identifier" is the modifier name, not a credential.
+			name:    "Keyword and identifier are mutually exclusive",
+			token:   "?<x|keyword,identifier>",
+			want:    nil,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -501,6 +516,55 @@ func Test_parseQueryOpts(t *testing.T) {
 			[]interface{}{"test example"},
 			false,
 			false,
+		},
+		{
+			"Test keyword renders a multiword privilege intact",
+			database.Oracle,
+			args{
+				t.Context(),
+				"GRANT ?<privilege_name|keyword> TO ?<grantee|identifier>",
+				nil,
+				map[string]any{
+					"privilege_name": "CREATE SESSION",
+					"grantee":        "alice",
+				},
+			},
+			`GRANT CREATE SESSION TO "alice"`,
+			nil,
+			false,
+			false,
+		},
+		{
+			"Test keyword collapses internal whitespace",
+			database.Oracle,
+			args{
+				t.Context(),
+				"GRANT ?<privilege_name|keyword> TO bob",
+				nil,
+				map[string]any{
+					"privilege_name": "CREATE   SESSION",
+				},
+			},
+			"GRANT CREATE SESSION TO bob",
+			nil,
+			false,
+			false,
+		},
+		{
+			"Test keyword rejects an injection value",
+			database.Oracle,
+			args{
+				t.Context(),
+				"GRANT ?<privilege_name|keyword> TO bob",
+				nil,
+				map[string]any{
+					"privilege_name": "SESSION; DROP TABLE x",
+				},
+			},
+			"",
+			nil,
+			false,
+			true,
 		},
 	}
 	for _, tt := range tests {

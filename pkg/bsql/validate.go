@@ -87,6 +87,29 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 	return nil
 }
 
+// validateProvisioningIdempotency validates the validation_queries and the
+// validation_queries_signal_idempotency opt-in shared by grant and revoke. Validation queries are
+// always vars-checked; the opt-in additionally requires at least one validation query and, on a
+// DDL engine, no_transaction (Db2/Oracle GRANT/REVOKE report no rows-affected under a tx).
+func validateProvisioningIdempotency(s *SQLSyncer, pq EntitlementProvisioningQueries, vars map[string]string) error {
+	for _, query := range pq.ValidationQueries {
+		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
+		}
+	}
+
+	if pq.ValidationQueriesSignalIdempotency {
+		if len(pq.ValidationQueries) < 1 {
+			return errors.New("validation_queries_signal_idempotency requires at least one validation_query")
+		}
+		if isDDLEngine(s.dbEngine) && !pq.NoTransaction {
+			return errors.New("validation_queries_signal_idempotency requires no_transaction: true on DDL engines (Db2/Oracle)")
+		}
+	}
+
+	return nil
+}
+
 func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvisioningQueries, vars map[string]string) error {
 	if grant == nil {
 		return nil
@@ -96,6 +119,10 @@ func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvi
 		if err := validateVarsInQuery(s, grant.RejectIf.Query, vars); err != nil {
 			return err
 		}
+	}
+
+	if err := validateProvisioningIdempotency(s, grant.EntitlementProvisioningQueries, vars); err != nil {
+		return err
 	}
 
 	for _, query := range grant.Queries {
@@ -110,6 +137,10 @@ func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvi
 func validateRevokeProvisioningQueries(s *SQLSyncer, revoke *RevokeEntitlementProvisioningQueries, vars map[string]string) error {
 	if revoke == nil {
 		return nil
+	}
+
+	if err := validateProvisioningIdempotency(s, revoke.EntitlementProvisioningQueries, vars); err != nil {
+		return err
 	}
 
 	for _, query := range revoke.Queries {

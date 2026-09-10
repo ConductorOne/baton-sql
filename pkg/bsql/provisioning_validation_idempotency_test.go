@@ -21,6 +21,10 @@ const revokeValidationQuery = `SELECT 1 FROM user_roles WHERE user_id = ?<princi
 // args it can't satisfy; a bind-free query that always returns no rows drives the idempotent
 // path on Oracle without executing engine-specific bind SQL.
 func withBindFreeValidationConfig(s *SQLSyncer) {
+	withBindFreeValidationConfigSignal(s, true)
+}
+
+func withBindFreeValidationConfigSignal(s *SQLSyncer, signalIdempotency bool) {
 	const alwaysNoRows = `SELECT 1 WHERE 1 = 0`
 	s.config = ResourceType{
 		StaticEntitlements: []*EntitlementMapping{
@@ -34,14 +38,14 @@ func withBindFreeValidationConfig(s *SQLSyncer) {
 					Grant: &GrantEntitlementProvisioningQueries{
 						EntitlementProvisioningQueries: EntitlementProvisioningQueries{
 							ValidationQueries:                  []string{alwaysNoRows},
-							ValidationQueriesSignalIdempotency: true,
+							ValidationQueriesSignalIdempotency: signalIdempotency,
 							Queries:                            []string{`INSERT INTO user_roles (user_id, role) VALUES (?<principal_id>, ?<role>)`},
 						},
 					},
 					Revoke: &RevokeEntitlementProvisioningQueries{
 						EntitlementProvisioningQueries: EntitlementProvisioningQueries{
 							ValidationQueries:                  []string{alwaysNoRows},
-							ValidationQueriesSignalIdempotency: true,
+							ValidationQueriesSignalIdempotency: signalIdempotency,
 							Queries:                            []string{`DELETE FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`},
 						},
 					},
@@ -242,9 +246,37 @@ func TestRunProvisioningQueriesWithExecutor_ValidationNoRowsWrapsSentinel(t *tes
 	require.Contains(t, err.Error(), "revoke provisioning")
 }
 
-// With the opt-in off, a no-rows validation result must fail loudly even on a DDL engine:
-// the default keeps validation_queries as a hard existence precondition.
+// On Oracle the opt-in is required: with it off, a no-rows validation must fail loudly rather
+// than reporting GrantAlreadyExists (Oracle ships in every binary, so the reinterpretation is
+// opt-in only). Bind-free validation queries keep the SQLite harness happy under Oracle's ":N"
+// placeholders, so this exercises the gate rather than a bind error.
 func TestGrant_ValidationNoRowsWithoutOptInFailsLoudly(t *testing.T) {
+	s, db := newRevokeProvisioningTestSyncer(t)
+	withBindFreeValidationConfigSignal(s, false)
+	s.dbEngine = database.Oracle
+	// the grant validation query always returns no rows
+
+	annos, err := s.Grant(t.Context(), userPrincipal("user-1"), memberEntitlementFor("admin"))
+	require.Error(t, err)
+	require.Nil(t, annos)
+	// the INSERT never ran
+	require.Equal(t, 0, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
+}
+
+func TestRevoke_ValidationNoRowsWithoutOptInFailsLoudly(t *testing.T) {
+	s, _ := newRevokeProvisioningTestSyncer(t)
+	withBindFreeValidationConfigSignal(s, false)
+	s.dbEngine = database.Oracle
+	// the revoke validation query always returns no rows
+
+	annos, err := s.Revoke(t.Context(), revokeGrantFor("user-1", "admin"))
+	require.Error(t, err)
+	require.Nil(t, annos)
+}
+
+// Db2 ships behind a build tag, so no-rows-means-idempotent stays on by engine even with the
+// opt-in off: a no-rows grant validation still reports GrantAlreadyExists (unchanged from #151).
+func TestGrant_Db2ValidationNoRowsIdempotentByDefault(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	withValidationQueryConfigSignal(s, false)
 	s.dbEngine = database.DB2
@@ -252,18 +284,28 @@ func TestGrant_ValidationNoRowsWithoutOptInFailsLoudly(t *testing.T) {
 	seedUserWithRoles(t, db, "user-1", "admin")
 
 	annos, err := s.Grant(t.Context(), userPrincipal("user-1"), memberEntitlementFor("admin"))
-	require.Error(t, err)
-	require.Nil(t, annos)
+	require.NoError(t, err)
+
+	ok, err := annos.Pick(&v2.GrantAlreadyExists{})
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	// the INSERT never ran, so no duplicate row was created
 	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
 }
 
-func TestRevoke_ValidationNoRowsWithoutOptInFailsLoudly(t *testing.T) {
+// Revoke counterpart: on Db2 a no-rows revoke validation still reports GrantAlreadyRevoked with
+// the opt-in off.
+func TestRevoke_Db2ValidationNoRowsIdempotentByDefault(t *testing.T) {
 	s, _ := newRevokeProvisioningTestSyncer(t)
 	withValidationQueryConfigSignal(s, false)
 	s.dbEngine = database.DB2
 	// nothing seeded: the revoke validation query returns no rows
 
 	annos, err := s.Revoke(t.Context(), revokeGrantFor("user-1", "admin"))
-	require.Error(t, err)
-	require.Nil(t, annos)
+	require.NoError(t, err)
+
+	ok, err := annos.Pick(&v2.GrantAlreadyRevoked{})
+	require.NoError(t, err)
+	require.True(t, ok)
 }

@@ -31,14 +31,16 @@ grant:
   no_transaction: true
   validation_queries_signal_idempotency: true
   # returns a row only while the role is NOT yet granted (no rows => already granted)
+  # exact-match (no UPPER): the GRANT quotes identifiers, so the stored GRANTEE/GRANTED_ROLE
+  # are case-sensitive and must equal the bound value
   validation_queries:
     - |
       SELECT 1 FROM dual WHERE NOT EXISTS (
         SELECT 1 FROM DBA_ROLE_PRIVS
-        WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = UPPER(?<role_name>)
+        WHERE GRANTEE = ?<principal_name> AND GRANTED_ROLE = ?<role_name>
       )
   queries:
-    - GRANT ?<role_name|unquoted> TO ?<principal_name|unquoted>
+    - GRANT ?<role_name|identifier> TO ?<principal_name|identifier>
 revoke:
   no_transaction: true
   validation_queries_signal_idempotency: true
@@ -46,9 +48,19 @@ revoke:
   validation_queries:
     - |
       SELECT 1 FROM DBA_ROLE_PRIVS
-      WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = UPPER(?<role_name>)
+      WHERE GRANTEE = ?<principal_name> AND GRANTED_ROLE = ?<role_name>
   queries:
-    - REVOKE ?<role_name|unquoted> FROM ?<principal_name|unquoted>
+    - REVOKE ?<role_name|identifier> FROM ?<principal_name|identifier>
+```
+
+Use `|identifier` for role and principal names so they are engine-quoted (safe against
+injection and case-sensitive). System-privilege entitlements are different: privilege names are
+multiword keywords like `CREATE SESSION`, so their DDL operand must use `|keyword`, not
+`|identifier` (quoting would break the clause and `|unquoted` would strip the space):
+
+```yaml
+queries:
+  - GRANT ?<privilege_name|keyword> TO ?<principal_name|unquoted>
 ```
 
 The flag is off by default, so without it Oracle keeps failing loudly on the repeat operation.

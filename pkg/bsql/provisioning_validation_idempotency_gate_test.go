@@ -8,24 +8,28 @@ import (
 )
 
 // validationNoRowsMeansIdempotent gates validation "no rows" onto idempotency (not a failed
-// precondition) only on DDL engines whose already-applied GRANT/REVOKE raises an error instead
-// of affecting rows (Db2, Oracle), AND only when the entitlement opts in. With the opt-in off,
-// every engine fails loudly; with it on, only the two DDL engines reinterpret no-rows. This
-// guards against re-enabling any engine by accident or dropping the opt-in requirement.
+// precondition) only on the two DDL engines whose already-applied GRANT/REVOKE raises an error
+// instead of affecting rows. Db2 ships behind a build tag, so it stays on by engine regardless of
+// the opt-in; Oracle ships in every binary, so it reinterprets no-rows only when the entitlement
+// opts in. Every non-DDL engine fails loudly in both cases. This guards against re-enabling any
+// engine by accident, flipping Db2's default-on behavior, or dropping Oracle's opt-in requirement.
 func TestValidationNoRowsMeansIdempotent_EngineGate(t *testing.T) {
-	ddlEngines := map[database.DbEngine]bool{
-		database.DB2:        true,
-		database.Oracle:     true,
-		database.SQLite:     false,
-		database.MySQL:      false,
-		database.PostgreSQL: false,
-		database.MSSQL:      false,
-		database.HDB:        false,
-		database.Vertica:    false,
+	cases := map[database.DbEngine]struct {
+		optInOff bool
+		optInOn  bool
+	}{
+		database.DB2:        {optInOff: true, optInOn: true},
+		database.Oracle:     {optInOff: false, optInOn: true},
+		database.SQLite:     {optInOff: false, optInOn: false},
+		database.MySQL:      {optInOff: false, optInOn: false},
+		database.PostgreSQL: {optInOff: false, optInOn: false},
+		database.MSSQL:      {optInOff: false, optInOn: false},
+		database.HDB:        {optInOff: false, optInOn: false},
+		database.Vertica:    {optInOff: false, optInOn: false},
 	}
-	for engine, ddlOptIn := range ddlEngines {
+	for engine, want := range cases {
 		s := &SQLSyncer{dbEngine: engine}
-		require.False(t, s.validationNoRowsMeansIdempotent(false), "opt-in off must never signal idempotency, engine=%v", engine)
-		require.Equal(t, ddlOptIn, s.validationNoRowsMeansIdempotent(true), "opt-in on, engine=%v", engine)
+		require.Equal(t, want.optInOff, s.validationNoRowsMeansIdempotent(false), "opt-in off, engine=%v", engine)
+		require.Equal(t, want.optInOn, s.validationNoRowsMeansIdempotent(true), "opt-in on, engine=%v", engine)
 	}
 }
