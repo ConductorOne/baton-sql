@@ -338,6 +338,8 @@ resource_types:
         grantable_to:
           - "user"
         # Provisioning details for granting and revoking admin privileges
+        # Intentionally no validation_queries_signal_idempotency here: WITH ADMIN OPTION is left
+        # non-idempotent, so a repeat revoke still raises ORA-01951. Omitted on purpose, not missed.
         provisioning:
           vars:
             principal_name: principal.ID # Maps to the user receiving the admin rights
@@ -441,6 +443,8 @@ resource_types:
         purpose: "permission" # Indicates this entitlement is a permission setting
         grantable_to:
           - "user" # This permission can be granted to user resources
+        # Intentionally no validation_queries_signal_idempotency here: WITH ADMIN OPTION is left
+        # non-idempotent, so a repeat grant/revoke still errors. Omitted on purpose, not missed.
         provisioning:
           vars:
             principal_name: principal.ID # User identifier for provisioning
