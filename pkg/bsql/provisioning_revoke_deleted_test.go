@@ -144,6 +144,27 @@ func TestRunRevokeProvisioning_AllZeroRowsWithSurvivingPrincipal(t *testing.T) {
 	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM users WHERE id = ?`, "user-1"))
 }
 
+// On a DDL engine, a revoke whose validation query returns no rows short-circuits
+// before any revoke runs. The principal-exists probe must be skipped: otherwise a
+// mistyped principal_id (validation AND probe both empty) would falsely report the
+// still-present principal as deleted.
+func TestRunRevokeProvisioning_DDLValidationNoRowsSkipsExistsCheck(t *testing.T) {
+	s, _ := newRevokeProvisioningTestSyncer(t)
+	s.dbEngine = database.DB2
+	// nothing seeded: the revoke validation query returns no rows, and the exists-check
+	// would also return no rows for user-1 — but no revoke ran, so no deletion happened.
+	deleted, err := s.RunRevokeProvisioning(
+		t.Context(),
+		[]string{`DELETE FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`},
+		[]string{`SELECT 1 FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`},
+		principalExistsCheck(),
+		map[string]any{"principal_id": "user-1", "role": "admin"},
+		true,
+	)
+	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
+	require.False(t, deleted, "exists-check must be skipped when the sentinel came from validation")
+}
+
 func TestRunRevokeProvisioning_NoExistsCheckBehavesLikeBefore(t *testing.T) {
 	s, db := newRevokeProvisioningTestSyncer(t)
 	seedUserWithRoles(t, db, "user-1", "admin")

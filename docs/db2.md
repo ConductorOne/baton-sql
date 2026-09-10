@@ -221,6 +221,27 @@ the OS libxml2 package: `apt-get install libxml2` / `yum install libxml2`.
 **`go vet` / `golangci-lint` with `-tags db2` fails** — type-checking the tagged path needs
 the clidriver headers too. Default-tag lint and vet need nothing.
 
+## Provisioning: `validation_queries` semantics
+
+Db2 is DDL-based: its `GRANT`/`REVOKE` don't report rows-affected, so a `validation_query`
+returning no rows is treated as an idempotent success, not a failed precondition. Db2 is the
+only engine with this behavior today, and it ships opt-in behind the `db2` build tag. It means
+you must not use `validation_queries` as existence preconditions on Db2. See
+[Provisioning: `validation_queries` semantics](provisioning.md) for the full explanation and
+examples.
+
+The same no-rows rule applies to the revoke inside a `grant_replace`. When a grant replaces an
+existing grant, its revoke runs first; if that revoke's `validation_query` returns no rows on
+Db2, the old grant is already gone, so the connector reports `GrantReplaced` (telling
+ConductorOne to drop the old grant) instead of failing. Write that `validation_query` to answer
+"is the old grant still present?" so no rows genuinely means "already removed".
+
+Set `no_transaction: true` on every Db2 grant and revoke (as the shipped Oracle and Redshift DDL
+examples do). Because Db2 `GRANT`/`REVOKE` report no rows-affected, the default transactional path
+reads that as "affected zero rows" and rolls the statement back, so a real grant is undone and
+reported as `GrantAlreadyExists`. With `no_transaction: true` the statement commits on its own and
+the `validation_query` is the sole idempotency signal.
+
 ## Docker
 
 - The default release pipeline (goreleaser, `CGO_ENABLED=0`) is unaffected — DB2 does not

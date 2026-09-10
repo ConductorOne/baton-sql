@@ -49,7 +49,7 @@ jobs:
           baton-principal-type: user
           bad-credentials: DB_PASSWORD=invalid
       - name: Run account provisioning tests
-        uses: ConductorOne/github-workflows/actions/account-provisioning@v3
+        uses: ConductorOne/github-workflows/actions/account-provisioning@v4
         with:
           connector: ./baton-sql
           account-email: robert.tables2@example.com
