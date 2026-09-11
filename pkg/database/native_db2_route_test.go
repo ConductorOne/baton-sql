@@ -9,10 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A native DB2 DSN set through config must reach the DB2 driver, not be rejected by the
-// URL builder. On a default (non-db2) build that means Connect returns the "not compiled"
-// stub error, never the "scheme must be specified" / "database name is required" errors
-// the URL builder raises for an opaque DSN.
+// A native DB2 DSN must reach the DB2 driver, not the URL builder; on a default (non-db2)
+// build, Connect should return the "not compiled" stub error, never the URL builder's
+// scheme/database errors.
 func TestConnectNativeDB2DSNReachesDriver(t *testing.T) {
 	const native = "HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=db2inst1;PWD=pass123;PROTOCOL=TCPIP"
 
@@ -34,9 +33,8 @@ func TestConnectNativeDB2DSNReachesDriver(t *testing.T) {
 }
 
 // A native DSN already carries every connection setting, so pairing it with structured
-// connect fields or a per-database override must be rejected up front (before the driver
-// stub), never silently dropped. This also covers the multi-database path, where
-// ConnectMany sets perOpts.Database per name.
+// fields or a per-database override must be rejected up front, never silently dropped —
+// including via ConnectMany's per-name Database override.
 func TestConnectNativeDB2DSNRejectsStructuredFields(t *testing.T) {
 	const native = "HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=db2inst1;PWD=pass123;PROTOCOL=TCPIP"
 

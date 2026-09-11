@@ -8,20 +8,15 @@ import (
 	"strings"
 )
 
-// urlSchemeRegex matches a DSN that begins with a URL scheme (e.g. "db2://").
-// Anchored to the start so a native ODBC DSN carrying "://" inside a value
-// (e.g. PWD=my://secret) is not misread as a URL.
+// urlSchemeRegex matches a DSN that begins with a URL scheme (e.g. "db2://"); anchoring
+// to the start keeps a native DSN whose value contains "://" (e.g. PWD=my://secret) from
+// being misread as a URL.
 var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
-// ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (rather
-// than a URL) and, when it is, returns its DATABASE value ("" if the DSN omits one).
-// The HOSTNAME keyword is the native marker: DATABASE alone does not qualify, because
-// generic ODBC/ADO strings from other engines (e.g. "Server=x;Database=y") also carry
-// DATABASE and would otherwise be misrouted to the DB2 driver instead of failing with
-// the normal scheme-missing error. One pass over the DSN; IsNativeDSN and DSNDatabase
-// are thin wrappers so all callers (pkg/database routing, convertToDB2DSN passthrough,
-// pkg/bsql offline scheme check) share one decision and cannot drift. ODBC keywords are
-// case-insensitive and keyword/value may carry surrounding whitespace, so both are normalized.
+// ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (not a URL),
+// returning its DATABASE value if present. HOSTNAME, not DATABASE alone, is the native
+// marker, since other engines' ODBC/ADO strings also carry DATABASE; every caller shares
+// this one detector to avoid drift.
 func ParseNativeDSN(dsn string) (string, bool) {
 	if urlSchemeRegex.MatchString(dsn) {
 		return "", false
@@ -62,12 +57,9 @@ func DSNDatabase(dsn string) string {
 	return database
 }
 
-// splitDB2DSN splits a native DB2 DSN on ';', ignoring separators inside {} quoting.
-// A '{' quotes only when it starts a value (right after '=', across any whitespace) AND
-// is closed by a later '}'. A '{' elsewhere, or one left unterminated, is literal, so
-// PWD=p{q keeps the following ';' and an unclosed '{' does not swallow the rest of the
-// DSN (its HOSTNAME/DATABASE markers stay visible and the malformed value reaches the
-// driver's own error rather than a silent misroute).
+// splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it
+// opens a value and is later closed by '}'; an unterminated or misplaced '{' is literal,
+// so HOSTNAME/DATABASE markers stay visible instead of being silently swallowed.
 func splitDB2DSN(dsn string) []string {
 	var parts []string
 	start := 0

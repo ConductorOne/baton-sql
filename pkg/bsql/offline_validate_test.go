@@ -125,9 +125,9 @@ func TestRejectNonV1_NonPostgresScheme(t *testing.T) {
 }
 
 func TestRejectNonV1_NativeDB2DSNRejectedAsDB2(t *testing.T) {
-	// A native DB2 DSN carries no scheme prefix; it must be classified as "db2" (via the
-	// shared detector), so v1 rejects it with the scheme message rather than the confusing
-	// "scheme missing from dsn". Also guards against a "://" inside a value misclassifying it.
+	// A native DB2 DSN carries no scheme prefix, so it must classify as "db2" via the shared
+	// detector — giving v1 the right rejection message instead of a confusing "scheme
+	// missing" error — and must not be misclassified by a "://" inside a value.
 	for _, dsn := range []string{
 		"HOSTNAME=localhost;PORT=50000;DATABASE=TESTDB;UID=u;PWD=p;PROTOCOL=TCPIP",
 		"HOSTNAME=localhost;DATABASE=TESTDB;PWD=my://secret",

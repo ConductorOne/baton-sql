@@ -373,11 +373,10 @@ func ResolveDatabaseName(opts ConnectOptions) string {
 	return strings.TrimPrefix(parsedUrl.Path, "/")
 }
 
-// hasStructuredConnectFields reports whether opts carries any structured connect
-// field that a native DB2 DSN would make redundant. A native DSN is self-contained;
-// combining it with these (or a per-database override) silently drops them, so the
-// caller rejects the combination. Scheme is excluded: "db2" alongside a native DSN
-// is a supported, explicit hint.
+// hasStructuredConnectFields reports whether opts sets any structured connect field a
+// self-contained native DB2 DSN would silently override; the caller rejects that
+// combination instead of dropping the fields. Scheme is excluded, since "db2" alongside
+// a native DSN is a supported hint.
 func hasStructuredConnectFields(opts ConnectOptions) bool {
 	return opts.Host != "" || opts.Port != "" || opts.User != "" ||
 		opts.Password != "" || opts.Database != "" || len(opts.Params) > 0
@@ -419,19 +418,16 @@ func ConnectMany(ctx context.Context, opts ConnectOptions, dbNames []string) (ma
 }
 
 func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error) {
-	// A native DB2 DSN is an opaque ODBC keyword=value string, not a URL. Routing it
-	// through buildConnectionURL corrupts it (url.Parse/.String mangles the opaque form),
-	// so hand it to the driver verbatim. See docs/db2.md.
+	// A native DB2 DSN is opaque ODBC text, not a URL, so hand it to the driver verbatim
+	// instead of routing it through buildConnectionURL, which would corrupt it. See docs/db2.md.
 	nativeDSN, _, isNativeDB2, err := nativeDB2DSN(opts)
 	if err != nil {
 		return nil, Unknown, err
 	}
 	if isNativeDB2 {
-		// A native DSN already carries host, port, credentials, params and the target
-		// database. Structured fields or a per-database override (set directly, or by
-		// ConnectMany for databases.static / discovery_query) would be silently dropped
-		// on the verbatim path, so reject the combination instead of connecting to the
-		// wrong database. See docs/db2.md.
+		// A native DSN already carries every connection setting, so structured fields or
+		// a per-database override would be silently dropped on the verbatim path; reject
+		// the combination instead of connecting to the wrong database. See docs/db2.md.
 		if hasStructuredConnectFields(opts) {
 			return nil, Unknown, status.Error(codes.InvalidArgument,
 				"native DB2 DSN is self-contained and cannot be combined with structured "+
@@ -499,7 +495,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 		}
 		return db, Vertica, nil
 
-	case "db2":
+	case db2Scheme:
 		db, err := db2.Connect(ctx, parsedDsn.String())
 		if err != nil {
 			return nil, Unknown, err
@@ -511,12 +507,14 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 	}
 }
 
-// nativeDB2DSN reports whether opts carries a native DB2 DSN: an opaque ODBC
-// keyword=value string (e.g. "HOSTNAME=...;DATABASE=...") rather than a db2:// URL.
-// When it does, the env-expanded string (for verbatim handoff to the driver) and its
-// DATABASE value are returned. The scheme, when set, must be db2; a URL-shaped DSN or
-// foreign scheme is left to the normal URL path. Detection is db2.ParseNativeDSN, shared
-// with convertToDB2DSN's passthrough, so one pass yields both facts without re-splitting.
+// db2Scheme is the "db2" scheme name, used both as the switch case above and to
+// recognize an explicit (rather than inferred) DB2 hint in nativeDB2DSN.
+const db2Scheme = "db2"
+
+// nativeDB2DSN reports whether opts carries a native (ODBC keyword=value) DB2 DSN rather
+// than a db2:// URL, returning the env-expanded DSN and its DATABASE value when it does.
+// Detection defers to db2.ParseNativeDSN so this and convertToDB2DSN's passthrough share
+// one decision.
 func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
 	if opts.DSN == "" {
 		return "", "", false, nil
@@ -527,7 +525,7 @@ func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
 	if err != nil {
 		return "", "", false, err
 	}
-	if scheme != "" && scheme != "db2" {
+	if scheme != "" && scheme != db2Scheme {
 		return "", "", false, nil
 	}
 
@@ -686,10 +684,10 @@ func expandValue(s string, lookup LookupFunc) (string, error) {
 	return s, nil
 }
 
-// expandNativeDSN expands ${KEY} placeholders in a native DB2 DSN, rejecting any expanded
-// value that carries an ODBC keyword separator (; { } =). The db2:// URL path quotes each
-// field with quoteDB2Value, but a native DSN is handed to the driver verbatim, so a
-// placeholder value here could otherwise inject or override DSN keywords.
+// expandNativeDSN expands ${KEY} placeholders in a native DB2 DSN, rejecting any value
+// containing an ODBC separator (; { } =); unlike the db2:// URL path, which quotes each
+// field via quoteDB2Value, a native DSN reaches the driver verbatim, so an unchecked
+// placeholder could inject or override keywords.
 func expandNativeDSN(dsn string, lookup LookupFunc) (string, error) {
 	if !DSNREnvRegex.MatchString(dsn) {
 		return dsn, nil
