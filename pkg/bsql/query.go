@@ -36,6 +36,13 @@ const (
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
 var ErrQueryAffectedMoreThanOneRow = errors.New("query affected more than one row, ending and rolling back")
 
+// ErrValidationNoRows means a validation query returned no rows on a DDL engine (see
+// validationNoRowsMeansIdempotent). It wraps ErrQueryAffectedZeroRows so idempotency
+// reporting still fires, but stays distinct so the revoke path can tell it apart from the
+// revoke queries themselves affecting zero rows: no revoke ran, so the principal-exists
+// probe must be skipped rather than reporting a spurious deletion.
+var ErrValidationNoRows = fmt.Errorf("validation query returned no rows: %w", ErrQueryAffectedZeroRows)
+
 const defaultGrantCancelledReason = "Grant cancelled by connector policy."
 
 type executor interface {
@@ -421,6 +428,7 @@ func (s *SQLSyncer) RunProvisioningQueries(
 		ctx,
 		queries,
 		validationQueries,
+		"provisioning",
 		vars,
 		executor,
 	)
@@ -456,8 +464,9 @@ func (s *SQLSyncer) RunProvisioningQueries(
 //
 // When every revoke query affects zero rows the function still commits and
 // probes, then returns ErrQueryAffectedZeroRows so the caller can report
-// GrantAlreadyRevoked — combined with ResourceDeleted when the principal is
-// also gone, so retried revokes still surface the deletion.
+// GrantAlreadyRevoked, combined with ResourceDeleted when the principal is also
+// gone. Exception: when the zero-rows came from a DDL validation query no revoke
+// ran, so the probe is skipped and the deletion is not reported.
 func (s *SQLSyncer) RunRevokeProvisioning(
 	ctx context.Context,
 	queries,
@@ -477,13 +486,16 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 		return false, err
 	}
 
-	allZero, err := s.runRevokeQueries(ctx, queries, validationQueries, vars, useTx, target)
+	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, vars, useTx, target)
 	if err != nil {
 		return false, err
 	}
 
 	var principalDeleted bool
-	if existsCheck != nil {
+	// Skip the probe when the zero-rows came from a validation query (DDL engines): no
+	// revoke ran, so a no-rows exists-check would falsely report the principal deleted
+	// "as a side effect of the revoke" when it may still be present.
+	if existsCheck != nil && !fromValidation {
 		exists, err := s.runPrincipalExistsCheck(ctx, target, existsCheck, vars)
 		if err != nil {
 			l.Warn(
@@ -505,9 +517,12 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 }
 
 // runRevokeQueries executes the revoke queries against target, committing when
-// useTx is set. It reports whether every query affected zero rows, which means
-// the grant was already revoked; that case commits rather than failing so the
-// caller can still probe the principal and annotate the response.
+// useTx is set. It reports whether every query affected zero rows (allZero, the
+// already-revoked case) and whether that zero-rows result came from a validation query
+// rather than the revoke queries executing (fromValidation): on a DDL engine a no-rows
+// validation short-circuits before any revoke runs, so the caller must skip the
+// principal-exists probe. The already-revoked case commits rather than failing so the
+// caller can still annotate the response.
 func (s *SQLSyncer) runRevokeQueries(
 	ctx context.Context,
 	queries,
@@ -515,7 +530,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	vars map[string]any,
 	useTx bool,
 	target *sql.DB,
-) (bool, error) {
+) (bool, bool, error) {
 	l := ctxzap.Extract(ctx)
 
 	var committed bool
@@ -524,7 +539,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	if useTx {
 		tx, err := target.BeginTx(ctx, nil)
 		if err != nil {
-			return false, err
+			return false, false, err
 		}
 		executor = tx
 
@@ -537,27 +552,28 @@ func (s *SQLSyncer) runRevokeQueries(
 		}()
 	}
 
-	var allZero bool
-	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, vars, executor)
+	var allZero, fromValidation bool
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", vars, executor)
 	if err != nil {
 		if !errors.Is(err, ErrQueryAffectedZeroRows) {
-			return false, err
+			return false, false, err
 		}
 		allZero = true
+		fromValidation = errors.Is(err, ErrValidationNoRows)
 	}
 
 	if useTx {
 		tx, ok := executor.(*sql.Tx)
 		if !ok {
-			return false, errors.New("transactional executor required")
+			return false, false, errors.New("transactional executor required")
 		}
 		if err := tx.Commit(); err != nil {
-			return false, err
+			return false, false, err
 		}
 		committed = true
 	}
 
-	return allZero, nil
+	return allZero, fromValidation, nil
 }
 
 // runPrincipalExistsCheck executes the exists-check probe on the given
@@ -602,10 +618,20 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 	return exists, nil
 }
 
-func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
+// validationNoRowsMeansIdempotent reports whether a validation query returning no rows
+// means "already in the desired state" rather than a failed precondition. Only Db2 needs
+// it today: its DDL GRANT/REVOKE don't report rows-affected, so the validation query is the
+// only zero-effect signal, and Db2 ships opt-in behind the db2 build tag. Oracle and other
+// DDL engines are a follow-up: they ship default-on, so flipping this would break existing
+// configs that use validation_queries as loud preconditions, and need a per-config opt-in first.
+func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
+	return s.dbEngine == database.DB2
+}
+
+func (s *SQLSyncer) runValidationQueries(
 	ctx context.Context,
-	queries,
 	validationQueries []string,
+	operation string,
 	vars map[string]any,
 	executor executor,
 ) error {
@@ -632,17 +658,38 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 		valid := result.Next()
 
 		if err := result.Err(); err != nil {
+			_ = result.Close()
 			return fmt.Errorf("failed to read validation query result: %w", err)
 		}
 
-		err = result.Close()
-		if err != nil {
+		if err := result.Close(); err != nil {
 			return fmt.Errorf("failed to close validation query result: %w", err)
 		}
 
 		if !valid {
-			return fmt.Errorf("validation query returned no rows")
+			if s.validationNoRowsMeansIdempotent() {
+				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q), zap.String("operation", operation))
+				return fmt.Errorf("%s: validation query %q returned no rows: %w", operation, q, ErrValidationNoRows)
+			}
+			return fmt.Errorf("%s: validation query %q returned no rows", operation, q)
 		}
+	}
+
+	return nil
+}
+
+func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	operation string,
+	vars map[string]any,
+	executor executor,
+) error {
+	l := ctxzap.Extract(ctx)
+
+	if err := s.runValidationQueries(ctx, validationQueries, operation, vars, executor); err != nil {
+		return err
 	}
 
 	zeroRowCount := 0
@@ -1030,10 +1077,15 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				ctx,
 				provisioningConfig.Revoke.Queries,
 				provisioningConfig.Revoke.ValidationQueries,
+				"grant_replace revoke",
 				provisioningVars,
 				executor,
 			)
 			if err != nil {
+				// A zero-rows sentinel means the replace revoke had nothing to remove: the revoke
+				// queries matched nothing, or (Db2 only) a validation query returned no rows. Reporting
+				// the latter as GrantReplaced is load-bearing on the Db2 validation_queries contract that
+				// no-rows means "already gone"; don't generalize it to existence-precondition queries.
 				if !errors.Is(err, ErrQueryAffectedZeroRows) {
 					return anno, err
 				}
@@ -1047,32 +1099,8 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 	}
 
-	for _, q := range validationQueries {
-		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
-		if err != nil {
-			return anno, fmt.Errorf("failed to prepare validation query: %w", err)
-		}
-
-		result, err := executor.QueryContext(ctx, q, qArgs...)
-		if err != nil {
-			return anno, fmt.Errorf("failed to execute validation query: %w", err)
-		}
-
-		valid := result.Next()
-
-		if err := result.Err(); err != nil {
-			_ = result.Close()
-			return anno, fmt.Errorf("failed to read validation query result: %w", err)
-		}
-
-		err = result.Close()
-		if err != nil {
-			return anno, fmt.Errorf("failed to close validation query result: %w", err)
-		}
-
-		if !valid {
-			return anno, fmt.Errorf("grant provisioning: validation query returned no rows")
-		}
+	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", vars, executor); err != nil {
+		return anno, err
 	}
 
 	zeroRowCount := 0
