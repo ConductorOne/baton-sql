@@ -87,6 +87,37 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 	return nil
 }
 
+// validateProvisioningIdempotency validates the validation_queries and the
+// validation_queries_signal_idempotency opt-in shared by grant and revoke. Validation queries are
+// always vars-checked. The opt-in is only valid on DDL engines (Db2, Oracle) and requires at least
+// one validation query. no_transaction is required whenever a no-rows validation is reinterpreted
+// as idempotent (Db2 by default, Oracle on opt-in): Db2/Oracle GRANT/REVOKE report no rows-affected
+// under a tx, which would roll the statement back.
+func validateProvisioningIdempotency(s *SQLSyncer, pq EntitlementProvisioningQueries, vars map[string]string) error {
+	for _, query := range pq.ValidationQueries {
+		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
+		}
+	}
+
+	if pq.ValidationQueriesSignalIdempotency {
+		if !isDDLEngine(s.dbEngine) {
+			return errors.New("validation_queries_signal_idempotency is only supported on DDL engines (Db2, Oracle)")
+		}
+		if len(pq.ValidationQueries) < 1 {
+			return errors.New("validation_queries_signal_idempotency requires at least one validation_query")
+		}
+	}
+
+	if len(pq.ValidationQueries) > 0 &&
+		s.validationNoRowsMeansIdempotent(pq.ValidationQueriesSignalIdempotency) &&
+		!pq.NoTransaction {
+		return errors.New("validation_queries with no-rows idempotency require no_transaction: true on DDL engines (Db2/Oracle)")
+	}
+
+	return nil
+}
+
 func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvisioningQueries, vars map[string]string) error {
 	if grant == nil {
 		return nil
@@ -96,6 +127,10 @@ func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvi
 		if err := validateVarsInQuery(s, grant.RejectIf.Query, vars); err != nil {
 			return err
 		}
+	}
+
+	if err := validateProvisioningIdempotency(s, grant.EntitlementProvisioningQueries, vars); err != nil {
+		return err
 	}
 
 	for _, query := range grant.Queries {
@@ -110,6 +145,10 @@ func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvi
 func validateRevokeProvisioningQueries(s *SQLSyncer, revoke *RevokeEntitlementProvisioningQueries, vars map[string]string) error {
 	if revoke == nil {
 		return nil
+	}
+
+	if err := validateProvisioningIdempotency(s, revoke.EntitlementProvisioningQueries, vars); err != nil {
+		return err
 	}
 
 	for _, query := range revoke.Queries {

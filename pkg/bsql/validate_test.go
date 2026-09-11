@@ -3,6 +3,7 @@ package bsql
 import (
 	"testing"
 
+	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/stretchr/testify/require"
 )
 
@@ -99,6 +100,80 @@ func TestValidate(t *testing.T) {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestValidateProvisioningIdempotency covers the shared validation_queries_signal_idempotency
+// checks: validation queries are always vars-checked, the opt-in requires at least one validation
+// query, and on a DDL engine it requires no_transaction. The grant and revoke helpers both run it.
+func TestValidateProvisioningIdempotency(t *testing.T) {
+	vars := map[string]string{"p": "principal.ID"}
+	oneValidation := []string{"SELECT 1 FROM dual WHERE x = ?<p>"}
+
+	tests := []struct {
+		name    string
+		engine  database.DbEngine
+		pq      EntitlementProvisioningQueries
+		wantErr bool
+	}{
+		{
+			name:    "signal on without validation queries fails",
+			engine:  database.Oracle,
+			pq:      EntitlementProvisioningQueries{ValidationQueriesSignalIdempotency: true, NoTransaction: true},
+			wantErr: true,
+		},
+		{
+			name:    "signal on DDL engine without no_transaction fails",
+			engine:  database.Oracle,
+			pq:      EntitlementProvisioningQueries{ValidationQueriesSignalIdempotency: true, ValidationQueries: oneValidation},
+			wantErr: true,
+		},
+		{
+			name:    "signal on DDL engine with no_transaction and a validation query ok",
+			engine:  database.Oracle,
+			pq:      EntitlementProvisioningQueries{ValidationQueriesSignalIdempotency: true, NoTransaction: true, ValidationQueries: oneValidation},
+			wantErr: false,
+		},
+		{
+			name:    "signal on non-DDL engine is rejected",
+			engine:  database.PostgreSQL,
+			pq:      EntitlementProvisioningQueries{ValidationQueriesSignalIdempotency: true, NoTransaction: true, ValidationQueries: oneValidation},
+			wantErr: true,
+		},
+		{
+			name:    "Db2 default-on validation without no_transaction fails",
+			engine:  database.DB2,
+			pq:      EntitlementProvisioningQueries{ValidationQueries: oneValidation},
+			wantErr: true,
+		},
+		{
+			name:    "Db2 default-on validation with no_transaction ok",
+			engine:  database.DB2,
+			pq:      EntitlementProvisioningQueries{NoTransaction: true, ValidationQueries: oneValidation},
+			wantErr: false,
+		},
+		{
+			name:    "validation query with undefined var fails",
+			engine:  database.Oracle,
+			pq:      EntitlementProvisioningQueries{NoTransaction: true, ValidationQueries: []string{"SELECT 1 WHERE x = ?<missing>"}},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &SQLSyncer{dbEngine: tt.engine}
+
+			gErr := validateGrantProvisioningQueries(s, &GrantEntitlementProvisioningQueries{EntitlementProvisioningQueries: tt.pq}, vars)
+			rErr := validateRevokeProvisioningQueries(s, &RevokeEntitlementProvisioningQueries{EntitlementProvisioningQueries: tt.pq}, vars)
+			if tt.wantErr {
+				require.Error(t, gErr)
+				require.Error(t, rErr)
+			} else {
+				require.NoError(t, gErr)
+				require.NoError(t, rErr)
 			}
 		})
 	}

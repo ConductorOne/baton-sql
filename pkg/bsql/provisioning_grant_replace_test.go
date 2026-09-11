@@ -136,6 +136,7 @@ func withGrantReplaceDB2Config(s *SQLSyncer) {
 	revoke.ValidationQueries = []string{
 		`SELECT 1 FROM user_roles WHERE user_id = ?<user_id> AND role = 'does-not-exist'`,
 	}
+	revoke.ValidationQueriesSignalIdempotency = true
 }
 
 // Db2 path: the revoke validation query returns no rows, so the revoke DELETE never
@@ -159,4 +160,38 @@ func TestGrant_ReplaceDB2RevokeValidationNoRowsStillReportsGrantReplaced(t *test
 	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "viewer"))
 	// the main grant still ran
 	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
+}
+
+// withGrantReplaceOracleOptInOffConfig is the grant_replace config on Oracle with the revoke
+// opt-in OFF. Bind-free queries keep the SQLite harness happy under Oracle's ":N" placeholders;
+// the revoke validation returns no rows, and with the opt-in off that is a hard failure rather
+// than an idempotent success.
+func withGrantReplaceOracleOptInOffConfig(s *SQLSyncer) {
+	withGrantReplaceConfig(s, true) // no_transaction
+	prov := s.config.StaticEntitlements[0].Provisioning
+	// bind-free replace query so Oracle's ":N" binds never reach SQLite
+	prov.Grant.GrantReplace.Query = `SELECT user_id, role FROM user_roles WHERE role = 'viewer'`
+	revoke := prov.Revoke
+	revoke.ValidationQueries = []string{`SELECT 1 WHERE 1 = 0`}
+	revoke.ValidationQueriesSignalIdempotency = false
+}
+
+// Oracle path with the grant_replace revoke opt-in OFF: a no-rows revoke validation is a hard
+// failure, not idempotency, so the whole grant errors and GrantReplaced is never reported. The
+// viewer row survives because the revoke DELETE never ran.
+func TestGrant_ReplaceOracleRevokeValidationNoRowsOptInOffFailsGrant(t *testing.T) {
+	s, db := newGrantReplaceTestSyncer(t)
+	s.dbEngine = database.Oracle
+	withGrantReplaceOracleOptInOffConfig(s)
+	_, err := db.ExecContext(t.Context(), `INSERT INTO user_roles (user_id, role) VALUES ('user-1','viewer')`)
+	require.NoError(t, err)
+
+	annos, err := s.Grant(t.Context(), userPrincipal("user-1"), memberEntitlementFor("admin"))
+	require.Error(t, err)
+	require.Nil(t, annos, "the whole grant must fail; no GrantReplaced annotation")
+
+	// the revoke never ran, so viewer survives
+	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "viewer"))
+	// the main grant never ran either
+	require.Equal(t, 0, countRows(t, db, `SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role = ?`, "user-1", "admin"))
 }

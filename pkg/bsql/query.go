@@ -31,6 +31,7 @@ const (
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
 	identifierKey   = "identifier"
+	keywordKey      = "keyword"
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
@@ -74,6 +75,29 @@ type queryTokenOpts struct {
 	// Identifier inlines as an engine-quoted SQL identifier (doubled embedded quotes).
 	// Use where parameter binding isn't allowed by the SQL grammar (GRANT, DDL).
 	Identifier bool
+
+	// Keyword inlines a fixed multiword SQL keyword clause (e.g. "CREATE SESSION") as-is,
+	// after collapsing internal whitespace. For system-privilege GRANT/REVOKE where the value
+	// is a keyword rather than an identifier: quoting would break it and Unquoted would strip
+	// the space. Rejects anything outside letters, digits, and single spaces, so it is not an
+	// injection vector.
+	Keyword bool
+}
+
+var keywordClauseRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9 ]*$`)
+
+var whitespaceRunRegex = regexp.MustCompile(`\s+`)
+
+// renderKeyword validates a fixed multiword SQL keyword clause (e.g. "CREATE SESSION") and
+// returns it with internal whitespace collapsed to single spaces. It reports false for anything
+// outside letters, digits, and single spaces (must start with a letter), so an injected value
+// like "SESSION; DROP TABLE x" is rejected rather than inlined.
+func renderKeyword(val string) (string, bool) {
+	collapsed := strings.TrimSpace(whitespaceRunRegex.ReplaceAllString(val, " "))
+	if !keywordClauseRegex.MatchString(collapsed) {
+		return "", false
+	}
+	return collapsed, true
 }
 
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)(?:\|([a-zA-Z0-9_]+))?\>`)
@@ -126,13 +150,21 @@ func parseToken(token string) (*queryTokenOpts, error) {
 			opts.Unquoted = true
 		case identifierKey:
 			opts.Identifier = true
+		case keywordKey:
+			opts.Keyword = true
 		default:
 			return nil, fmt.Errorf("unknown option %s", opt)
 		}
 	}
 
-	if opts.Unquoted && opts.Identifier {
-		return nil, fmt.Errorf("token options unquoted and identifier are mutually exclusive")
+	set := 0
+	for _, on := range []bool{opts.Unquoted, opts.Identifier, opts.Keyword} {
+		if on {
+			set++
+		}
+	}
+	if set > 1 {
+		return nil, fmt.Errorf("token options unquoted, identifier and keyword are mutually exclusive")
 	}
 
 	return opts, nil
@@ -204,6 +236,16 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 
 		if opts.Identifier {
 			return s.quoteIdentifier(fmt.Sprintf("%v", val))
+		}
+
+		if opts.Keyword {
+			strVal := fmt.Sprintf("%v", val)
+			rendered, ok := renderKeyword(strVal)
+			if !ok {
+				parseErr = errors.Join(parseErr, fmt.Errorf("token %s: value %q is not a valid SQL keyword clause", token, strVal))
+				return token
+			}
+			return rendered
 		}
 
 		qArgs = append(qArgs, val)
@@ -359,6 +401,16 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 			return s.quoteIdentifier(fmt.Sprintf("%v", v))
 		}
 
+		if opts.Keyword {
+			strVal := fmt.Sprintf("%v", v)
+			rendered, ok := renderKeyword(strVal)
+			if !ok {
+				parseErr = errors.Join(parseErr, fmt.Errorf("token %s: value %q is not a valid SQL keyword clause", token, strVal))
+				return token
+			}
+			return rendered
+		}
+
 		qArgs = append(qArgs, v)
 		return s.getNextPlaceholder(qArgs)
 	})
@@ -387,13 +439,21 @@ func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) 
 	return nil, fmt.Errorf("provisioning: primary database %q not found in handles (configured: %v)", s.primaryDBName, s.dbNames)
 }
 
+// ProvisioningOptions carries the boolean knobs shared by the exported provisioning entrypoints so
+// new options can be added without breaking out-of-repo callers.
+type ProvisioningOptions struct {
+	SignalIdempotency bool
+	UseTransaction    bool
+}
+
 func (s *SQLSyncer) RunProvisioningQueries(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
 	vars map[string]any,
-	useTx bool,
+	opts ProvisioningOptions,
 ) error {
+	useTx := opts.UseTransaction
 	l := ctxzap.Extract(ctx).With(
 		zap.Bool("use_tx", useTx),
 	)
@@ -431,6 +491,7 @@ func (s *SQLSyncer) RunProvisioningQueries(
 		"provisioning",
 		vars,
 		executor,
+		ProvisioningOptions{SignalIdempotency: opts.SignalIdempotency},
 	)
 	if err != nil {
 		return err
@@ -473,10 +534,10 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	validationQueries []string,
 	existsCheck *PrincipalExistsCheck,
 	vars map[string]any,
-	useTx bool,
+	opts ProvisioningOptions,
 ) (bool, error) {
 	l := ctxzap.Extract(ctx).With(
-		zap.Bool("use_tx", useTx),
+		zap.Bool("use_tx", opts.UseTransaction),
 	)
 
 	ctx = ctxzap.ToContext(ctx, l)
@@ -486,7 +547,7 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 		return false, err
 	}
 
-	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, vars, useTx, target)
+	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, opts.SignalIdempotency, vars, opts.UseTransaction, target)
 	if err != nil {
 		return false, err
 	}
@@ -527,6 +588,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
+	signalIdempotency bool,
 	vars map[string]any,
 	useTx bool,
 	target *sql.DB,
@@ -553,7 +615,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	}
 
 	var allZero, fromValidation bool
-	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", vars, executor)
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", vars, executor, ProvisioningOptions{SignalIdempotency: signalIdempotency})
 	if err != nil {
 		if !errors.Is(err, ErrQueryAffectedZeroRows) {
 			return false, false, err
@@ -618,20 +680,44 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 	return exists, nil
 }
 
-// validationNoRowsMeansIdempotent reports whether a validation query returning no rows
-// means "already in the desired state" rather than a failed precondition. Only Db2 needs
-// it today: its DDL GRANT/REVOKE don't report rows-affected, so the validation query is the
-// only zero-effect signal, and Db2 ships opt-in behind the db2 build tag. Oracle and other
-// DDL engines are a follow-up: they ship default-on, so flipping this would break existing
-// configs that use validation_queries as loud preconditions, and need a per-config opt-in first.
-func (s *SQLSyncer) validationNoRowsMeansIdempotent() bool {
-	return s.dbEngine == database.DB2
+// isDDLEngine reports whether the engine applies GRANT/REVOKE as DDL that raises an error on
+// re-run instead of reporting rows-affected (Db2, Oracle).
+func isDDLEngine(e database.DbEngine) bool {
+	switch e {
+	case database.DB2, database.Oracle:
+		return true
+	default:
+		return false
+	}
+}
+
+// validationNoRowsMeansIdempotent reports whether a validation query returning no rows means
+// "already in the desired state" (an idempotent success) rather than a failed precondition. It
+// is true only on DDL engines whose GRANT/REVOKE raise an error instead of reporting
+// rows-affected (Db2, Oracle). Db2 ships behind a build tag, so it stays on by engine (unchanged
+// from #151); Oracle ships in every binary, so it reinterprets no-rows only when the entitlement
+// opts in via validation_queries_signal_idempotency. Everywhere else a no-rows result keeps
+// failing loudly: swallowing it where it could mean a missing or mistyped principal is a
+// silent-access bug.
+func (s *SQLSyncer) validationNoRowsMeansIdempotent(signalIdempotency bool) bool {
+	switch s.dbEngine {
+	case database.DB2:
+		// Db2 ships behind a build tag; no-rows-means-idempotent stays on by engine
+		// (unchanged from #151), no per-config opt-in required.
+		return true
+	case database.Oracle:
+		// Oracle ships in every binary, so the reinterpretation is opt-in only.
+		return signalIdempotency
+	default:
+		return false
+	}
 }
 
 func (s *SQLSyncer) runValidationQueries(
 	ctx context.Context,
 	validationQueries []string,
 	operation string,
+	signalIdempotency bool,
 	vars map[string]any,
 	executor executor,
 ) error {
@@ -667,7 +753,7 @@ func (s *SQLSyncer) runValidationQueries(
 		}
 
 		if !valid {
-			if s.validationNoRowsMeansIdempotent() {
+			if s.validationNoRowsMeansIdempotent(signalIdempotency) {
 				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q), zap.String("operation", operation))
 				return fmt.Errorf("%s: validation query %q returned no rows: %w", operation, q, ErrValidationNoRows)
 			}
@@ -685,10 +771,11 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 	operation string,
 	vars map[string]any,
 	executor executor,
+	opts ProvisioningOptions,
 ) error {
 	l := ctxzap.Extract(ctx)
 
-	if err := s.runValidationQueries(ctx, validationQueries, operation, vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, operation, opts.SignalIdempotency, vars, executor); err != nil {
 		return err
 	}
 
@@ -934,10 +1021,11 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	queries,
 	validationQueries []string,
 	vars map[string]any,
-	useTx bool,
+	opts ProvisioningOptions,
 	replace *GrantReplaceProvisioningQueries,
 	rejectIf *GrantRejectIfProvisioningQuery,
 ) (annotations.Annotations, error) {
+	useTx := opts.UseTransaction
 	l := ctxzap.Extract(ctx)
 
 	anno := annotations.New()
@@ -1080,12 +1168,13 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				"grant_replace revoke",
 				provisioningVars,
 				executor,
+				ProvisioningOptions{SignalIdempotency: provisioningConfig.Revoke.ValidationQueriesSignalIdempotency},
 			)
 			if err != nil {
 				// A zero-rows sentinel means the replace revoke had nothing to remove: the revoke
-				// queries matched nothing, or (Db2 only) a validation query returned no rows. Reporting
-				// the latter as GrantReplaced is load-bearing on the Db2 validation_queries contract that
-				// no-rows means "already gone"; don't generalize it to existence-precondition queries.
+				// queries matched nothing, or a no-rows validation was reinterpreted as idempotent
+				// on a DDL engine (Db2 by default, Oracle on validation_queries_signal_idempotency).
+				// Reporting the latter as GrantReplaced leans on that meaning "already gone".
 				if !errors.Is(err, ErrQueryAffectedZeroRows) {
 					return anno, err
 				}
@@ -1099,7 +1188,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 	}
 
-	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", opts.SignalIdempotency, vars, executor); err != nil {
 		return anno, err
 	}
 

@@ -79,7 +79,7 @@ func TestRunRevokeProvisioning_LastRoleDeletesPrincipal(t *testing.T) {
 		nil,
 		principalExistsCheck(),
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 	)
 	require.NoError(t, err)
 	require.True(t, deleted)
@@ -98,7 +98,7 @@ func TestRunRevokeProvisioning_KeepsPrincipalWhenOtherRolesRemain(t *testing.T) 
 		nil,
 		principalExistsCheck(),
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 	)
 	require.NoError(t, err)
 	require.False(t, deleted)
@@ -119,7 +119,7 @@ func TestRunRevokeProvisioning_AllZeroRowsWithDeletedPrincipal(t *testing.T) {
 		nil,
 		principalExistsCheck(),
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 	)
 	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
 	require.True(t, deleted)
@@ -136,7 +136,7 @@ func TestRunRevokeProvisioning_AllZeroRowsWithSurvivingPrincipal(t *testing.T) {
 		nil,
 		principalExistsCheck(),
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 	)
 	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
 	require.False(t, deleted)
@@ -159,7 +159,7 @@ func TestRunRevokeProvisioning_DDLValidationNoRowsSkipsExistsCheck(t *testing.T)
 		[]string{`SELECT 1 FROM user_roles WHERE user_id = ?<principal_id> AND role = ?<role>`},
 		principalExistsCheck(),
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{SignalIdempotency: true, UseTransaction: true},
 	)
 	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
 	require.False(t, deleted, "exists-check must be skipped when the sentinel came from validation")
@@ -176,7 +176,7 @@ func TestRunRevokeProvisioning_NoExistsCheckBehavesLikeBefore(t *testing.T) {
 		nil,
 		nil,
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 	)
 	require.NoError(t, err)
 	require.False(t, deleted)
@@ -189,7 +189,7 @@ func TestRunRevokeProvisioning_NoExistsCheckBehavesLikeBefore(t *testing.T) {
 		nil,
 		nil,
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 	)
 	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
 	require.False(t, deleted)
@@ -207,7 +207,7 @@ func TestRunRevokeProvisioning_ProbeErrorKeepsRevoke(t *testing.T) {
 		nil,
 		&PrincipalExistsCheck{Query: `SELECT 1 FROM nonexistent_table WHERE id = ?<principal_id>`},
 		map[string]any{"principal_id": "user-1", "role": "admin"},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 	)
 	require.NoError(t, err)
 	require.False(t, deleted)

@@ -53,7 +53,7 @@ func TestRunGrantProvisioning_RejectIfMatchReturnsGrantCancelledAndSkipsMutation
 			"user_id": "user-1",
 			"role":    "admin",
 		},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 		nil,
 		&GrantRejectIfProvisioningQuery{
 			Query:  `SELECT 1 AS rejected`,
@@ -84,7 +84,7 @@ func TestRunGrantProvisioning_RejectIfNoMatchProceedsWithGrant(t *testing.T) {
 			"user_id": "user-1",
 			"role":    "admin",
 		},
-		true,
+		ProvisioningOptions{UseTransaction: true},
 		nil,
 		&GrantRejectIfProvisioningQuery{
 			Query:  `SELECT 1 AS rejected WHERE 0`,
