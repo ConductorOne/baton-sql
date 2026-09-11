@@ -37,8 +37,9 @@ revoke:
 
 On these engines a `validation_query` returning no rows is reported as an **idempotent success**
 (`GrantAlreadyExists` on grant, `GrantAlreadyRevoked` on revoke): no rows means "the state is
-already as desired, there is no work to do". On Db2 (default-on) this reinterpretation also
-requires `no_transaction: true`, since Db2 reports no rows-affected under a transaction.
+already as desired, there is no work to do". Wherever this reinterpretation is active (Db2 always,
+Oracle when the flag is on), the grant/revoke must also set `no_transaction: true`, since Db2 and
+Oracle report no rows-affected under a transaction.
 
 ## Writing the query: "is there work to do?", not "does this exist?"
 
