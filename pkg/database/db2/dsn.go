@@ -3,9 +3,96 @@ package db2
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+// urlSchemeRegex matches a DSN that begins with a URL scheme (e.g. "db2://"); anchoring
+// to the start keeps a native DSN whose value contains "://" (e.g. PWD=my://secret) from
+// being misread as a URL.
+var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
+
+// ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (not a URL),
+// returning its DATABASE value if present. HOSTNAME, not DATABASE alone, is the native
+// marker, since other engines' ODBC/ADO strings also carry DATABASE; every caller shares
+// this one detector to avoid drift.
+func ParseNativeDSN(dsn string) (string, bool) {
+	if urlSchemeRegex.MatchString(dsn) {
+		return "", false
+	}
+	var database string
+	native, haveDB := false, false
+	for _, part := range splitDB2DSN(dsn) {
+		keyword, value, found := strings.Cut(part, "=")
+		if !found {
+			continue
+		}
+		keyword = strings.TrimSpace(keyword)
+		switch {
+		case strings.EqualFold(keyword, "HOSTNAME"):
+			native = true
+		case strings.EqualFold(keyword, "DATABASE"):
+			if !haveDB { // first DATABASE= wins
+				value = strings.TrimSpace(value)
+				if strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}") {
+					value = value[1 : len(value)-1]
+				}
+				database, haveDB = value, true
+			}
+		}
+	}
+	return database, native
+}
+
+// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form.
+func IsNativeDSN(dsn string) bool {
+	_, native := ParseNativeDSN(dsn)
+	return native
+}
+
+// DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent.
+func DSNDatabase(dsn string) string {
+	database, _ := ParseNativeDSN(dsn)
+	return database
+}
+
+// splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it
+// opens a value and is later closed by '}'; an unterminated or misplaced '{' is literal,
+// so HOSTNAME/DATABASE markers stay visible instead of being silently swallowed.
+func splitDB2DSN(dsn string) []string {
+	var parts []string
+	start := 0
+	braced := false       // inside a {...} quoted value
+	atValueStart := false // at a value position (right after '=', across whitespace) outside braces
+	for i := 0; i < len(dsn); i++ {
+		switch dsn[i] {
+		case '}':
+			braced = false
+			atValueStart = false
+		case '{':
+			if atValueStart && strings.IndexByte(dsn[i:], '}') != -1 {
+				braced = true
+			}
+			atValueStart = false
+		case '=':
+			if !braced {
+				atValueStart = true
+			}
+		case ';':
+			if !braced {
+				parts = append(parts, dsn[start:i])
+				start = i + 1
+			}
+			atValueStart = false
+		case ' ', '\t':
+			// keep atValueStart so "DATABASE= {my;db}" still brace-detects.
+		default:
+			atValueStart = false
+		}
+	}
+	return append(parts, dsn[start:])
+}
 
 // Keywords derived from the URL itself; query parameters may not override them.
 // Anyone needing full control over these can pass a native DB2 DSN instead.
@@ -33,9 +120,9 @@ func quoteDB2Value(v string) (string, error) {
 
 // convertToDB2DSN converts URL format to DB2 DSN format.
 func convertToDB2DSN(dsn string) (string, error) {
-	// If it's already in DB2 format (contains HOSTNAME= or DATABASE=), return as-is.
-	// URL-format DSNs are exempt from this check so those markers may appear in credentials.
-	if !strings.HasPrefix(dsn, "db2://") && (strings.Contains(dsn, "HOSTNAME=") || strings.Contains(dsn, "DATABASE=")) {
+	// If it's already in DB2's native keyword=value format, return as-is.
+	// URL-format DSNs are exempt so those markers may appear in credentials.
+	if IsNativeDSN(dsn) {
 		return dsn, nil
 	}
 

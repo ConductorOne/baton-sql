@@ -14,3 +14,8 @@ import (
 func Connect(_ context.Context, _ string) (*sql.DB, error) {
 	return nil, errors.New("baton-sql: DB2 support not compiled into this binary; rebuild with -tags db2 (see docs/db2.md)")
 }
+
+// IsAuthError is a stub; the DB2 driver error types are unavailable without -tags db2.
+func IsAuthError(_ error) bool {
+	return false
+}

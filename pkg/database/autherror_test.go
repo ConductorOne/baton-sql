@@ -3,6 +3,7 @@ package database
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/go-sql-driver/mysql"
@@ -38,6 +39,12 @@ func TestAuthError(t *testing.T) {
 			}
 			if status.Code(got) != tt.want {
 				t.Fatalf("want %v, got %v", tt.want, status.Code(got))
+			}
+			if !strings.Contains(got.Error(), `"testdb"`) {
+				t.Fatalf("expected database name in error, got %v", got)
+			}
+			if !errors.Is(got, tt.err) {
+				t.Fatalf("expected original error to remain reachable via errors.Is, got %v", got)
 			}
 		})
 	}

@@ -18,6 +18,8 @@ import (
 	"github.com/conductorone/baton-sql/pkg/database/postgres"
 	"github.com/conductorone/baton-sql/pkg/database/sqlserver"
 	"github.com/conductorone/baton-sql/pkg/database/vertica"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
@@ -361,11 +363,23 @@ func ResolveDatabaseName(opts ConnectOptions) string {
 			return expanded
 		}
 	}
+	if _, database, isNativeDB2, err := nativeDB2DSN(opts); err == nil && isNativeDB2 {
+		return database
+	}
 	parsedUrl, err := buildConnectionURL(opts)
 	if err != nil || parsedUrl == nil {
 		return ""
 	}
 	return strings.TrimPrefix(parsedUrl.Path, "/")
+}
+
+// hasStructuredConnectFields reports whether opts sets any structured connect field a
+// self-contained native DB2 DSN would silently override; the caller rejects that
+// combination instead of dropping the fields. Scheme is excluded, since "db2" alongside
+// a native DSN is a supported hint.
+func hasStructuredConnectFields(opts ConnectOptions) bool {
+	return opts.Host != "" || opts.Port != "" || opts.User != "" ||
+		opts.Password != "" || opts.Database != "" || len(opts.Params) > 0
 }
 
 // ConnectMany opens one *sql.DB per name in dbNames. On any per-database failure,
@@ -404,13 +418,38 @@ func ConnectMany(ctx context.Context, opts ConnectOptions, dbNames []string) (ma
 }
 
 func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error) {
+	// A native DB2 DSN is opaque ODBC text, not a URL, so hand it to the driver verbatim
+	// instead of routing it through buildConnectionURL, which would corrupt it. See docs/db2.md.
+	nativeDSN, _, isNativeDB2, err := nativeDB2DSN(opts)
+	if err != nil {
+		return nil, Unknown, err
+	}
+	if isNativeDB2 {
+		// A native DSN already carries every connection setting, so structured fields or
+		// a per-database override would be silently dropped on the verbatim path; reject
+		// the combination instead of connecting to the wrong database. See docs/db2.md.
+		if hasStructuredConnectFields(opts) {
+			return nil, Unknown, status.Error(codes.InvalidArgument,
+				"native DB2 DSN is self-contained and cannot be combined with structured "+
+					"connect fields (host, port, user, password, params) or a per-database "+
+					"override (connect.database, databases); put every setting in the DSN or "+
+					"use the db2:// URL form",
+			)
+		}
+		db, err := db2.Connect(ctx, nativeDSN)
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, DB2, nil
+	}
+
 	parsedDsn, err := buildConnectionURL(opts)
 	if err != nil {
 		return nil, Unknown, err
 	}
 
 	if parsedDsn.Scheme == "" {
-		return nil, Unknown, errors.New("database scheme must be specified in DSN or configuration")
+		return nil, Unknown, status.Error(codes.InvalidArgument, "database scheme must be specified in DSN or configuration")
 	}
 
 	switch parsedDsn.Scheme {
@@ -456,7 +495,7 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 		}
 		return db, Vertica, nil
 
-	case "db2":
+	case db2Scheme:
 		db, err := db2.Connect(ctx, parsedDsn.String())
 		if err != nil {
 			return nil, Unknown, err
@@ -466,6 +505,45 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
+}
+
+// db2Scheme is the "db2" scheme name, used both as the switch case above and to
+// recognize an explicit (rather than inferred) DB2 hint in nativeDB2DSN.
+const db2Scheme = "db2"
+
+// nativeDB2DSN reports whether opts carries a native (ODBC keyword=value) DB2 DSN rather
+// than a db2:// URL, returning the env-expanded DSN and its DATABASE value when it does.
+// Detection defers to db2.ParseNativeDSN so this and convertToDB2DSN's passthrough share
+// one decision.
+func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
+	if opts.DSN == "" {
+		return "", "", false, nil
+	}
+	lookup := opts.resolveLookup()
+
+	scheme, err := expandValue(opts.Scheme, lookup)
+	if err != nil {
+		return "", "", false, err
+	}
+	if scheme != "" && scheme != db2Scheme {
+		return "", "", false, nil
+	}
+
+	dsn, err := expandValue(opts.DSN, lookup)
+	if err != nil {
+		return "", "", false, err
+	}
+	if _, native := db2.ParseNativeDSN(dsn); !native {
+		return "", "", false, nil
+	}
+	// Confirmed native: re-expand with keyword-injection validation. The expansion above
+	// only decides routing; the driver gets this string verbatim.
+	safeDSN, err := expandNativeDSN(opts.DSN, lookup)
+	if err != nil {
+		return "", "", false, err
+	}
+	database, _ := db2.ParseNativeDSN(safeDSN)
+	return safeDSN, database, true, nil
 }
 
 func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
@@ -604,4 +682,40 @@ func expandValue(s string, lookup LookupFunc) (string, error) {
 		return updateFromLookup(s, lookup)
 	}
 	return s, nil
+}
+
+// expandNativeDSN expands ${KEY} placeholders in a native DB2 DSN, rejecting any value
+// containing an ODBC separator (; { } =); unlike the db2:// URL path, which quotes each
+// field via quoteDB2Value, a native DSN reaches the driver verbatim, so an unchecked
+// placeholder could inject or override keywords.
+func expandNativeDSN(dsn string, lookup LookupFunc) (string, error) {
+	if !DSNREnvRegex.MatchString(dsn) {
+		return dsn, nil
+	}
+	// A DSN that is a single ${KEY} spanning the whole string is the full value, not a
+	// field embedded in literal structure, so its separators are legitimate: expand as-is.
+	if DSNREnvRegex.FindString(dsn) == dsn {
+		return expandValue(dsn, lookup)
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	var err error
+	result := DSNREnvRegex.ReplaceAllStringFunc(dsn, func(match string) string {
+		varName := match[2 : len(match)-1]
+		value, exists := lookup(varName)
+		if !exists {
+			err = errors.Join(err, fmt.Errorf("environment variable %s is not set", varName))
+			return match
+		}
+		if strings.ContainsAny(value, ";{}=") {
+			err = errors.Join(err, fmt.Errorf("value for %s must not contain ODBC keyword separators (; { } =)", varName))
+			return match
+		}
+		return value
+	})
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }

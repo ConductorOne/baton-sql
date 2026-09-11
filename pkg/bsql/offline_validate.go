@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/conductorone/baton-sql/pkg/database/db2"
 )
+
+// db2Scheme is the "db2" scheme name a native DB2 DSN classifies to in resolveConnectScheme.
+const db2Scheme = "db2"
 
 // OfflineValidate performs YAML-level structural checks without opening a DB or
 // requiring SQLSyncer. Suitable for editor/RPC offline validation.
@@ -101,6 +106,11 @@ func resolveConnectScheme(c *DatabaseConfig) (string, error) {
 	dsn := strings.TrimSpace(c.DSN)
 	if dsn == "" {
 		return "", errors.New("connect: scheme or dsn is required")
+	}
+	// A native DB2 DSN carries no scheme prefix, so classify it via the shared detector to
+	// match pkg/database's routing and avoid misreading a "://" inside a value as a scheme.
+	if db2.IsNativeDSN(dsn) {
+		return db2Scheme, nil
 	}
 	// Placeholders like postgres://${HOST}/db — peel scheme before parse when possible.
 	if idx := strings.Index(dsn, "://"); idx > 0 {

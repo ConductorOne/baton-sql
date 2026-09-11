@@ -29,6 +29,16 @@ func TestConvertToDB2DSN(t *testing.T) {
 			want: "HOSTNAME=dbhost;PORT=50000;DATABASE=testdb;UID=user;PWD=pass",
 		},
 		{
+			name: "lowercase native dsn passed through",
+			dsn:  "hostname=dbhost;port=50000;database=testdb;uid=user;pwd=pass",
+			want: "hostname=dbhost;port=50000;database=testdb;uid=user;pwd=pass",
+		},
+		{
+			name: "native dsn with whitespace passed through",
+			dsn:  "HOSTNAME=dbhost; DATABASE=testdb; UID=user",
+			want: "HOSTNAME=dbhost; DATABASE=testdb; UID=user",
+		},
+		{
 			name:    "wrong scheme",
 			dsn:     "postgres://dbhost/testdb",
 			wantErr: "expected db2:// scheme",
@@ -99,6 +109,61 @@ func TestConvertToDB2DSN(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIsNativeDSN(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want bool
+	}{
+		{name: "native markers", dsn: "HOSTNAME=h;DATABASE=X", want: true},
+		{name: "lowercase keywords", dsn: "hostname=h;database=x", want: true},
+		{name: "whitespace after separator", dsn: "HOSTNAME=h; DATABASE=X", want: true},
+		{name: "db2 url", dsn: "db2://u:p@h:50000/db", want: false},
+		{name: "postgres url", dsn: "postgres://h/db", want: false},
+		{name: "value carrying :// is not a url", dsn: "HOSTNAME=h;PWD=my://secret", want: true},
+		{name: "space before the =", dsn: "HOSTNAME = h;DATABASE=X", want: true},
+		// DATABASE without HOSTNAME is a generic ODBC/ADO shape (e.g. MSSQL), not native DB2.
+		{name: "database without hostname is not native", dsn: "Server=x;Database=y;User Id=u", want: false},
+		// HOSTNAME appears only inside a braced PWD value, so the brace-aware split keeps it
+		// as one PWD part: not a native marker.
+		{name: "hostname marker only inside braced value", dsn: "UID=u;PWD={x;HOSTNAME=y}", want: false},
+		// Unterminated '{' is literal, so the ';' still splits and HOSTNAME= stays visible;
+		// the malformed value then reaches the driver instead of silently misrouting.
+		{name: "unterminated brace keeps marker visible", dsn: "PWD={oops;HOSTNAME=h", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, IsNativeDSN(tt.dsn))
+		})
+	}
+}
+
+func TestDSNDatabase(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want string
+	}{
+		{name: "plain", dsn: "HOSTNAME=h;DATABASE=TESTDB;UID=u", want: "TESTDB"},
+		{name: "braced value with semicolon", dsn: "HOSTNAME=h;DATABASE={my;db}", want: "my;db"},
+		{name: "lowercase", dsn: "hostname=h;database=testdb", want: "testdb"},
+		{name: "whitespace before keyword", dsn: "HOSTNAME=h; DATABASE=TESTDB", want: "TESTDB"},
+		{name: "space after the =", dsn: "HOSTNAME=h;DATABASE= TESTDB", want: "TESTDB"},
+		{name: "space before the =", dsn: "HOSTNAME=h;DATABASE = TESTDB", want: "TESTDB"},
+		// Space between '=' and a braced value must still brace-detect, else the ';'
+		// inside the braces splits and the database name comes back truncated.
+		{name: "space before braced value", dsn: "HOSTNAME=h;DATABASE= {my;db}", want: "my;db"},
+		// A literal '{' mid-value (not ODBC quoting) must not swallow the following ';'.
+		{name: "unquoted brace in earlier value", dsn: "HOSTNAME=h;PWD=p{q;DATABASE=TESTDB", want: "TESTDB"},
+		{name: "absent", dsn: "HOSTNAME=h;UID=u", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, DSNDatabase(tt.dsn))
 		})
 	}
 }
