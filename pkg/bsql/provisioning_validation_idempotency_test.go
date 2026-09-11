@@ -237,9 +237,9 @@ func TestRunProvisioningQueriesWithExecutor_ValidationNoRowsWrapsSentinel(t *tes
 		[]string{`DELETE FROM user_roles WHERE user_id = ?<principal_id>`},
 		[]string{revokeValidationQuery},
 		"revoke provisioning",
-		true,
 		map[string]any{"principal_id": "user-1", "role": "admin"},
 		db,
+		ProvisioningOptions{SignalIdempotency: true},
 	)
 	require.ErrorIs(t, err, ErrQueryAffectedZeroRows)
 	// guard the operation prefix so a rebase can't silently drop it (it's the only per-call diagnostic once swallowed into an annotation)

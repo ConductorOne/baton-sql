@@ -137,9 +137,21 @@ func TestValidateProvisioningIdempotency(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "signal on non-DDL engine does not require no_transaction",
+			name:    "signal on non-DDL engine is rejected",
 			engine:  database.PostgreSQL,
-			pq:      EntitlementProvisioningQueries{ValidationQueriesSignalIdempotency: true, ValidationQueries: oneValidation},
+			pq:      EntitlementProvisioningQueries{ValidationQueriesSignalIdempotency: true, NoTransaction: true, ValidationQueries: oneValidation},
+			wantErr: true,
+		},
+		{
+			name:    "Db2 default-on validation without no_transaction fails",
+			engine:  database.DB2,
+			pq:      EntitlementProvisioningQueries{ValidationQueries: oneValidation},
+			wantErr: true,
+		},
+		{
+			name:    "Db2 default-on validation with no_transaction ok",
+			engine:  database.DB2,
+			pq:      EntitlementProvisioningQueries{NoTransaction: true, ValidationQueries: oneValidation},
 			wantErr: false,
 		},
 		{

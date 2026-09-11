@@ -429,9 +429,10 @@ type EntitlementProvisioningQueries struct {
 
 	// ValidationQueriesSignalIdempotency opts this entitlement into treating a no-rows
 	// ValidationQueries result as an idempotent success (GrantAlreadyExists on grant,
-	// GrantAlreadyRevoked on revoke) instead of a failed precondition. It only takes effect
-	// on DDL engines whose GRANT/REVOKE don't report rows-affected (Db2, Oracle); on every
-	// other engine a no-rows result still fails loudly regardless of this flag. Default off.
+	// GrantAlreadyRevoked on revoke) instead of a failed precondition. The reinterpretation
+	// only applies on DDL engines whose GRANT/REVOKE don't report rows-affected (Db2, Oracle);
+	// Db2 does it by default and ignores this flag, so this opt-in is only needed on Oracle. On
+	// every other engine a no-rows result still fails loudly regardless of this flag. Default off.
 	//
 	// Warning: when enabled, do NOT use ValidationQueries as existence preconditions
 	// (e.g. "does this user/role exist?"). A no-rows result is reported as idempotent

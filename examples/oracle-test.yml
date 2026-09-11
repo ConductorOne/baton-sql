@@ -305,31 +305,31 @@ resource_types:
             # result as an idempotent success so re-granting a held role reports GrantAlreadyExists.
             validation_queries_signal_idempotency: true
             # Returns a row only while the role is NOT yet granted (no rows => already granted).
-            # Exact-match (no UPPER) is required: the GRANT quotes identifiers with |identifier, so
-            # the stored GRANTEE/GRANTED_ROLE are case-sensitive and must equal the bound value.
+            # UPPER-normalize the principal: the GRANT inserts it |unquoted, so Oracle folds it to
+            # upper-case (CREATE USER jdoe => JDOE); DBA_ROLES roles are already upper-case.
             validation_queries:
               - |
                 SELECT 1 FROM dual WHERE NOT EXISTS (
                   SELECT 1 FROM DBA_ROLE_PRIVS
-                  WHERE GRANTEE = ?<principal_name> AND GRANTED_ROLE = ?<role_name>
+                  WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = ?<role_name>
                 )
             queries:
               - |
-                GRANT ?<role_name|identifier> TO ?<principal_name|identifier>
+                GRANT ?<role_name|identifier> TO ?<principal_name|unquoted>
           revoke:
             # Indicates that the revoke operation runs without a transaction
             no_transaction: true
             # Without this, a repeat revoke of an already-removed role fails with ORA-01951.
             validation_queries_signal_idempotency: true
             # Returns a row only while the role IS still granted (no rows => already revoked).
-            # Exact-match (no UPPER) is required for the same reason as the grant validation.
+            # UPPER-normalize the principal for the same reason as the grant validation.
             validation_queries:
               - |
                 SELECT 1 FROM DBA_ROLE_PRIVS
-                WHERE GRANTEE = ?<principal_name> AND GRANTED_ROLE = ?<role_name>
+                WHERE GRANTEE = UPPER(?<principal_name>) AND GRANTED_ROLE = ?<role_name>
             queries:
               - |
-                REVOKE ?<role_name|identifier> FROM ?<principal_name|identifier>
+                REVOKE ?<role_name|identifier> FROM ?<principal_name|unquoted>
       - id: "admin" # Entitlement identifier for role administration privileges
         # Dynamic display name for admin entitlement, appending ' Role Admin'
         display_name: "resource.DisplayName + ' Role Admin'"
@@ -351,14 +351,14 @@ resource_types:
             no_transaction: true
             queries:
               - |
-                GRANT ?<role_name|identifier> TO ?<principal_name|identifier> WITH ADMIN OPTION
+                GRANT ?<role_name|identifier> TO ?<principal_name|unquoted> WITH ADMIN OPTION
           revoke:
             no_transaction: true
             queries:
               - |
-                REVOKE ?<role_name|identifier> FROM ?<principal_name|identifier>
+                REVOKE ?<role_name|identifier> FROM ?<principal_name|unquoted>
               - |
-                GRANT ?<role_name|identifier> TO ?<principal_name|identifier>
+                GRANT ?<role_name|identifier> TO ?<principal_name|unquoted>
     # Dynamic grants based on SQL queries to associate users with roles
     grants:
       - query: |

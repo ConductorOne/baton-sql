@@ -439,14 +439,21 @@ func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) 
 	return nil, fmt.Errorf("provisioning: primary database %q not found in handles (configured: %v)", s.primaryDBName, s.dbNames)
 }
 
+// ProvisioningOptions carries the boolean knobs shared by the exported provisioning entrypoints so
+// new options can be added without breaking out-of-repo callers.
+type ProvisioningOptions struct {
+	SignalIdempotency bool
+	UseTransaction    bool
+}
+
 func (s *SQLSyncer) RunProvisioningQueries(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
-	signalIdempotency bool,
 	vars map[string]any,
-	useTx bool,
+	opts ProvisioningOptions,
 ) error {
+	useTx := opts.UseTransaction
 	l := ctxzap.Extract(ctx).With(
 		zap.Bool("use_tx", useTx),
 	)
@@ -482,9 +489,9 @@ func (s *SQLSyncer) RunProvisioningQueries(
 		queries,
 		validationQueries,
 		"provisioning",
-		signalIdempotency,
 		vars,
 		executor,
+		ProvisioningOptions{SignalIdempotency: opts.SignalIdempotency},
 	)
 	if err != nil {
 		return err
@@ -525,13 +532,12 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 	ctx context.Context,
 	queries,
 	validationQueries []string,
-	signalIdempotency bool,
 	existsCheck *PrincipalExistsCheck,
 	vars map[string]any,
-	useTx bool,
+	opts ProvisioningOptions,
 ) (bool, error) {
 	l := ctxzap.Extract(ctx).With(
-		zap.Bool("use_tx", useTx),
+		zap.Bool("use_tx", opts.UseTransaction),
 	)
 
 	ctx = ctxzap.ToContext(ctx, l)
@@ -541,7 +547,7 @@ func (s *SQLSyncer) RunRevokeProvisioning(
 		return false, err
 	}
 
-	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, signalIdempotency, vars, useTx, target)
+	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, opts.SignalIdempotency, vars, opts.UseTransaction, target)
 	if err != nil {
 		return false, err
 	}
@@ -609,7 +615,7 @@ func (s *SQLSyncer) runRevokeQueries(
 	}
 
 	var allZero, fromValidation bool
-	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", signalIdempotency, vars, executor)
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", vars, executor, ProvisioningOptions{SignalIdempotency: signalIdempotency})
 	if err != nil {
 		if !errors.Is(err, ErrQueryAffectedZeroRows) {
 			return false, false, err
@@ -717,10 +723,6 @@ func (s *SQLSyncer) runValidationQueries(
 ) error {
 	l := ctxzap.Extract(ctx)
 
-	if signalIdempotency && !isDDLEngine(s.dbEngine) {
-		l.Warn("validation_queries_signal_idempotency is set but ignored on this engine; only DDL engines (Db2, Oracle) reinterpret a no-rows validation as an idempotent success")
-	}
-
 	for _, q := range validationQueries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
@@ -767,13 +769,13 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 	queries,
 	validationQueries []string,
 	operation string,
-	signalIdempotency bool,
 	vars map[string]any,
 	executor executor,
+	opts ProvisioningOptions,
 ) error {
 	l := ctxzap.Extract(ctx)
 
-	if err := s.runValidationQueries(ctx, validationQueries, operation, signalIdempotency, vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, operation, opts.SignalIdempotency, vars, executor); err != nil {
 		return err
 	}
 
@@ -1018,12 +1020,12 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	resource *v2.Resource,
 	queries,
 	validationQueries []string,
-	signalIdempotency bool,
 	vars map[string]any,
-	useTx bool,
+	opts ProvisioningOptions,
 	replace *GrantReplaceProvisioningQueries,
 	rejectIf *GrantRejectIfProvisioningQuery,
 ) (annotations.Annotations, error) {
+	useTx := opts.UseTransaction
 	l := ctxzap.Extract(ctx)
 
 	anno := annotations.New()
@@ -1164,16 +1166,15 @@ func (s *SQLSyncer) RunGrantProvisioning(
 				provisioningConfig.Revoke.Queries,
 				provisioningConfig.Revoke.ValidationQueries,
 				"grant_replace revoke",
-				provisioningConfig.Revoke.ValidationQueriesSignalIdempotency,
 				provisioningVars,
 				executor,
+				ProvisioningOptions{SignalIdempotency: provisioningConfig.Revoke.ValidationQueriesSignalIdempotency},
 			)
 			if err != nil {
 				// A zero-rows sentinel means the replace revoke had nothing to remove: the revoke
-				// queries matched nothing, or a validation query returned no rows on a DDL engine
-				// that opted into validation_queries_signal_idempotency. Reporting the latter as
-				// GrantReplaced leans on that opt-in meaning "already gone"; the gate keeps it off
-				// for existence-precondition queries.
+				// queries matched nothing, or a no-rows validation was reinterpreted as idempotent
+				// on a DDL engine (Db2 by default, Oracle on validation_queries_signal_idempotency).
+				// Reporting the latter as GrantReplaced leans on that meaning "already gone".
 				if !errors.Is(err, ErrQueryAffectedZeroRows) {
 					return anno, err
 				}
@@ -1187,7 +1188,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 		}
 	}
 
-	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", signalIdempotency, vars, executor); err != nil {
+	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", opts.SignalIdempotency, vars, executor); err != nil {
 		return anno, err
 	}
 

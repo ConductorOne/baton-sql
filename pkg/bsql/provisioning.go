@@ -80,9 +80,11 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		principal,
 		provisioningConfig.Grant.Queries,
 		provisioningConfig.Grant.ValidationQueries,
-		provisioningConfig.Grant.ValidationQueriesSignalIdempotency,
 		provisioningVars,
-		useTx,
+		ProvisioningOptions{
+			SignalIdempotency: provisioningConfig.Grant.ValidationQueriesSignalIdempotency,
+			UseTransaction:    useTx,
+		},
 		provisioningConfig.Grant.GrantReplace,
 		provisioningConfig.Grant.RejectIf,
 	)
@@ -150,10 +152,12 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 		ctx,
 		provisioningConfig.Revoke.Queries,
 		provisioningConfig.Revoke.ValidationQueries,
-		provisioningConfig.Revoke.ValidationQueriesSignalIdempotency,
 		existsCheck,
 		provisioningVars,
-		useTx,
+		ProvisioningOptions{
+			SignalIdempotency: provisioningConfig.Revoke.ValidationQueriesSignalIdempotency,
+			UseTransaction:    useTx,
+		},
 	)
 	// The exists-check still runs when the revoke queries affected zero rows, so
 	// principalDeleted is only meaningful on the success and already-revoked paths.

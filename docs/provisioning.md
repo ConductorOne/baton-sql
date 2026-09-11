@@ -1,20 +1,24 @@
 # Provisioning: `validation_queries` semantics
 
 `validation_queries` run before the provisioning `queries` in a grant or revoke. What a
-**no-rows** result means depends on one per-entitlement flag.
+**no-rows** result means depends on the engine: on the DDL engines (Db2, Oracle) it can mean an
+idempotent success (on by default for Db2, opt-in for Oracle); on every other engine it fails the
+operation.
 
 ## Default: no rows fails the operation
 
 By default a `validation_query` returning no rows **fails the operation**. It is an existence
-precondition that aborts loudly. This is the behavior on every engine unless you opt in below.
+precondition that aborts loudly. This is the behavior on every engine except where the DDL
+no-rows-means-idempotent behavior below is active.
 
-## Opt-in: no rows means idempotent success
+## DDL engines: no rows means idempotent success
 
-Some engines apply `GRANT`/`REVOKE` as DDL that does not report rows-affected (Db2, Oracle), so
+The DDL engines (Db2, Oracle) apply `GRANT`/`REVOKE` as DDL that does not report rows-affected, so
 the connector cannot tell from the statement whether it changed anything, and re-running an
-already-applied statement raises an error (Oracle `ORA-01951` on a repeat revoke, for example).
-To make grant and revoke idempotent on these engines, set `validation_queries_signal_idempotency:
-true` on the grant or revoke:
+already-applied statement raises an error (Oracle `ORA-01951` on a repeat revoke, for example). On
+these engines a `validation_query` returning no rows is reported as an idempotent success. This is
+on by **default** for Db2; on Oracle you opt in per entitlement with
+`validation_queries_signal_idempotency: true` on the grant or revoke:
 
 ```yaml
 grant:
@@ -31,18 +35,15 @@ revoke:
     - REVOKE ...
 ```
 
-With the flag on, a `validation_query` returning no rows is reported as an **idempotent success**
+On these engines a `validation_query` returning no rows is reported as an **idempotent success**
 (`GrantAlreadyExists` on grant, `GrantAlreadyRevoked` on revoke): no rows means "the state is
-already as desired, there is no work to do".
-
-The flag only takes effect on the DDL engines that need it (Db2, Oracle). On every other engine a
-no-rows result still fails loudly regardless of the flag, because those engines report
-rows-affected and don't need the reinterpretation. Default off, so existing configs are unchanged.
+already as desired, there is no work to do". On Db2 (default-on) this reinterpretation also
+requires `no_transaction: true`, since Db2 reports no rows-affected under a transaction.
 
 ## Writing the query: "is there work to do?", not "does this exist?"
 
-When the flag is on, your `validation_queries` must answer **"is there work to do?"**, not
-**"does this principal or role exist?"**.
+On the DDL engines (Db2, Oracle), your `validation_queries` must answer **"is there work to do?"**,
+not **"does this principal or role exist?"**.
 
 **Do not use them as existence preconditions.** A no-rows result is swallowed as idempotent
 success, so a missing, deleted, or mistyped principal or role is reported as "already done"
