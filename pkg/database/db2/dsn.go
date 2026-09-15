@@ -1,6 +1,7 @@
 package db2
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -13,17 +14,27 @@ import (
 // being misread as a URL.
 var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
+// ErrAmbiguousDSN is returned when a brace-quoted value in a native DB2 DSN appears to have
+// swallowed a later, unrelated KEYWORD=value field. Rather than guess which interpretation
+// is correct, the DSN is rejected: credential-adjacent parsing should fail loud, not silently
+// drop a field.
+var ErrAmbiguousDSN = errors.New("ambiguous DB2 DSN: a brace-quoted value appears to contain a later field")
+
 // ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (not a URL),
 // returning its DATABASE value if present. HOSTNAME, not DATABASE alone, is the native
 // marker, since other engines' ODBC/ADO strings also carry DATABASE; every caller shares
 // this one detector to avoid drift.
-func ParseNativeDSN(dsn string) (string, bool) {
+func ParseNativeDSN(dsn string) (string, bool, error) {
 	if urlSchemeRegex.MatchString(dsn) {
-		return "", false
+		return "", false, nil
+	}
+	parts, err := splitDB2DSN(dsn)
+	if err != nil {
+		return "", false, err
 	}
 	var database string
 	native, haveDB := false, false
-	for _, part := range splitDB2DSN(dsn) {
+	for _, part := range parts {
 		keyword, value, found := strings.Cut(part, "=")
 		if !found {
 			continue
@@ -42,18 +53,21 @@ func ParseNativeDSN(dsn string) (string, bool) {
 			}
 		}
 	}
-	return database, native
+	return database, native, nil
 }
 
-// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form.
+// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form. An ambiguous DSN
+// (see ErrAmbiguousDSN) is treated as not native, so callers fail loudly downstream instead
+// of routing a DSN whose fields could not be reliably split.
 func IsNativeDSN(dsn string) bool {
-	_, native := ParseNativeDSN(dsn)
-	return native
+	_, native, err := ParseNativeDSN(dsn)
+	return err == nil && native
 }
 
-// DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent.
+// DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent or
+// if the DSN is ambiguous (see ErrAmbiguousDSN).
 func DSNDatabase(dsn string) string {
-	database, _ := ParseNativeDSN(dsn)
+	database, _, _ := ParseNativeDSN(dsn)
 	return database
 }
 
@@ -78,9 +92,15 @@ func matchBraces(s string) map[int]int {
 	return pairs
 }
 
+// bareFieldPattern matches ";KEYWORD=" inside a brace-quoted span: a sign that the span has
+// swallowed a separate KEYWORD=value field rather than deliberately quoting one value.
+var bareFieldPattern = regexp.MustCompile(`;\s*[A-Za-z][A-Za-z0-9 _]*=`)
+
 // splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it
-// opens a value and has a genuine matching '}' (per matchBraces).
-func splitDB2DSN(dsn string) []string {
+// opens a value and has a genuine matching '}' (per matchBraces). If that quoted span itself
+// looks like it swallowed a later KEYWORD=value field (per bareFieldPattern), the DSN is
+// rejected with ErrAmbiguousDSN instead of silently dropping that field.
+func splitDB2DSN(dsn string) ([]string, error) {
 	pairs := matchBraces(dsn)
 	var parts []string
 	start := 0
@@ -98,6 +118,9 @@ func splitDB2DSN(dsn string) []string {
 		case '{':
 			if atValueStart {
 				if end, ok := pairs[i]; ok {
+					if bareFieldPattern.MatchString(dsn[i+1 : end]) {
+						return nil, fmt.Errorf("%w: %q", ErrAmbiguousDSN, dsn[i:end+1])
+					}
 					braceEnd = end
 				}
 			}
@@ -114,7 +137,7 @@ func splitDB2DSN(dsn string) []string {
 			atValueStart = false
 		}
 	}
-	return append(parts, dsn[start:])
+	return append(parts, dsn[start:]), nil
 }
 
 // Keywords derived from the URL itself; query parameters may not override them.
@@ -145,7 +168,11 @@ func quoteDB2Value(v string) (string, error) {
 func convertToDB2DSN(dsn string) (string, error) {
 	// If it's already in DB2's native keyword=value format, return as-is.
 	// URL-format DSNs are exempt so those markers may appear in credentials.
-	if IsNativeDSN(dsn) {
+	_, native, err := ParseNativeDSN(dsn)
+	if err != nil {
+		return "", fmt.Errorf("invalid native DB2 DSN: %w", err)
+	}
+	if native {
 		return dsn, nil
 	}
 

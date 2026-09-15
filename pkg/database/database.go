@@ -533,7 +533,11 @@ func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
 	if err != nil {
 		return "", "", false, err
 	}
-	if _, native := db2.ParseNativeDSN(dsn); !native {
+	_, native, err := db2.ParseNativeDSN(dsn)
+	if err != nil {
+		return "", "", false, fmt.Errorf("invalid native DB2 DSN: %w", err)
+	}
+	if !native {
 		return "", "", false, nil
 	}
 	// Confirmed native: re-expand with keyword-injection validation. The expansion above
@@ -542,7 +546,10 @@ func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
 	if err != nil {
 		return "", "", false, err
 	}
-	database, _ := db2.ParseNativeDSN(safeDSN)
+	database, _, err := db2.ParseNativeDSN(safeDSN)
+	if err != nil {
+		return "", "", false, fmt.Errorf("invalid native DB2 DSN: %w", err)
+	}
 	return safeDSN, database, true, nil
 }
 

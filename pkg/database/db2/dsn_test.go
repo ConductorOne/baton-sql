@@ -177,3 +177,21 @@ func TestDSNDatabase(t *testing.T) {
 		})
 	}
 }
+
+func TestParseNativeDSN_Ambiguous(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+	}{
+		// An earlier unterminated '{' pairs with a bare field's stray trailing '}' instead of
+		// its own value, swallowing DATABASE=TESTDB into PWD's value.
+		{name: "unterminated brace swallows a later bare field", dsn: "HOSTNAME=h;PWD={oops;DATABASE=TESTDB}"},
+		{name: "unterminated brace swallows multiple later bare fields", dsn: "HOSTNAME=h;PWD={oops;UID=u;DATABASE=TESTDB}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := ParseNativeDSN(tt.dsn)
+			require.ErrorIs(t, err, ErrAmbiguousDSN)
+		})
+	}
+}
