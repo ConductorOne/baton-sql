@@ -134,6 +134,8 @@ func TestIsNativeDSN(t *testing.T) {
 		// Unterminated '{' is literal, so the ';' still splits and HOSTNAME= stays visible;
 		// the malformed value then reaches the driver instead of silently misrouting.
 		{name: "unterminated brace keeps marker visible", dsn: "PWD={oops;HOSTNAME=h", want: true},
+		// HOSTNAME stays visible since the later '{' pairs with DATABASE's '}', not PWD's.
+		{name: "hostname visible despite later legitimately-braced value", dsn: "HOSTNAME=h;PWD={oops;DATABASE={REAL}", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -160,6 +162,14 @@ func TestDSNDatabase(t *testing.T) {
 		// A literal '{' mid-value (not ODBC quoting) must not swallow the following ';'.
 		{name: "unquoted brace in earlier value", dsn: "HOSTNAME=h;PWD=p{q;DATABASE=TESTDB", want: "TESTDB"},
 		{name: "absent", dsn: "HOSTNAME=h;UID=u", want: ""},
+		// An earlier unterminated '{' must not steal DATABASE's closing '}'.
+		{name: "unterminated brace does not steal a later value's closing brace", dsn: "HOSTNAME=h;PWD={oops;DATABASE={REAL}", want: "REAL"},
+		{name: "two unterminated braces before the real one", dsn: "HOSTNAME=h;A={one;B={two;DATABASE={REAL}", want: "REAL"},
+		{name: "three unterminated braces before the real one", dsn: "HOSTNAME=h;A={one;B={two;C={three;DATABASE={REAL}", want: "REAL"},
+		// A later unterminated brace must not retroactively corrupt an earlier, already-closed value.
+		{name: "real value first, unterminated brace after", dsn: "HOSTNAME=h;DATABASE={REAL};PWD={oops", want: "REAL"},
+		// A stray '}' with no preceding '{' has nothing to pair with and stays literal.
+		{name: "stray closing brace with no opener", dsn: "HOSTNAME=h;DATABASE=TESTDB};UID=u", want: "TESTDB}"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

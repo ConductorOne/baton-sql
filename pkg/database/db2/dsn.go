@@ -57,33 +57,56 @@ func DSNDatabase(dsn string) string {
 	return database
 }
 
+// matchBraces pairs each '{' with the '}' that actually closes it via LIFO stack
+// matching, so an earlier unterminated '{' can't steal a later value's closing '}'.
+// Unmatched braces have no entry in the returned map.
+func matchBraces(s string) map[int]int {
+	pairs := make(map[int]int)
+	var stack []int
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			stack = append(stack, i)
+		case '}':
+			if n := len(stack); n > 0 {
+				open := stack[n-1]
+				stack = stack[:n-1]
+				pairs[open] = i
+			}
+		}
+	}
+	return pairs
+}
+
 // splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it
-// opens a value and is later closed by '}'; an unterminated or misplaced '{' is literal,
-// so HOSTNAME/DATABASE markers stay visible instead of being silently swallowed.
+// opens a value and has a genuine matching '}' (per matchBraces).
 func splitDB2DSN(dsn string) []string {
+	pairs := matchBraces(dsn)
 	var parts []string
 	start := 0
-	braced := false       // inside a {...} quoted value
+	braceEnd := -1        // index of the '}' that closes the current quoted value, or -1
 	atValueStart := false // at a value position (right after '=', across whitespace) outside braces
 	for i := 0; i < len(dsn); i++ {
+		if braceEnd != -1 {
+			if i == braceEnd {
+				braceEnd = -1
+				atValueStart = false
+			}
+			continue
+		}
 		switch dsn[i] {
-		case '}':
-			braced = false
-			atValueStart = false
 		case '{':
-			if atValueStart && strings.IndexByte(dsn[i:], '}') != -1 {
-				braced = true
+			if atValueStart {
+				if end, ok := pairs[i]; ok {
+					braceEnd = end
+				}
 			}
 			atValueStart = false
 		case '=':
-			if !braced {
-				atValueStart = true
-			}
+			atValueStart = true
 		case ';':
-			if !braced {
-				parts = append(parts, dsn[start:i])
-				start = i + 1
-			}
+			parts = append(parts, dsn[start:i])
+			start = i + 1
 			atValueStart = false
 		case ' ', '\t':
 			// keep atValueStart so "DATABASE= {my;db}" still brace-detects.
