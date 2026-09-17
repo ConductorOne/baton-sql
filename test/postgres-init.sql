@@ -72,7 +72,7 @@ UPDATE users SET manager_id = (SELECT id FROM users WHERE username = 'robert.tab
 -- Create roles table
 CREATE TABLE roles (
   id SERIAL PRIMARY KEY,
-  role_name VARCHAR(100) NOT NULL
+  role_name VARCHAR(100) NOT NULL UNIQUE
 );
 
 -- Insert sample roles
