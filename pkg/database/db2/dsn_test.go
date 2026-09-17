@@ -176,6 +176,9 @@ func TestDSNDatabase(t *testing.T) {
 		{name: "braced password with semicolon and non-reserved word is not ambiguous", dsn: "HOSTNAME=h;DATABASE=db;UID=u;PWD={pa;ss=word}", want: "db"},
 		// A literal '{' inside a braced value isn't a new opener, since ODBC values don't nest.
 		{name: "literal brace inside a braced value does not truncate it", dsn: "HOSTNAME=h;DATABASE={a{b;c};UID=u", want: "a{b;c"},
+		// A non-reserved keyword's '=' inside an already-open value must not open a new
+		// candidate brace, or it steals the real closing brace and truncates the value.
+		{name: "non-reserved keyword inside a braced value does not steal its closing brace", dsn: "HOSTNAME=h;DATABASE={db;x={y};UID=u", want: "db;x={y"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

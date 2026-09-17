@@ -64,18 +64,20 @@ func DSNDatabase(dsn string) string {
 	return database
 }
 
-// matchBraces pairs each value-opening '{' with the '}' that closes it via LIFO stack
-// matching, so an earlier unterminated '{' can't steal a later value's closing '}'. Only a
-// '{' at a value-start position is pushed, since ODBC values don't nest and ambiguous braces
-// have no entry in the returned map.
+// matchBraces pairs each reserved-keyword's opening '{' with the '}' that closes it via LIFO
+// stack matching, so an earlier unterminated '{' can't steal a later value's closing '}'. Only
+// a '{' right after a reserved keyword's '=' is pushed, so a '=' occurring inside an
+// already-open value (ODBC values don't nest) can't be mistaken for a new field's opener.
+// Ambiguous braces have no entry in the returned map.
 func matchBraces(s string) map[int]int {
 	pairs := make(map[int]int)
 	var stack []int
+	wordStart, eqPos := 0, -1
 	atValueStart := false
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '{':
-			if atValueStart {
+			if atValueStart && eqPos >= 0 && reservedDSNKeywords[strings.ToUpper(strings.TrimSpace(s[wordStart:eqPos]))] {
 				stack = append(stack, i)
 			}
 			atValueStart = false
@@ -87,8 +89,10 @@ func matchBraces(s string) map[int]int {
 			}
 			atValueStart = false
 		case '=':
+			eqPos = i
 			atValueStart = true
 		case ';':
+			wordStart = i + 1
 			atValueStart = false
 		case ' ', '\t':
 			// keep atValueStart across whitespace before a brace.
