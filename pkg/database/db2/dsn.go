@@ -9,21 +9,16 @@ import (
 	"strings"
 )
 
-// urlSchemeRegex matches a DSN that begins with a URL scheme (e.g. "db2://"); anchoring
-// to the start keeps a native DSN whose value contains "://" (e.g. PWD=my://secret) from
-// being misread as a URL.
+// urlSchemeRegex matches a DSN that begins with a URL scheme, so a native DSN whose value
+// contains "://" isn't misread as a URL.
 var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
-// ErrAmbiguousDSN is returned when a brace-quoted value in a native DB2 DSN appears to have
-// swallowed a later, unrelated KEYWORD=value field. Rather than guess which interpretation
-// is correct, the DSN is rejected: credential-adjacent parsing should fail loud, not silently
-// drop a field.
+// ErrAmbiguousDSN means a brace-quoted value appears to contain a later KEYWORD=value field.
+// The DSN is rejected rather than guessed at, since it may carry credentials.
 var ErrAmbiguousDSN = errors.New("ambiguous DB2 DSN: a brace-quoted value appears to contain a later field")
 
 // ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (not a URL),
-// returning its DATABASE value if present. HOSTNAME, not DATABASE alone, is the native
-// marker, since other engines' ODBC/ADO strings also carry DATABASE; every caller shares
-// this one detector to avoid drift.
+// returning its DATABASE value if present. HOSTNAME, not DATABASE alone, is the native marker.
 func ParseNativeDSN(dsn string) (string, bool, error) {
 	if urlSchemeRegex.MatchString(dsn) {
 		return "", false, nil
@@ -57,49 +52,71 @@ func ParseNativeDSN(dsn string) (string, bool, error) {
 }
 
 // IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form. An ambiguous DSN
-// (see ErrAmbiguousDSN) is treated as not native, so callers fail loudly downstream instead
-// of routing a DSN whose fields could not be reliably split.
+// is treated as not native.
 func IsNativeDSN(dsn string) bool {
 	_, native, err := ParseNativeDSN(dsn)
 	return err == nil && native
 }
 
-// DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent or
-// if the DSN is ambiguous (see ErrAmbiguousDSN).
+// DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent or ambiguous.
 func DSNDatabase(dsn string) string {
 	database, _, _ := ParseNativeDSN(dsn)
 	return database
 }
 
-// matchBraces pairs each '{' with the '}' that actually closes it via LIFO stack
-// matching, so an earlier unterminated '{' can't steal a later value's closing '}'.
-// Unmatched braces have no entry in the returned map.
+// matchBraces pairs each value-opening '{' with the '}' that closes it via LIFO stack
+// matching, so an earlier unterminated '{' can't steal a later value's closing '}'. Only a
+// '{' at a value-start position is pushed, since ODBC values don't nest and ambiguous braces
+// have no entry in the returned map.
 func matchBraces(s string) map[int]int {
 	pairs := make(map[int]int)
 	var stack []int
+	atValueStart := false
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '{':
-			stack = append(stack, i)
+			if atValueStart {
+				stack = append(stack, i)
+			}
+			atValueStart = false
 		case '}':
 			if n := len(stack); n > 0 {
 				open := stack[n-1]
 				stack = stack[:n-1]
 				pairs[open] = i
 			}
+			atValueStart = false
+		case '=':
+			atValueStart = true
+		case ';':
+			atValueStart = false
+		case ' ', '\t':
+			// keep atValueStart across whitespace before a brace.
+		default:
+			atValueStart = false
 		}
 	}
 	return pairs
 }
 
-// bareFieldPattern matches ";KEYWORD=" inside a brace-quoted span: a sign that the span has
-// swallowed a separate KEYWORD=value field rather than deliberately quoting one value.
-var bareFieldPattern = regexp.MustCompile(`;\s*[A-Za-z][A-Za-z0-9 _]*=`)
+// bareFieldPattern captures a "KEYWORD=" immediately after a ';' inside a brace-quoted span.
+var bareFieldPattern = regexp.MustCompile(`;\s*([A-Za-z][A-Za-z0-9_]*)=`)
 
-// splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it
-// opens a value and has a genuine matching '}' (per matchBraces). If that quoted span itself
-// looks like it swallowed a later KEYWORD=value field (per bareFieldPattern), the DSN is
-// rejected with ErrAmbiguousDSN instead of silently dropping that field.
+// swallowedReservedField reports whether span contains what looks like a later reserved
+// KEYWORD=value field, and returns that keyword. Only reserved keywords count, so a value
+// that merely contains ";word=" text isn't misclassified as ambiguous.
+func swallowedReservedField(span string) (string, bool) {
+	for _, m := range bareFieldPattern.FindAllStringSubmatch(span, -1) {
+		if keyword := strings.ToUpper(m[1]); reservedDSNKeywords[keyword] {
+			return keyword, true
+		}
+	}
+	return "", false
+}
+
+// splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it opens
+// a value with a genuine matching '}'. A span that appears to swallow a later reserved field
+// makes the DSN ambiguous; the resulting error reports only keyword names, never values.
 func splitDB2DSN(dsn string) ([]string, error) {
 	pairs := matchBraces(dsn)
 	var parts []string
@@ -118,8 +135,10 @@ func splitDB2DSN(dsn string) ([]string, error) {
 		case '{':
 			if atValueStart {
 				if end, ok := pairs[i]; ok {
-					if bareFieldPattern.MatchString(dsn[i+1 : end]) {
-						return nil, fmt.Errorf("%w: %q", ErrAmbiguousDSN, dsn[i:end+1])
+					if swallowed, ambiguous := swallowedReservedField(dsn[i+1 : end]); ambiguous {
+						owner, _, _ := strings.Cut(dsn[start:i], "=")
+						return nil, fmt.Errorf("%w (keyword %q appears to swallow a later %q field)",
+							ErrAmbiguousDSN, strings.TrimSpace(owner), swallowed)
 					}
 					braceEnd = end
 				}
@@ -132,7 +151,7 @@ func splitDB2DSN(dsn string) ([]string, error) {
 			start = i + 1
 			atValueStart = false
 		case ' ', '\t':
-			// keep atValueStart so "DATABASE= {my;db}" still brace-detects.
+			// keep atValueStart across whitespace before a brace.
 		default:
 			atValueStart = false
 		}
