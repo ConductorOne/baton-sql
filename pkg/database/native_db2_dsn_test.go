@@ -68,6 +68,11 @@ func TestNativeDB2DSN(t *testing.T) {
 			opts:    ConnectOptions{DSN: "HOSTNAME=${MISSING};DATABASE=d", Lookup: lookup(map[string]string{})},
 			wantErr: "MISSING",
 		},
+		{
+			name:    "ambiguous brace swallowing a later field errors",
+			opts:    ConnectOptions{DSN: "HOSTNAME=h;PWD={oops;DATABASE=TESTDB}"},
+			wantErr: "ambiguous DB2 DSN",
+		},
 	}
 
 	for _, tt := range tests {

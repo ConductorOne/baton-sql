@@ -128,12 +128,16 @@ func TestIsNativeDSN(t *testing.T) {
 		{name: "space before the =", dsn: "HOSTNAME = h;DATABASE=X", want: true},
 		// DATABASE without HOSTNAME is a generic ODBC/ADO shape (e.g. MSSQL), not native DB2.
 		{name: "database without hostname is not native", dsn: "Server=x;Database=y;User Id=u", want: false},
-		// HOSTNAME appears only inside a braced PWD value, so the brace-aware split keeps it
-		// as one PWD part: not a native marker.
+		// A reserved keyword found after a ';' inside a braced value is rejected as ambiguous.
 		{name: "hostname marker only inside braced value", dsn: "UID=u;PWD={x;HOSTNAME=y}", want: false},
+		// A reserved keyword with no leading ';' can't look like a separate field, so it's kept
+		// buried without erroring.
+		{name: "hostname marker directly inside braced value does not error", dsn: "UID=u;PWD={HOSTNAME=y}", want: false},
 		// Unterminated '{' is literal, so the ';' still splits and HOSTNAME= stays visible;
 		// the malformed value then reaches the driver instead of silently misrouting.
 		{name: "unterminated brace keeps marker visible", dsn: "PWD={oops;HOSTNAME=h", want: true},
+		// The later '{' pairs with DATABASE's '}', not PWD's, so HOSTNAME stays visible.
+		{name: "hostname visible despite later legitimately-braced value", dsn: "HOSTNAME=h;PWD={oops;DATABASE={REAL}", want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -160,10 +164,46 @@ func TestDSNDatabase(t *testing.T) {
 		// A literal '{' mid-value (not ODBC quoting) must not swallow the following ';'.
 		{name: "unquoted brace in earlier value", dsn: "HOSTNAME=h;PWD=p{q;DATABASE=TESTDB", want: "TESTDB"},
 		{name: "absent", dsn: "HOSTNAME=h;UID=u", want: ""},
+		// An earlier unterminated '{' must not steal DATABASE's closing '}'.
+		{name: "unterminated brace does not steal a later value's closing brace", dsn: "HOSTNAME=h;PWD={oops;DATABASE={REAL}", want: "REAL"},
+		{name: "two unterminated braces before the real one", dsn: "HOSTNAME=h;A={one;B={two;DATABASE={REAL}", want: "REAL"},
+		{name: "three unterminated braces before the real one", dsn: "HOSTNAME=h;A={one;B={two;C={three;DATABASE={REAL}", want: "REAL"},
+		// A later unterminated brace must not retroactively corrupt an earlier, already-closed value.
+		{name: "real value first, unterminated brace after", dsn: "HOSTNAME=h;DATABASE={REAL};PWD={oops", want: "REAL"},
+		// A stray '}' with no preceding '{' has nothing to pair with and stays literal.
+		{name: "stray closing brace with no opener", dsn: "HOSTNAME=h;DATABASE=TESTDB};UID=u", want: "TESTDB}"},
+		// Only a reserved keyword after the ';' makes a braced value ambiguous.
+		{name: "braced password with semicolon and non-reserved word is not ambiguous", dsn: "HOSTNAME=h;DATABASE=db;UID=u;PWD={pa;ss=word}", want: "db"},
+		// A literal '{' inside a braced value isn't a new opener, since ODBC values don't nest.
+		{name: "literal brace inside a braced value does not truncate it", dsn: "HOSTNAME=h;DATABASE={a{b;c};UID=u", want: "a{b;c"},
+		// A non-reserved keyword's '=' inside an already-open value must not open a new
+		// candidate brace, or it steals the real closing brace and truncates the value.
+		{name: "non-reserved keyword inside a braced value does not steal its closing brace", dsn: "HOSTNAME=h;DATABASE={db;x={y};UID=u", want: "db;x={y"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, DSNDatabase(tt.dsn))
+		})
+	}
+}
+
+func TestParseNativeDSN_Ambiguous(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+	}{
+		// An earlier unterminated '{' pairs with a bare field's stray trailing '}' instead of
+		// its own value, swallowing that field.
+		{name: "unterminated brace swallows a later bare field", dsn: "HOSTNAME=h;PWD={oops;DATABASE=TESTDB}"},
+		{name: "unterminated brace swallows multiple later bare fields", dsn: "HOSTNAME=h;PWD={oops;UID=u;DATABASE=TESTDB}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := ParseNativeDSN(tt.dsn)
+			require.ErrorIs(t, err, ErrAmbiguousDSN)
+			// The error must never echo any part of the DSN's values, which may be credentials.
+			require.NotContains(t, err.Error(), "oops")
+			require.NotContains(t, err.Error(), "TESTDB")
 		})
 	}
 }

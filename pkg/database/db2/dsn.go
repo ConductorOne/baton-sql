@@ -1,6 +1,7 @@
 package db2
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -8,22 +9,27 @@ import (
 	"strings"
 )
 
-// urlSchemeRegex matches a DSN that begins with a URL scheme (e.g. "db2://"); anchoring
-// to the start keeps a native DSN whose value contains "://" (e.g. PWD=my://secret) from
-// being misread as a URL.
+// urlSchemeRegex matches a DSN that begins with a URL scheme, so a native DSN whose value
+// contains "://" isn't misread as a URL.
 var urlSchemeRegex = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
 
+// ErrAmbiguousDSN means a brace-quoted value appears to contain a later KEYWORD=value field.
+// The DSN is rejected rather than guessed at, since it may carry credentials.
+var ErrAmbiguousDSN = errors.New("ambiguous DB2 DSN: a brace-quoted value appears to contain a later field")
+
 // ParseNativeDSN reports whether dsn is DB2's native ODBC keyword=value form (not a URL),
-// returning its DATABASE value if present. HOSTNAME, not DATABASE alone, is the native
-// marker, since other engines' ODBC/ADO strings also carry DATABASE; every caller shares
-// this one detector to avoid drift.
-func ParseNativeDSN(dsn string) (string, bool) {
+// returning its DATABASE value if present. HOSTNAME, not DATABASE alone, is the native marker.
+func ParseNativeDSN(dsn string) (string, bool, error) {
 	if urlSchemeRegex.MatchString(dsn) {
-		return "", false
+		return "", false, nil
+	}
+	parts, err := splitDB2DSN(dsn)
+	if err != nil {
+		return "", false, err
 	}
 	var database string
 	native, haveDB := false, false
-	for _, part := range splitDB2DSN(dsn) {
+	for _, part := range parts {
 		keyword, value, found := strings.Cut(part, "=")
 		if !found {
 			continue
@@ -42,56 +48,119 @@ func ParseNativeDSN(dsn string) (string, bool) {
 			}
 		}
 	}
-	return database, native
+	return database, native, nil
 }
 
-// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form.
+// IsNativeDSN reports whether dsn is DB2's native ODBC keyword=value form. An ambiguous DSN
+// is treated as not native.
 func IsNativeDSN(dsn string) bool {
-	_, native := ParseNativeDSN(dsn)
-	return native
+	_, native, err := ParseNativeDSN(dsn)
+	return err == nil && native
 }
 
-// DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent.
+// DSNDatabase returns the DATABASE keyword value from a native DB2 DSN, or "" if absent or ambiguous.
 func DSNDatabase(dsn string) string {
-	database, _ := ParseNativeDSN(dsn)
+	database, _, _ := ParseNativeDSN(dsn)
 	return database
 }
 
-// splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it
-// opens a value and is later closed by '}'; an unterminated or misplaced '{' is literal,
-// so HOSTNAME/DATABASE markers stay visible instead of being silently swallowed.
-func splitDB2DSN(dsn string) []string {
-	var parts []string
-	start := 0
-	braced := false       // inside a {...} quoted value
-	atValueStart := false // at a value position (right after '=', across whitespace) outside braces
-	for i := 0; i < len(dsn); i++ {
-		switch dsn[i] {
-		case '}':
-			braced = false
-			atValueStart = false
+// matchBraces pairs each reserved-keyword's opening '{' with the '}' that closes it via LIFO
+// stack matching, so an earlier unterminated '{' can't steal a later value's closing '}'. Only
+// a '{' right after a reserved keyword's '=' is pushed, so a '=' occurring inside an
+// already-open value (ODBC values don't nest) can't be mistaken for a new field's opener.
+// Ambiguous braces have no entry in the returned map.
+func matchBraces(s string) map[int]int {
+	pairs := make(map[int]int)
+	var stack []int
+	wordStart, eqPos := 0, -1
+	atValueStart := false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
 		case '{':
-			if atValueStart && strings.IndexByte(dsn[i:], '}') != -1 {
-				braced = true
+			if atValueStart && eqPos >= 0 && reservedDSNKeywords[strings.ToUpper(strings.TrimSpace(s[wordStart:eqPos]))] {
+				stack = append(stack, i)
+			}
+			atValueStart = false
+		case '}':
+			if n := len(stack); n > 0 {
+				open := stack[n-1]
+				stack = stack[:n-1]
+				pairs[open] = i
 			}
 			atValueStart = false
 		case '=':
-			if !braced {
-				atValueStart = true
-			}
+			eqPos = i
+			atValueStart = true
 		case ';':
-			if !braced {
-				parts = append(parts, dsn[start:i])
-				start = i + 1
-			}
+			wordStart = i + 1
 			atValueStart = false
 		case ' ', '\t':
-			// keep atValueStart so "DATABASE= {my;db}" still brace-detects.
+			// keep atValueStart across whitespace before a brace.
 		default:
 			atValueStart = false
 		}
 	}
-	return append(parts, dsn[start:])
+	return pairs
+}
+
+// bareFieldPattern captures a "KEYWORD=" immediately after a ';' inside a brace-quoted span.
+var bareFieldPattern = regexp.MustCompile(`;\s*([A-Za-z][A-Za-z0-9_]*)=`)
+
+// swallowedReservedField reports whether span contains what looks like a later reserved
+// KEYWORD=value field, and returns that keyword. Only reserved keywords count, so a value
+// that merely contains ";word=" text isn't misclassified as ambiguous.
+func swallowedReservedField(span string) (string, bool) {
+	for _, m := range bareFieldPattern.FindAllStringSubmatch(span, -1) {
+		if keyword := strings.ToUpper(m[1]); reservedDSNKeywords[keyword] {
+			return keyword, true
+		}
+	}
+	return "", false
+}
+
+// splitDB2DSN splits a native DB2 DSN on ';', treating '{' as ODBC quoting only when it opens
+// a value with a genuine matching '}'. A span that appears to swallow a later reserved field
+// makes the DSN ambiguous; the resulting error reports only keyword names, never values.
+func splitDB2DSN(dsn string) ([]string, error) {
+	pairs := matchBraces(dsn)
+	var parts []string
+	start := 0
+	braceEnd := -1        // index of the '}' that closes the current quoted value, or -1
+	atValueStart := false // at a value position (right after '=', across whitespace) outside braces
+	for i := 0; i < len(dsn); i++ {
+		if braceEnd != -1 {
+			if i == braceEnd {
+				braceEnd = -1
+				atValueStart = false
+			}
+			continue
+		}
+		switch dsn[i] {
+		case '{':
+			if atValueStart {
+				if end, ok := pairs[i]; ok {
+					if swallowed, ambiguous := swallowedReservedField(dsn[i+1 : end]); ambiguous {
+						owner, _, _ := strings.Cut(dsn[start:i], "=")
+						return nil, fmt.Errorf("%w (keyword %q appears to swallow a later %q field)",
+							ErrAmbiguousDSN, strings.TrimSpace(owner), swallowed)
+					}
+					braceEnd = end
+				}
+			}
+			atValueStart = false
+		case '=':
+			atValueStart = true
+		case ';':
+			parts = append(parts, dsn[start:i])
+			start = i + 1
+			atValueStart = false
+		case ' ', '\t':
+			// keep atValueStart across whitespace before a brace.
+		default:
+			atValueStart = false
+		}
+	}
+	return append(parts, dsn[start:]), nil
 }
 
 // Keywords derived from the URL itself; query parameters may not override them.
@@ -122,7 +191,11 @@ func quoteDB2Value(v string) (string, error) {
 func convertToDB2DSN(dsn string) (string, error) {
 	// If it's already in DB2's native keyword=value format, return as-is.
 	// URL-format DSNs are exempt so those markers may appear in credentials.
-	if IsNativeDSN(dsn) {
+	_, native, err := ParseNativeDSN(dsn)
+	if err != nil {
+		return "", fmt.Errorf("invalid native DB2 DSN: %w", err)
+	}
+	if native {
 		return dsn, nil
 	}
 
