@@ -25,18 +25,38 @@ func Test_Krb5ProviderRegistered(t *testing.T) {
 		},
 	}
 
-	// Normative wording (R-3): assert err != nil AND the error message does not
-	// contain "not found". Do NOT assert a specific upstream error label: any
-	// non-"not found" error from GetIntegratedAuthenticator proves the registry
-	// lookup reached the krb5 provider rather than the miss
-	// `provider %v not found` (getProvider in integratedauth/auth.go); upstream
-	// may reword its config-load or keytab error messages.
+	// Normative assertion: err != nil AND the error message does not contain
+	// "not found". No specific upstream error label is pinned: any non-"not
+	// found" error from GetIntegratedAuthenticator proves the registry lookup
+	// reached the krb5 provider rather than the miss `provider %v not found`;
+	// upstream may reword its config-load or keytab error messages at any time.
 	_, err := integratedauth.GetIntegratedAuthenticator(config)
 	if err == nil {
 		t.Fatalf("expected an error from the krb5 provider for a nonexistent krb5 config, got nil")
 	}
 	if strings.Contains(err.Error(), "not found") {
 		t.Fatalf("krb5 provider not registered (lookup missed the registry): %v", err)
+	}
+}
+
+// Test_ProviderMissMessageControl is the negative control for
+// Test_Krb5ProviderRegistered: it asserts the upstream registry-miss error
+// still contains "not found". If upstream ever rewords that miss message, THIS
+// test fails loudly and the guard's "not found" check in
+// Test_Krb5ProviderRegistered must be updated to match.
+func Test_ProviderMissMessageControl(t *testing.T) {
+	config := msdsn.Config{
+		Parameters: map[string]string{
+			"authenticator": "krb5-no-such-provider",
+		},
+	}
+
+	_, err := integratedauth.GetIntegratedAuthenticator(config)
+	if err == nil {
+		t.Fatalf("expected a registry-miss error for a bogus authenticator, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("upstream registry-miss message no longer contains \"not found\"; update the guard in Test_Krb5ProviderRegistered: %v", err)
 	}
 }
 
