@@ -25,17 +25,18 @@ func Test_Krb5ProviderRegistered(t *testing.T) {
 		},
 	}
 
-	authenticator, err := integratedauth.GetIntegratedAuthenticator(config)
-	if err != nil && strings.Contains(err.Error(), "not found") {
+	// Normative wording (R-3): assert err != nil AND the error message does not
+	// contain "not found". Do NOT assert a specific upstream error label: any
+	// non-"not found" error from GetIntegratedAuthenticator proves the registry
+	// lookup reached the krb5 provider rather than the miss
+	// `provider %v not found` (getProvider in integratedauth/auth.go); upstream
+	// may reword its config-load or keytab error messages.
+	_, err := integratedauth.GetIntegratedAuthenticator(config)
+	if err == nil {
+		t.Fatalf("expected an error from the krb5 provider for a nonexistent krb5 config, got nil")
+	}
+	if strings.Contains(err.Error(), "not found") {
 		t.Fatalf("krb5 provider not registered (lookup missed the registry): %v", err)
-	}
-	if err != nil {
-		// A config-load or keytab-validation error is expected here (the paths
-		// above do not exist); it proves the krb5 provider was found and ran.
-		return
-	}
-	if authenticator == nil {
-		t.Fatalf("expected an error or a non-nil authenticator, got nil authenticator without error")
 	}
 }
 

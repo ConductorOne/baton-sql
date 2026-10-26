@@ -50,7 +50,7 @@ This document describes the Baton SQL connector's capabilities and the credentia
    > - PostgreSQL: `postgres://username:password@host:port/database`
    > - Oracle: `oracle://username:password@host:port/service`
    > - SQL Server: `sqlserver://username:password@host:port?database=dbname`
-   > - SQL Server (Kerberos/keytab): add `?authenticator=krb5&krb5-realm=<REALM>&krb5-keytabfile=<path>&krb5-configfile=<path>` to the `sqlserver://` DSN
+   > - SQL Server (Kerberos/keytab): use a DSN without username/password, e.g. `sqlserver://host:port?database=dbname&authenticator=krb5&krb5-realm=<REALM>&krb5-keytabfile=<path>&krb5-configfile=<path>` (with both username and password present the keytab is ignored)
    > - SAP HANA: `hdb://username:password@host:port/database`
    > - Vertica: `vertica://username:password@host:port/database`
    > - Amazon Redshift: `postgres://username:password@host:port/database` (uses the PostgreSQL scheme)
