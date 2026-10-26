@@ -25,11 +25,7 @@ func Test_Krb5ProviderRegistered(t *testing.T) {
 		},
 	}
 
-	// Normative assertion: err != nil AND the error message does not contain
-	// "not found". No specific upstream error label is pinned: any non-"not
-	// found" error from GetIntegratedAuthenticator proves the registry lookup
-	// reached the krb5 provider rather than the miss `provider %v not found`;
-	// upstream may reword its config-load or keytab error messages at any time.
+	// Both paths point at /nonexistent, so the error is deterministic without touching /etc/krb5.conf.
 	_, err := integratedauth.GetIntegratedAuthenticator(config)
 	if err == nil {
 		t.Fatalf("expected an error from the krb5 provider for a nonexistent krb5 config, got nil")
@@ -59,5 +55,3 @@ func Test_ProviderMissMessageControl(t *testing.T) {
 		t.Fatalf("upstream registry-miss message no longer contains \"not found\"; update the guard in Test_Krb5ProviderRegistered: %v", err)
 	}
 }
-
-
