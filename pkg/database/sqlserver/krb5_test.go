@@ -8,13 +8,7 @@ import (
 	"github.com/microsoft/go-mssqldb/msdsn"
 )
 
-// Test_Krb5ProviderRegistered proves the blank import in sqlserver.go registers
-// the "krb5" integrated-auth provider. Normative wording (no specific upstream
-// error label): the assertion is err != nil AND the error message does not
-// contain "not found". Any non-"not found" error from GetIntegratedAuthenticator
-// proves the registry lookup reached the krb5 provider rather than the miss
-// `provider %v not found`; upstream may reword its config-load or keytab error
-// messages, so no specific upstream string is asserted here.
+// A non-"not found" error proves the lookup reached the krb5 provider.
 func Test_Krb5ProviderRegistered(t *testing.T) {
 	config := msdsn.Config{
 		Parameters: map[string]string{
