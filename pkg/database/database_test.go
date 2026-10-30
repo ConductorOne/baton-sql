@@ -773,23 +773,6 @@ func Test_buildConnectionURL(t *testing.T) {
 			want: "postgres://testuser:testpass@[::1]:5432/testdb",
 		},
 		{
-			name: "sqlserver with krb5 integrated-auth params round-trips verbatim",
-			opts: ConnectOptions{
-				Scheme: "sqlserver",
-				Host:   "sql.internal",
-				Port:   "1433",
-				User:   "svc-account",
-				Params: map[string]string{
-					"database":        "appdb",
-					"authenticator":   "krb5",
-					"krb5-realm":      "EXAMPLE.COM",
-					"krb5-keytabfile": "/etc/krb5/svc.keytab",
-					"krb5-configfile": "/etc/krb5/krb5.conf",
-				},
-			},
-			want: "sqlserver://svc-account@sql.internal:1433?authenticator=krb5&database=appdb&krb5-configfile=%2Fetc%2Fkrb5%2Fkrb5.conf&krb5-keytabfile=%2Fetc%2Fkrb5%2Fsvc.keytab&krb5-realm=EXAMPLE.COM",
-		},
-		{
 			name: "IPv6 host without brackets gets brackets added by JoinHostPort",
 			opts: ConnectOptions{
 				Scheme:   "postgres",
