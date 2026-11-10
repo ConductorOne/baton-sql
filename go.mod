@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/SAP/go-hdb v1.14.5
-	github.com/conductorone/baton-sdk v0.44.1
+	github.com/conductorone/baton-sdk v0.44.2
 	github.com/elliotchance/phpserialize v1.4.0
 	github.com/ennyjfrick/ruleguard-logfatal v0.0.2
 	github.com/go-sql-driver/mysql v1.9.2
@@ -103,7 +103,7 @@ require (
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/jellydator/ttlcache/v3 v3.3.0 // indirect
 	github.com/joeshaw/multierror v0.0.0-20140124173710-69b34d4ec901 // indirect
-	github.com/klauspost/compress v1.18.7 // indirect
+	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect
