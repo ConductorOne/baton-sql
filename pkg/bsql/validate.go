@@ -331,6 +331,9 @@ func (l *GrantsEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) erro
 	if l.ResourceId == "" {
 		return errors.New("event_feed.resource_id is required")
 	}
+	if err := s.env.Compile(l.ResourceId); err != nil {
+		return fmt.Errorf("event_feed.resource_id: invalid CEL expression: %w", err)
+	}
 	if l.ChangesCursorColumn == "" {
 		return errors.New("event_feed.changes_cursor_column is required")
 	}

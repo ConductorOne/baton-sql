@@ -3,6 +3,7 @@ package bsql
 import (
 	"testing"
 
+	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/stretchr/testify/require"
 )
@@ -180,11 +181,21 @@ func TestValidateEventFeedPagination(t *testing.T) {
 			},
 			errSubstr: "event_feed.revokes_query must contain ?<Limit>",
 		},
+		{
+			name: "grant feed with invalid resource_id CEL expression",
+			validator: &GrantsEventFeed{
+				ResourceId: "cols.user_id +", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at", Pagination: offset,
+			},
+			errSubstr: "event_feed.resource_id: invalid CEL expression",
+		},
 	}
+
+	celEnv, err := bcel.NewEnv(t.Context())
+	require.NoError(t, err)
 
 	for _, tc := range tcases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.validator.staticValidate(t.Context(), &SQLSyncer{})
+			err := tc.validator.staticValidate(t.Context(), &SQLSyncer{env: celEnv})
 			if tc.errSubstr == "" {
 				require.NoError(t, err)
 				return
