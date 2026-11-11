@@ -475,7 +475,7 @@ type EventFeedConfig struct {
 // GetQuery defines how to fetch a single resource by its ID.
 // Required for resource types that configure event_feed.
 type GetQuery struct {
-	// Query is the SQL statement to fetch one resource. Must contain ?<id>.
+	// Query is the SQL statement to fetch one resource. Must contain ?<resource_id>.
 	Query string `yaml:"query" json:"query"`
 	// Vars provides optional variables for the query.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`

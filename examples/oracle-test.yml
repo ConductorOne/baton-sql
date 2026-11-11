@@ -215,7 +215,7 @@ resource_types:
           attr_employee_number as "attr_employee_number",
           attr_employment_type as "attr_employment_type"
         FROM users
-        WHERE username = ?<id>
+        WHERE username = ?<resource_id>
 
     # Detects new and modified users via updated_at.
     # Note: Oracle role and privilege types are sourced from system views (DBA_ROLES,

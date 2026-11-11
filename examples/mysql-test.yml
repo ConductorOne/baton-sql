@@ -241,7 +241,7 @@ resource_types:
           u.attr_employment_type
         FROM users u
         LEFT JOIN users m ON u.manager_id = m.id
-        WHERE u.username = ?<id>
+        WHERE u.username = ?<resource_id>
 
     # Detects new and modified users via updated_at.
     event_feed:
@@ -391,7 +391,7 @@ resource_types:
       query: |
         SELECT id, role_name
         FROM roles
-        WHERE role_name = ?<id>
+        WHERE role_name = ?<resource_id>
 
     # Detects new and modified roles via updated_at.
     event_feed:

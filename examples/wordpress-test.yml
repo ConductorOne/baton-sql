@@ -54,7 +54,7 @@ resource_types:
           u.user_email AS email,
           u.user_registered AS created_at
         FROM wp_users u
-        WHERE u.ID = ?<id>
+        WHERE u.ID = ?<resource_id>
 
     # Detects newly registered users via user_registered.
     # Note: wp_users does not have a general-purpose updated_at column.

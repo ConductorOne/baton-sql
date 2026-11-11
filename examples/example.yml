@@ -60,7 +60,7 @@ resource_types:
       query: |
         SELECT id, username, email, created_at, status, department, updated_at
         FROM users
-        WHERE id = ?<id>
+        WHERE id = ?<resource_id>
 
     # List Configuration
     # ------------------

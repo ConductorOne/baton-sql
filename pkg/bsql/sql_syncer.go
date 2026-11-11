@@ -55,7 +55,7 @@ func (s *SQLSyncer) Get(ctx context.Context, resourceId *v2.ResourceId, parentRe
 	if err != nil {
 		return nil, nil, fmt.Errorf("baton-sql: failed to prepare vars for get query: %w", err)
 	}
-	vars[idKey] = resourceId.GetResource()
+	vars[resourceIdKey] = resourceId.GetResource()
 
 	var result *v2.Resource
 	_, err = s.runQuery(ctx, &pagination.Token{}, s.config.Get.Query, nil, vars, func(ctx context.Context, row map[string]interface{}) (bool, error) {

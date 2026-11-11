@@ -26,10 +26,10 @@ const (
 	cursorKey       = "cursor"
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
-	// sinceKey and idKey are reserved placeholders injected by the event feed path.
+	// sinceKey and resourceIdKey are reserved placeholders injected by the event feed path.
 	// Users must not define vars with these names.
-	sinceKey = "since"
-	idKey    = "id"
+	sinceKey      = "since"
+	resourceIdKey = "resource_id"
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")

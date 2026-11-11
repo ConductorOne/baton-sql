@@ -33,7 +33,7 @@ func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) err
 
 	for _, v := range usedVars {
 		if _, ok := vars[v]; !ok {
-			if v == limitKey || v == offsetKey || v == cursorKey || v == sinceKey || v == idKey {
+			if v == limitKey || v == offsetKey || v == cursorKey || v == sinceKey || v == resourceIdKey {
 				continue
 			}
 			return fmt.Errorf("query uses variable '%s' which is not defined in vars", v)
@@ -182,11 +182,11 @@ func (l *GetQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if err != nil {
 		return err
 	}
-	if !queryUsesVar(usedVars, idKey) {
-		return fmt.Errorf("get query must contain ?<%s> placeholder", idKey)
+	if !queryUsesVar(usedVars, resourceIdKey) {
+		return fmt.Errorf("get query must contain ?<%s> placeholder", resourceIdKey)
 	}
 	for k := range l.Vars {
-		if k == sinceKey || k == idKey {
+		if k == sinceKey || k == resourceIdKey {
 			return fmt.Errorf("vars must not use reserved key %q", k)
 		}
 	}
@@ -208,7 +208,7 @@ func (l *ResourceEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) er
 		return fmt.Errorf("event_feed.query must contain ?<%s> placeholder", sinceKey)
 	}
 	for k := range l.Vars {
-		if k == sinceKey || k == idKey {
+		if k == sinceKey || k == resourceIdKey {
 			return fmt.Errorf("vars must not use reserved key %q", k)
 		}
 	}
@@ -253,7 +253,7 @@ func (l *GrantsEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) erro
 		}
 	}
 	for k := range l.Vars {
-		if k == sinceKey || k == idKey {
+		if k == sinceKey || k == resourceIdKey {
 			return fmt.Errorf("vars must not use reserved key %q", k)
 		}
 	}

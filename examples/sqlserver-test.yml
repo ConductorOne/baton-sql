@@ -219,7 +219,7 @@ resource_types:
         FROM Users u
         LEFT JOIN Users m ON u.ManagerID = m.UserID
         LEFT JOIN EmployeeData ed ON u.UserID = ed.UserID
-        WHERE u.Username = ?<id>
+        WHERE u.Username = ?<resource_id>
 
     # Detects new and modified users via UpdatedAt.
     event_feed:
@@ -370,7 +370,7 @@ resource_types:
       query: |
         SELECT RoleID as id, RoleName as role_name, Description as description
         FROM Roles
-        WHERE RoleName = ?<id>
+        WHERE RoleName = ?<resource_id>
 
     # Detects new and modified roles via UpdatedAt.
     event_feed:

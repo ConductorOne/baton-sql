@@ -79,7 +79,7 @@
           LEFT JOIN "USER_PARAMETERS"
             ON "SYS"."USERS".USER_NAME = "USER_PARAMETERS".USER_NAME
             AND "USER_PARAMETERS".PARAMETER = 'EMAIL ADDRESS'
-          WHERE USER_ID = ?<id>
+          WHERE USER_ID = ?<resource_id>
 
       # Detects newly created users via CREATE_TIME.
       # Note: SYS.USERS is a system catalog view. CREATE_TIME records when the user was
