@@ -193,6 +193,23 @@ func (l *GetQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	return nil
 }
 
+// validateEventFeedPagination requires pagination on event feed queries so each page stays bounded.
+func validateEventFeedPagination(field string, p *Pagination, usedVars []string) error {
+	if p == nil {
+		return fmt.Errorf("%s.pagination is required", field)
+	}
+	if p.Strategy != offsetKey && p.Strategy != cursorKey {
+		return fmt.Errorf("%s.pagination.strategy must be %q or %q", field, offsetKey, cursorKey)
+	}
+	if p.PrimaryKey == "" {
+		return fmt.Errorf("%s.pagination.primary_key is required", field)
+	}
+	if !queryUsesVar(usedVars, limitKey) {
+		return fmt.Errorf("%s must contain ?<Limit> placeholder", field)
+	}
+	return nil
+}
+
 func (l *ResourceEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if l.CursorColumn == "" {
 		return errors.New("event_feed.cursor_column is required")
@@ -206,6 +223,9 @@ func (l *ResourceEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) er
 	}
 	if !queryUsesVar(usedVars, sinceKey) {
 		return fmt.Errorf("event_feed.query must contain ?<%s> placeholder", sinceKey)
+	}
+	if err := validateEventFeedPagination("event_feed.query", l.Pagination, usedVars); err != nil {
+		return err
 	}
 	for k := range l.Vars {
 		if k == sinceKey || k == resourceIdKey {
@@ -237,6 +257,9 @@ func (l *GrantsEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) erro
 	if !queryUsesVar(usedVars, sinceKey) {
 		return fmt.Errorf("event_feed.changes_query must contain ?<%s> placeholder", sinceKey)
 	}
+	if err := validateEventFeedPagination("event_feed.changes_query", l.Pagination, usedVars); err != nil {
+		return err
+	}
 	if l.RevokesQuery != "" {
 		if l.RevokesCursorColumn == "" {
 			return errors.New("event_feed.revokes_cursor_column is required when revokes_query is set")
@@ -250,6 +273,9 @@ func (l *GrantsEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) erro
 		}
 		if !queryUsesVar(usedVars, sinceKey) {
 			return fmt.Errorf("event_feed.revokes_query must contain ?<%s> placeholder", sinceKey)
+		}
+		if err := validateEventFeedPagination("event_feed.revokes_query", l.Pagination, usedVars); err != nil {
+			return err
 		}
 	}
 	for k := range l.Vars {

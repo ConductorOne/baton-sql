@@ -145,6 +145,14 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 
 		var val interface{}
 		switch opts.Key {
+		case limitKey, offsetKey, cursorKey:
+			if pCtx == nil {
+				parseErr = errors.Join(parseErr, fmt.Errorf("query uses %s but no pagination is configured", token))
+				return token
+			}
+		}
+
+		switch opts.Key {
 		case limitKey:
 			// Always request 1 more than the specified limit, so we can see if there are additional results.
 			val = pCtx.Limit + 1
