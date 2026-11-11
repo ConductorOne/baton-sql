@@ -11,15 +11,23 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/conductorone/baton-sql/pkg/database/db2"
 	"github.com/conductorone/baton-sql/pkg/database/hdb"
 	"github.com/conductorone/baton-sql/pkg/database/mysql"
 	"github.com/conductorone/baton-sql/pkg/database/oracle"
 	"github.com/conductorone/baton-sql/pkg/database/postgres"
 	"github.com/conductorone/baton-sql/pkg/database/sqlserver"
 	"github.com/conductorone/baton-sql/pkg/database/vertica"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var DSNREnvRegex = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
+
+// LookupFunc resolves ${KEY} placeholders during DSN/connect field expansion.
+// When nil is passed to expand helpers, os.LookupEnv is used (CLI compatibility).
+// Library embedders should pass a map-backed LookupFunc and never mutate process env.
+type LookupFunc func(key string) (string, bool)
 
 type DbEngine uint8
 
@@ -32,6 +40,7 @@ const (
 	Oracle
 	HDB
 	Vertica
+	DB2
 )
 
 // ConnectOptions represents the structured configuration used to build a DSN.
@@ -48,15 +57,28 @@ type ConnectOptions struct {
 	Password string
 
 	Params map[string]string
+
+	// Lookup resolves ${KEY} placeholders. When nil, os.LookupEnv is used.
+	Lookup LookupFunc
 }
 
-func updateFromEnv(dsn string) (string, error) {
+func (opts ConnectOptions) resolveLookup() LookupFunc {
+	if opts.Lookup != nil {
+		return opts.Lookup
+	}
+	return os.LookupEnv
+}
+
+func updateFromLookup(dsn string, lookup LookupFunc) (string, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	var err error
 
 	result := DSNREnvRegex.ReplaceAllStringFunc(dsn, func(match string) string {
 		varName := match[2 : len(match)-1]
 
-		value, exists := os.LookupEnv(varName)
+		value, exists := lookup(varName)
 		if !exists {
 			err = errors.Join(err, fmt.Errorf("environment variable %s is not set", varName))
 			return match
@@ -70,11 +92,19 @@ func updateFromEnv(dsn string) (string, error) {
 	return result, nil
 }
 
+// updateFromEnv expands placeholders using process environment (CLI path).
+func updateFromEnv(dsn string) (string, error) {
+	return updateFromLookup(dsn, os.LookupEnv)
+}
+
 // extractPlaceholders replaces ${...} placeholders with unique sentinels
 // using the _PH-999000_ format for all placeholders to avoid collisions.
 // Port sentinels are expanded before URL parsing (in expandDSN) since ports must be numeric.
 // Returns: the string with sentinels, a mapping of sentinel->value, and any error.
-func extractPlaceholders(s string) (string, map[string]string, error) {
+func extractPlaceholders(s string, lookup LookupFunc) (string, map[string]string, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
 	mapping := make(map[string]string)
 	counter := 0
 	var err error
@@ -83,8 +113,7 @@ func extractPlaceholders(s string) (string, map[string]string, error) {
 		sentinel := fmt.Sprintf("_PH-999%03d_", counter)
 		varName := match[2 : len(match)-1] // Extract VAR from ${VAR}
 
-		// Look up the environment variable immediately
-		value, exists := os.LookupEnv(varName)
+		value, exists := lookup(varName)
 		if !exists {
 			err = errors.Join(err, fmt.Errorf("environment variable %s is not set", varName))
 			return sentinel // Return sentinel anyway to allow URL parsing for better error messages
@@ -256,15 +285,18 @@ func expandPortSentinel(sentinelDSN string, mapping map[string]string) string {
 }
 
 // expandDSN expands environment variable placeholders in a DSN using a three-phase approach:
-// 1. Replace ${...} with safe sentinel values and lookup env vars
+// 1. Replace ${...} with safe sentinel values and lookup values
 // 2. Parse the URL structure with sentinels
 // 3. Expand sentinels component-by-component with appropriate encoding
 //
 // This approach ensures that special characters in environment variables (like #, @, :)
 // don't break URL parsing, since they are expanded after the URL structure is established.
-func expandDSN(dsn string) (string, error) {
-	// Phase 1: Replace ${...} with sentinels and lookup env vars
-	sentinelDSN, mapping, err := extractPlaceholders(dsn)
+func expandDSN(dsn string, lookup LookupFunc) (string, error) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	// Phase 1: Replace ${...} with sentinels and lookup values
+	sentinelDSN, mapping, err := extractPlaceholders(dsn, lookup)
 	if err != nil {
 		return "", err
 	}
@@ -280,7 +312,7 @@ func expandDSN(dsn string) (string, error) {
 	if len(matches) == 1 && strings.TrimSpace(dsn) == strings.TrimSpace(matches[0]) {
 		// Get the variable name
 		varName := matches[0][2 : len(matches[0])-1]
-		value, exists := os.LookupEnv(varName)
+		value, exists := lookup(varName)
 		if !exists {
 			return "", fmt.Errorf("environment variable %s is not set", varName)
 		}
@@ -322,14 +354,102 @@ func expandDSN(dsn string) (string, error) {
 	return parsedUrl.String(), nil
 }
 
+// ResolveDatabaseName returns the database opts would connect to, merging the DSN
+// path with the structured field. Empty when neither supplies one.
+func ResolveDatabaseName(opts ConnectOptions) string {
+	lookup := opts.resolveLookup()
+	if opts.Database != "" {
+		if expanded, err := expandValue(opts.Database, lookup); err == nil && expanded != "" {
+			return expanded
+		}
+	}
+	if _, database, isNativeDB2, err := nativeDB2DSN(opts); err == nil && isNativeDB2 {
+		return database
+	}
+	parsedUrl, err := buildConnectionURL(opts)
+	if err != nil || parsedUrl == nil {
+		return ""
+	}
+	return strings.TrimPrefix(parsedUrl.Path, "/")
+}
+
+// hasStructuredConnectFields reports whether opts sets any structured connect field a
+// self-contained native DB2 DSN would silently override; the caller rejects that
+// combination instead of dropping the fields. Scheme is excluded, since "db2" alongside
+// a native DSN is a supported hint.
+func hasStructuredConnectFields(opts ConnectOptions) bool {
+	return opts.Host != "" || opts.Port != "" || opts.User != "" ||
+		opts.Password != "" || opts.Database != "" || len(opts.Params) > 0
+}
+
+// ConnectMany opens one *sql.DB per name in dbNames. On any per-database failure,
+// every handle opened so far is closed before returning the error.
+func ConnectMany(ctx context.Context, opts ConnectOptions, dbNames []string) (map[string]*sql.DB, DbEngine, error) {
+	if len(dbNames) == 0 {
+		return nil, Unknown, errors.New("ConnectMany: dbNames is empty")
+	}
+
+	dbs := make(map[string]*sql.DB, len(dbNames))
+	closeAll := func() {
+		for _, opened := range dbs {
+			_ = opened.Close()
+		}
+	}
+
+	var engine DbEngine
+	for i, name := range dbNames {
+		perOpts := opts
+		perOpts.Database = name
+		db, eng, err := Connect(ctx, perOpts)
+		if err != nil {
+			closeAll()
+			return nil, Unknown, fmt.Errorf("ConnectMany: failed to connect to database %q: %w", name, err)
+		}
+		if i == 0 {
+			engine = eng
+		} else if eng != engine {
+			_ = db.Close()
+			closeAll()
+			return nil, Unknown, fmt.Errorf("ConnectMany: engine mismatch between databases (%v vs %v)", eng, engine)
+		}
+		dbs[name] = db
+	}
+	return dbs, engine, nil
+}
+
 func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error) {
+	// A native DB2 DSN is opaque ODBC text, not a URL, so hand it to the driver verbatim
+	// instead of routing it through buildConnectionURL, which would corrupt it. See docs/db2.md.
+	nativeDSN, _, isNativeDB2, err := nativeDB2DSN(opts)
+	if err != nil {
+		return nil, Unknown, err
+	}
+	if isNativeDB2 {
+		// A native DSN already carries every connection setting, so structured fields or
+		// a per-database override would be silently dropped on the verbatim path; reject
+		// the combination instead of connecting to the wrong database. See docs/db2.md.
+		if hasStructuredConnectFields(opts) {
+			return nil, Unknown, status.Error(codes.InvalidArgument,
+				"native DB2 DSN is self-contained and cannot be combined with structured "+
+					"connect fields (host, port, user, password, params) or a per-database "+
+					"override (connect.database, databases); put every setting in the DSN or "+
+					"use the db2:// URL form",
+			)
+		}
+		db, err := db2.Connect(ctx, nativeDSN)
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, DB2, nil
+	}
+
 	parsedDsn, err := buildConnectionURL(opts)
 	if err != nil {
 		return nil, Unknown, err
 	}
 
 	if parsedDsn.Scheme == "" {
-		return nil, Unknown, errors.New("database scheme must be specified in DSN or configuration")
+		return nil, Unknown, status.Error(codes.InvalidArgument, "database scheme must be specified in DSN or configuration")
 	}
 
 	switch parsedDsn.Scheme {
@@ -375,9 +495,62 @@ func Connect(ctx context.Context, opts ConnectOptions) (*sql.DB, DbEngine, error
 		}
 		return db, Vertica, nil
 
+	case db2Scheme:
+		db, err := db2.Connect(ctx, parsedDsn.String())
+		if err != nil {
+			return nil, Unknown, err
+		}
+		return db, DB2, nil
+
 	default:
 		return nil, Unknown, fmt.Errorf("unsupported database scheme: %s", parsedDsn.Scheme)
 	}
+}
+
+// db2Scheme is the "db2" scheme name, used both as the switch case above and to
+// recognize an explicit (rather than inferred) DB2 hint in nativeDB2DSN.
+const db2Scheme = "db2"
+
+// nativeDB2DSN reports whether opts carries a native (ODBC keyword=value) DB2 DSN rather
+// than a db2:// URL, returning the env-expanded DSN and its DATABASE value when it does.
+// Detection defers to db2.ParseNativeDSN so this and convertToDB2DSN's passthrough share
+// one decision.
+func nativeDB2DSN(opts ConnectOptions) (string, string, bool, error) {
+	if opts.DSN == "" {
+		return "", "", false, nil
+	}
+	lookup := opts.resolveLookup()
+
+	scheme, err := expandValue(opts.Scheme, lookup)
+	if err != nil {
+		return "", "", false, err
+	}
+	if scheme != "" && scheme != db2Scheme {
+		return "", "", false, nil
+	}
+
+	dsn, err := expandValue(opts.DSN, lookup)
+	if err != nil {
+		return "", "", false, err
+	}
+	_, native, err := db2.ParseNativeDSN(dsn)
+	if err != nil {
+		return "", "", false, fmt.Errorf("invalid native DB2 DSN: %w", err)
+	}
+	if !native {
+		return "", "", false, nil
+	}
+	// Confirmed native: re-expand with keyword-injection validation. The expansion above
+	// only decides routing; the driver gets this string verbatim.
+	safeDSN, err := expandNativeDSN(opts.DSN, lookup)
+	if err != nil {
+		return "", "", false, err
+	}
+	database, _, err := db2.ParseNativeDSN(safeDSN)
+	if err != nil {
+		return "", "", false, fmt.Errorf("invalid native DB2 DSN: %w", err)
+	}
+	return safeDSN, database, true, nil
 }
 
 func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
@@ -385,9 +558,10 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		parsedUrl *url.URL
 		err       error
 	)
+	lookup := opts.resolveLookup()
 
 	if opts.DSN != "" {
-		populatedDSN, err := expandDSN(opts.DSN)
+		populatedDSN, err := expandDSN(opts.DSN, lookup)
 		if err != nil {
 			return nil, err
 		}
@@ -399,7 +573,7 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		parsedUrl = &url.URL{}
 	}
 
-	scheme, err := expandValue(opts.Scheme)
+	scheme, err := expandValue(opts.Scheme, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -407,12 +581,12 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		parsedUrl.Scheme = scheme
 	}
 
-	host, err := expandValue(opts.Host)
+	host, err := expandValue(opts.Host, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	port, err := expandValue(opts.Port)
+	port, err := expandValue(opts.Port, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +625,7 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		return nil, fmt.Errorf("port provided without host")
 	}
 
-	databaseName, err := expandValue(opts.Database)
+	databaseName, err := expandValue(opts.Database, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -463,12 +637,12 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 		}
 	}
 
-	user, err := expandValue(opts.User)
+	user, err := expandValue(opts.User, lookup)
 	if err != nil {
 		return nil, err
 	}
 
-	password, err := expandValue(opts.Password)
+	password, err := expandValue(opts.Password, lookup)
 	if err != nil {
 		return nil, err
 	}
@@ -487,11 +661,11 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 			values = url.Values{}
 		}
 		for k, v := range opts.Params {
-			key, err := expandValue(k)
+			key, err := expandValue(k, lookup)
 			if err != nil {
 				return nil, err
 			}
-			value, err := expandValue(v)
+			value, err := expandValue(v, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -507,12 +681,48 @@ func buildConnectionURL(opts ConnectOptions) (*url.URL, error) {
 	return parsedUrl, nil
 }
 
-func expandValue(s string) (string, error) {
+func expandValue(s string, lookup LookupFunc) (string, error) {
 	if s == "" {
 		return s, nil
 	}
 	if DSNREnvRegex.MatchString(s) {
-		return updateFromEnv(s)
+		return updateFromLookup(s, lookup)
 	}
 	return s, nil
+}
+
+// expandNativeDSN expands ${KEY} placeholders in a native DB2 DSN, rejecting any value
+// containing an ODBC separator (; { } =); unlike the db2:// URL path, which quotes each
+// field via quoteDB2Value, a native DSN reaches the driver verbatim, so an unchecked
+// placeholder could inject or override keywords.
+func expandNativeDSN(dsn string, lookup LookupFunc) (string, error) {
+	if !DSNREnvRegex.MatchString(dsn) {
+		return dsn, nil
+	}
+	// A DSN that is a single ${KEY} spanning the whole string is the full value, not a
+	// field embedded in literal structure, so its separators are legitimate: expand as-is.
+	if DSNREnvRegex.FindString(dsn) == dsn {
+		return expandValue(dsn, lookup)
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	var err error
+	result := DSNREnvRegex.ReplaceAllStringFunc(dsn, func(match string) string {
+		varName := match[2 : len(match)-1]
+		value, exists := lookup(varName)
+		if !exists {
+			err = errors.Join(err, fmt.Errorf("environment variable %s is not set", varName))
+			return match
+		}
+		if strings.ContainsAny(value, ";{}=") {
+			err = errors.Join(err, fmt.Errorf("value for %s must not contain ODBC keyword separators (; { } =)", varName))
+			return match
+		}
+		return value
+	})
+	if err != nil {
+		return "", err
+	}
+	return result, nil
 }

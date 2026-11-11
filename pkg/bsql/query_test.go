@@ -89,6 +89,36 @@ func Test_parseToken(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{ //nolint:gosec // G101 false positive: "identifier" is the modifier name, not a credential.
+			name:  "Token with identifier option",
+			token: "?<table_name|identifier>",
+			want: &queryTokenOpts{
+				Key:        "table_name",
+				Identifier: true,
+			},
+			wantErr: false,
+		},
+		{ //nolint:gosec // G101 false positive: "identifier" is the modifier name, not a credential.
+			name:    "Identifier and unquoted are mutually exclusive",
+			token:   "?<x|identifier,unquoted>",
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:  "Token with keyword option",
+			token: "?<privilege_name|keyword>",
+			want: &queryTokenOpts{
+				Key:     "privilege_name",
+				Keyword: true,
+			},
+			wantErr: false,
+		},
+		{ //nolint:gosec // G101 false positive: "identifier" is the modifier name, not a credential.
+			name:    "Keyword and identifier are mutually exclusive",
+			token:   "?<x|keyword,identifier>",
+			want:    nil,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -402,6 +432,75 @@ func Test_parseQueryOpts(t *testing.T) {
 			false,
 		},
 		{
+			"Test valid query with identifier substitution (Postgres)",
+			database.PostgreSQL,
+			args{
+				t.Context(),
+				"GRANT SELECT ON ?<db|identifier>.?<schema|identifier>.?<tbl|identifier> TO ?<grantee|identifier>",
+				nil,
+				map[string]any{
+					"db":      "analytics",
+					"schema":  "public",
+					"tbl":     "orders",
+					"grantee": "alice",
+				},
+			},
+			`GRANT SELECT ON "analytics"."public"."orders" TO "alice"`,
+			nil,
+			false,
+			false,
+		},
+		{
+			"Test identifier substitution escapes embedded double quote (Postgres)",
+			database.PostgreSQL,
+			args{
+				t.Context(),
+				`SELECT * FROM ?<tbl|identifier>`,
+				nil,
+				map[string]any{
+					"tbl": `weird"name`,
+				},
+			},
+			`SELECT * FROM "weird""name"`,
+			nil,
+			false,
+			false,
+		},
+		{
+			"Test identifier substitution uses backticks for MySQL",
+			database.MySQL,
+			args{
+				t.Context(),
+				"DROP TABLE ?<tbl|identifier>",
+				nil,
+				map[string]any{
+					"tbl": "my`table",
+				},
+			},
+			"DROP TABLE `my``table`",
+			nil,
+			false,
+			false,
+		},
+		{
+			"Test identifier substitution neutralises injection attempt (Postgres)",
+			database.PostgreSQL,
+			args{
+				t.Context(),
+				"GRANT SELECT ON ?<tbl|identifier> TO bob",
+				nil,
+				map[string]any{
+					"tbl": `orders; DROP TABLE users; --`,
+				},
+			},
+			// The semicolons / DROP / comment all become part of one quoted identifier;
+			// the parser will reject it as a missing table rather than execute the trailer.
+			`GRANT SELECT ON "orders; DROP TABLE users; --" TO bob`,
+			nil,
+			false,
+			false,
+		},
+		{
 			"Test sql injection attempt with unquoted table name var substitution",
 			database.MySQL,
 			args{
@@ -417,6 +516,55 @@ func Test_parseQueryOpts(t *testing.T) {
 			[]interface{}{"test example"},
 			false,
 			false,
+		},
+		{
+			"Test keyword renders a multiword privilege intact",
+			database.Oracle,
+			args{
+				t.Context(),
+				"GRANT ?<privilege_name|keyword> TO ?<grantee|identifier>",
+				nil,
+				map[string]any{
+					"privilege_name": "CREATE SESSION",
+					"grantee":        "alice",
+				},
+			},
+			`GRANT CREATE SESSION TO "alice"`,
+			nil,
+			false,
+			false,
+		},
+		{
+			"Test keyword collapses internal whitespace",
+			database.Oracle,
+			args{
+				t.Context(),
+				"GRANT ?<privilege_name|keyword> TO bob",
+				nil,
+				map[string]any{
+					"privilege_name": "CREATE   SESSION",
+				},
+			},
+			"GRANT CREATE SESSION TO bob",
+			nil,
+			false,
+			false,
+		},
+		{
+			"Test keyword rejects an injection value",
+			database.Oracle,
+			args{
+				t.Context(),
+				"GRANT ?<privilege_name|keyword> TO bob",
+				nil,
+				map[string]any{
+					"privilege_name": "SESSION; DROP TABLE x",
+				},
+			},
+			"",
+			nil,
+			false,
+			true,
 		},
 	}
 	for _, tt := range tests {

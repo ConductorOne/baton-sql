@@ -6,10 +6,10 @@ import (
 
 const MaxKeysPerRequest = 100
 
-// The default gRPC message size limit is 4MB (we subtract 30KB for general overhead, which is overkill).
+// The default gRPC message size limit is 4MB (we subtract 60KB for general overhead, which is overkill).
 // Unfortunately, this layer has to be aware of the size limit to avoid exceeding the size limit
 // because the client does not know the size of the items it requests.
-const MaxSessionStoreSizeLimit = 4163584
+const MaxSessionStoreSizeLimit = 4132864
 
 type SessionStoreKey struct{}
 
@@ -72,6 +72,12 @@ func SetSyncIDInContext(ctx context.Context, syncID string) context.Context {
 	return context.WithValue(ctx, SyncIDKey{}, syncID)
 }
 
-type SetSessionStore interface {
-	SetSessionStore(ctx context.Context, store SessionStore)
+// UnbindSessionStore removes the binding, then waits until requests already
+// using the store finish or ctx ends.
+type UnbindSessionStore func(ctx context.Context) error
+
+// SessionStoreBinder routes session requests that carry syncID to store until
+// the returned UnbindSessionStore runs.
+type SessionStoreBinder interface {
+	BindSessionStore(ctx context.Context, syncID string, store SessionStore) (UnbindSessionStore, error)
 }

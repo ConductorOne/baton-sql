@@ -10,9 +10,11 @@ package v2
 
 import (
 	v1 "github.com/conductorone/baton-sdk/pb/c1/config/v1"
+	_ "github.com/envoyproxy/protoc-gen-validate/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	unsafe "unsafe"
@@ -309,8 +311,23 @@ type InvokeActionRequest struct {
 	Annotations []*anypb.Any           `protobuf:"bytes,3,rep,name=annotations,proto3" json:"annotations,omitempty"`
 	// Optional: if set, invokes a resource-scoped action
 	ResourceTypeId string `protobuf:"bytes,4,opt,name=resource_type_id,json=resourceTypeId,proto3" json:"resource_type_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Optional: how long the server may block this call waiting for the action
+	// to finish before returning its in-flight status. The wait is an upper
+	// bound on blocking, not a guarantee: the server may answer sooner, and it
+	// may silently cap an oversized wait rather than reject it. Unset or
+	// zero values take the server's default. The server does not
+	// shorten the wait to fit the call's deadline, so callers must set their
+	// RPC deadline above the requested wait: a deadline that fires first fails
+	// the call, and although the action keeps running server-side, its id is
+	// never delivered, so the outcome is unreachable to that caller. Negative
+	// waits and waits beyond the validated ceiling are rejected as caller
+	// bugs where the transport enforces validation rules; the server-side
+	// cap is the backstop everywhere.
+	InlineWait *durationpb.Duration `protobuf:"bytes,5,opt,name=inline_wait,json=inlineWait,proto3" json:"inline_wait,omitempty"`
+	// Public keys the connector uses to encrypt secret return values.
+	EncryptionConfigs []*EncryptionConfig `protobuf:"bytes,6,rep,name=encryption_configs,json=encryptionConfigs,proto3" json:"encryption_configs,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *InvokeActionRequest) Reset() {
@@ -366,6 +383,20 @@ func (x *InvokeActionRequest) GetResourceTypeId() string {
 	return ""
 }
 
+func (x *InvokeActionRequest) GetInlineWait() *durationpb.Duration {
+	if x != nil {
+		return x.InlineWait
+	}
+	return nil
+}
+
+func (x *InvokeActionRequest) GetEncryptionConfigs() []*EncryptionConfig {
+	if x != nil {
+		return x.EncryptionConfigs
+	}
+	return nil
+}
+
 func (x *InvokeActionRequest) SetName(v string) {
 	x.Name = v
 }
@@ -382,6 +413,14 @@ func (x *InvokeActionRequest) SetResourceTypeId(v string) {
 	x.ResourceTypeId = v
 }
 
+func (x *InvokeActionRequest) SetInlineWait(v *durationpb.Duration) {
+	x.InlineWait = v
+}
+
+func (x *InvokeActionRequest) SetEncryptionConfigs(v []*EncryptionConfig) {
+	x.EncryptionConfigs = v
+}
+
 func (x *InvokeActionRequest) HasArgs() bool {
 	if x == nil {
 		return false
@@ -389,8 +428,19 @@ func (x *InvokeActionRequest) HasArgs() bool {
 	return x.Args != nil
 }
 
+func (x *InvokeActionRequest) HasInlineWait() bool {
+	if x == nil {
+		return false
+	}
+	return x.InlineWait != nil
+}
+
 func (x *InvokeActionRequest) ClearArgs() {
 	x.Args = nil
+}
+
+func (x *InvokeActionRequest) ClearInlineWait() {
+	x.InlineWait = nil
 }
 
 type InvokeActionRequest_builder struct {
@@ -401,6 +451,21 @@ type InvokeActionRequest_builder struct {
 	Annotations []*anypb.Any
 	// Optional: if set, invokes a resource-scoped action
 	ResourceTypeId string
+	// Optional: how long the server may block this call waiting for the action
+	// to finish before returning its in-flight status. The wait is an upper
+	// bound on blocking, not a guarantee: the server may answer sooner, and it
+	// may silently cap an oversized wait rather than reject it. Unset or
+	// zero values take the server's default. The server does not
+	// shorten the wait to fit the call's deadline, so callers must set their
+	// RPC deadline above the requested wait: a deadline that fires first fails
+	// the call, and although the action keeps running server-side, its id is
+	// never delivered, so the outcome is unreachable to that caller. Negative
+	// waits and waits beyond the validated ceiling are rejected as caller
+	// bugs where the transport enforces validation rules; the server-side
+	// cap is the backstop everywhere.
+	InlineWait *durationpb.Duration
+	// Public keys the connector uses to encrypt secret return values.
+	EncryptionConfigs []*EncryptionConfig
 }
 
 func (b0 InvokeActionRequest_builder) Build() *InvokeActionRequest {
@@ -411,16 +476,20 @@ func (b0 InvokeActionRequest_builder) Build() *InvokeActionRequest {
 	x.Args = b.Args
 	x.Annotations = b.Annotations
 	x.ResourceTypeId = b.ResourceTypeId
+	x.InlineWait = b.InlineWait
+	x.EncryptionConfigs = b.EncryptionConfigs
 	return m0
 }
 
 type InvokeActionResponse struct {
-	state         protoimpl.MessageState `protogen:"hybrid.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Status        BatonActionStatus      `protobuf:"varint,2,opt,name=status,proto3,enum=c1.connector.v2.BatonActionStatus" json:"status,omitempty"`
-	Annotations   []*anypb.Any           `protobuf:"bytes,3,rep,name=annotations,proto3" json:"annotations,omitempty"`
-	Response      *structpb.Struct       `protobuf:"bytes,4,opt,name=response,proto3" json:"response,omitempty"`
-	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	state       protoimpl.MessageState `protogen:"hybrid.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Status      BatonActionStatus      `protobuf:"varint,2,opt,name=status,proto3,enum=c1.connector.v2.BatonActionStatus" json:"status,omitempty"`
+	Annotations []*anypb.Any           `protobuf:"bytes,3,rep,name=annotations,proto3" json:"annotations,omitempty"`
+	Response    *structpb.Struct       `protobuf:"bytes,4,opt,name=response,proto3" json:"response,omitempty"`
+	Name        string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	// Secret return values encrypted for every requested recipient.
+	EncryptedData []*EncryptedData `protobuf:"bytes,6,rep,name=encrypted_data,json=encryptedData,proto3" json:"encrypted_data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -485,6 +554,13 @@ func (x *InvokeActionResponse) GetName() string {
 	return ""
 }
 
+func (x *InvokeActionResponse) GetEncryptedData() []*EncryptedData {
+	if x != nil {
+		return x.EncryptedData
+	}
+	return nil
+}
+
 func (x *InvokeActionResponse) SetId(v string) {
 	x.Id = v
 }
@@ -503,6 +579,10 @@ func (x *InvokeActionResponse) SetResponse(v *structpb.Struct) {
 
 func (x *InvokeActionResponse) SetName(v string) {
 	x.Name = v
+}
+
+func (x *InvokeActionResponse) SetEncryptedData(v []*EncryptedData) {
+	x.EncryptedData = v
 }
 
 func (x *InvokeActionResponse) HasResponse() bool {
@@ -524,6 +604,8 @@ type InvokeActionResponse_builder struct {
 	Annotations []*anypb.Any
 	Response    *structpb.Struct
 	Name        string
+	// Secret return values encrypted for every requested recipient.
+	EncryptedData []*EncryptedData
 }
 
 func (b0 InvokeActionResponse_builder) Build() *InvokeActionResponse {
@@ -535,6 +617,7 @@ func (b0 InvokeActionResponse_builder) Build() *InvokeActionResponse {
 	x.Annotations = b.Annotations
 	x.Response = b.Response
 	x.Name = b.Name
+	x.EncryptedData = b.EncryptedData
 	return m0
 }
 
@@ -628,12 +711,14 @@ func (b0 GetActionStatusRequest_builder) Build() *GetActionStatusRequest {
 }
 
 type GetActionStatusResponse struct {
-	state         protoimpl.MessageState `protogen:"hybrid.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	Status        BatonActionStatus      `protobuf:"varint,3,opt,name=status,proto3,enum=c1.connector.v2.BatonActionStatus" json:"status,omitempty"`
-	Annotations   []*anypb.Any           `protobuf:"bytes,4,rep,name=annotations,proto3" json:"annotations,omitempty"`
-	Response      *structpb.Struct       `protobuf:"bytes,5,opt,name=response,proto3" json:"response,omitempty"`
+	state       protoimpl.MessageState `protogen:"hybrid.v1"`
+	Name        string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id          string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Status      BatonActionStatus      `protobuf:"varint,3,opt,name=status,proto3,enum=c1.connector.v2.BatonActionStatus" json:"status,omitempty"`
+	Annotations []*anypb.Any           `protobuf:"bytes,4,rep,name=annotations,proto3" json:"annotations,omitempty"`
+	Response    *structpb.Struct       `protobuf:"bytes,5,opt,name=response,proto3" json:"response,omitempty"`
+	// Secret return values encrypted when the action settled.
+	EncryptedData []*EncryptedData `protobuf:"bytes,6,rep,name=encrypted_data,json=encryptedData,proto3" json:"encrypted_data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -698,6 +783,13 @@ func (x *GetActionStatusResponse) GetResponse() *structpb.Struct {
 	return nil
 }
 
+func (x *GetActionStatusResponse) GetEncryptedData() []*EncryptedData {
+	if x != nil {
+		return x.EncryptedData
+	}
+	return nil
+}
+
 func (x *GetActionStatusResponse) SetName(v string) {
 	x.Name = v
 }
@@ -716,6 +808,10 @@ func (x *GetActionStatusResponse) SetAnnotations(v []*anypb.Any) {
 
 func (x *GetActionStatusResponse) SetResponse(v *structpb.Struct) {
 	x.Response = v
+}
+
+func (x *GetActionStatusResponse) SetEncryptedData(v []*EncryptedData) {
+	x.EncryptedData = v
 }
 
 func (x *GetActionStatusResponse) HasResponse() bool {
@@ -737,6 +833,8 @@ type GetActionStatusResponse_builder struct {
 	Status      BatonActionStatus
 	Annotations []*anypb.Any
 	Response    *structpb.Struct
+	// Secret return values encrypted when the action settled.
+	EncryptedData []*EncryptedData
 }
 
 func (b0 GetActionStatusResponse_builder) Build() *GetActionStatusResponse {
@@ -748,6 +846,7 @@ func (b0 GetActionStatusResponse_builder) Build() *GetActionStatusResponse {
 	x.Status = b.Status
 	x.Annotations = b.Annotations
 	x.Response = b.Response
+	x.EncryptedData = b.EncryptedData
 	return m0
 }
 
@@ -1052,7 +1151,7 @@ var File_c1_connector_v2_action_proto protoreflect.FileDescriptor
 
 const file_c1_connector_v2_action_proto_rawDesc = "" +
 	"\n" +
-	"\x1cc1/connector/v2/action.proto\x12\x0fc1.connector.v2\x1a\x19c1/config/v1/config.proto\x1a\x19google/protobuf/any.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xfb\x02\n" +
+	"\x1cc1/connector/v2/action.proto\x12\x0fc1.connector.v2\x1a\x19c1/config/v1/config.proto\x1a\x1ec1/connector/v2/resource.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x17validate/validate.proto\"\xfb\x02\n" +
 	"\x11BatonActionSchema\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x121\n" +
 	"\targuments\x18\x02 \x03(\v2\x13.c1.config.v1.FieldR\targuments\x12:\n" +
@@ -1062,28 +1161,33 @@ const file_c1_connector_v2_action_proto_rawDesc = "" +
 	"\vdescription\x18\x06 \x01(\tR\vdescription\x12<\n" +
 	"\vaction_type\x18\a \x03(\x0e2\x1b.c1.connector.v2.ActionTypeR\n" +
 	"actionType\x12(\n" +
-	"\x10resource_type_id\x18\b \x01(\tR\x0eresourceTypeId\"\xb8\x01\n" +
+	"\x10resource_type_id\x18\b \x01(\tR\x0eresourceTypeId\"\xd6\x02\n" +
 	"\x13InvokeActionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12+\n" +
 	"\x04args\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x04args\x126\n" +
 	"\vannotations\x18\x03 \x03(\v2\x14.google.protobuf.AnyR\vannotations\x12(\n" +
-	"\x10resource_type_id\x18\x04 \x01(\tR\x0eresourceTypeId\"\xe3\x01\n" +
+	"\x10resource_type_id\x18\x04 \x01(\tR\x0eresourceTypeId\x12J\n" +
+	"\vinline_wait\x18\x05 \x01(\v2\x19.google.protobuf.DurationB\x0e\xfaB\v\xaa\x01\b\"\x04\b\x80\xa3\x052\x00R\n" +
+	"inlineWait\x12P\n" +
+	"\x12encryption_configs\x18\x06 \x03(\v2!.c1.connector.v2.EncryptionConfigR\x11encryptionConfigs\"\xaa\x02\n" +
 	"\x14InvokeActionResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12:\n" +
 	"\x06status\x18\x02 \x01(\x0e2\".c1.connector.v2.BatonActionStatusR\x06status\x126\n" +
 	"\vannotations\x18\x03 \x03(\v2\x14.google.protobuf.AnyR\vannotations\x123\n" +
 	"\bresponse\x18\x04 \x01(\v2\x17.google.protobuf.StructR\bresponse\x12\x12\n" +
-	"\x04name\x18\x05 \x01(\tR\x04name\"x\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\x12E\n" +
+	"\x0eencrypted_data\x18\x06 \x03(\v2\x1e.c1.connector.v2.EncryptedDataR\rencryptedData\"x\n" +
 	"\x16GetActionStatusRequest\x12\x16\n" +
 	"\x04name\x18\x01 \x01(\tB\x02\x18\x01R\x04name\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x126\n" +
-	"\vannotations\x18\x03 \x03(\v2\x14.google.protobuf.AnyR\vannotations\"\xe6\x01\n" +
+	"\vannotations\x18\x03 \x03(\v2\x14.google.protobuf.AnyR\vannotations\"\xad\x02\n" +
 	"\x17GetActionStatusResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12:\n" +
 	"\x06status\x18\x03 \x01(\x0e2\".c1.connector.v2.BatonActionStatusR\x06status\x126\n" +
 	"\vannotations\x18\x04 \x03(\v2\x14.google.protobuf.AnyR\vannotations\x123\n" +
-	"\bresponse\x18\x05 \x01(\v2\x17.google.protobuf.StructR\bresponse\"d\n" +
+	"\bresponse\x18\x05 \x01(\v2\x17.google.protobuf.StructR\bresponse\x12E\n" +
+	"\x0eencrypted_data\x18\x06 \x03(\v2\x1e.c1.connector.v2.EncryptedDataR\rencryptedData\"d\n" +
 	"\x16GetActionSchemaRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x126\n" +
 	"\vannotations\x18\x02 \x03(\v2\x14.google.protobuf.AnyR\vannotations\"\x8d\x01\n" +
@@ -1139,6 +1243,9 @@ var file_c1_connector_v2_action_proto_goTypes = []any{
 	(*v1.Constraint)(nil),             // 12: c1.config.v1.Constraint
 	(*structpb.Struct)(nil),           // 13: google.protobuf.Struct
 	(*anypb.Any)(nil),                 // 14: google.protobuf.Any
+	(*durationpb.Duration)(nil),       // 15: google.protobuf.Duration
+	(*EncryptionConfig)(nil),          // 16: c1.connector.v2.EncryptionConfig
+	(*EncryptedData)(nil),             // 17: c1.connector.v2.EncryptedData
 }
 var file_c1_connector_v2_action_proto_depIdxs = []int32{
 	11, // 0: c1.connector.v2.BatonActionSchema.arguments:type_name -> c1.config.v1.Field
@@ -1147,32 +1254,36 @@ var file_c1_connector_v2_action_proto_depIdxs = []int32{
 	1,  // 3: c1.connector.v2.BatonActionSchema.action_type:type_name -> c1.connector.v2.ActionType
 	13, // 4: c1.connector.v2.InvokeActionRequest.args:type_name -> google.protobuf.Struct
 	14, // 5: c1.connector.v2.InvokeActionRequest.annotations:type_name -> google.protobuf.Any
-	0,  // 6: c1.connector.v2.InvokeActionResponse.status:type_name -> c1.connector.v2.BatonActionStatus
-	14, // 7: c1.connector.v2.InvokeActionResponse.annotations:type_name -> google.protobuf.Any
-	13, // 8: c1.connector.v2.InvokeActionResponse.response:type_name -> google.protobuf.Struct
-	14, // 9: c1.connector.v2.GetActionStatusRequest.annotations:type_name -> google.protobuf.Any
-	0,  // 10: c1.connector.v2.GetActionStatusResponse.status:type_name -> c1.connector.v2.BatonActionStatus
-	14, // 11: c1.connector.v2.GetActionStatusResponse.annotations:type_name -> google.protobuf.Any
-	13, // 12: c1.connector.v2.GetActionStatusResponse.response:type_name -> google.protobuf.Struct
-	14, // 13: c1.connector.v2.GetActionSchemaRequest.annotations:type_name -> google.protobuf.Any
-	2,  // 14: c1.connector.v2.GetActionSchemaResponse.schema:type_name -> c1.connector.v2.BatonActionSchema
-	14, // 15: c1.connector.v2.GetActionSchemaResponse.annotations:type_name -> google.protobuf.Any
-	14, // 16: c1.connector.v2.ListActionSchemasRequest.annotations:type_name -> google.protobuf.Any
-	2,  // 17: c1.connector.v2.ListActionSchemasResponse.schemas:type_name -> c1.connector.v2.BatonActionSchema
-	14, // 18: c1.connector.v2.ListActionSchemasResponse.annotations:type_name -> google.protobuf.Any
-	3,  // 19: c1.connector.v2.ActionService.InvokeAction:input_type -> c1.connector.v2.InvokeActionRequest
-	5,  // 20: c1.connector.v2.ActionService.GetActionStatus:input_type -> c1.connector.v2.GetActionStatusRequest
-	7,  // 21: c1.connector.v2.ActionService.GetActionSchema:input_type -> c1.connector.v2.GetActionSchemaRequest
-	9,  // 22: c1.connector.v2.ActionService.ListActionSchemas:input_type -> c1.connector.v2.ListActionSchemasRequest
-	4,  // 23: c1.connector.v2.ActionService.InvokeAction:output_type -> c1.connector.v2.InvokeActionResponse
-	6,  // 24: c1.connector.v2.ActionService.GetActionStatus:output_type -> c1.connector.v2.GetActionStatusResponse
-	8,  // 25: c1.connector.v2.ActionService.GetActionSchema:output_type -> c1.connector.v2.GetActionSchemaResponse
-	10, // 26: c1.connector.v2.ActionService.ListActionSchemas:output_type -> c1.connector.v2.ListActionSchemasResponse
-	23, // [23:27] is the sub-list for method output_type
-	19, // [19:23] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	15, // 6: c1.connector.v2.InvokeActionRequest.inline_wait:type_name -> google.protobuf.Duration
+	16, // 7: c1.connector.v2.InvokeActionRequest.encryption_configs:type_name -> c1.connector.v2.EncryptionConfig
+	0,  // 8: c1.connector.v2.InvokeActionResponse.status:type_name -> c1.connector.v2.BatonActionStatus
+	14, // 9: c1.connector.v2.InvokeActionResponse.annotations:type_name -> google.protobuf.Any
+	13, // 10: c1.connector.v2.InvokeActionResponse.response:type_name -> google.protobuf.Struct
+	17, // 11: c1.connector.v2.InvokeActionResponse.encrypted_data:type_name -> c1.connector.v2.EncryptedData
+	14, // 12: c1.connector.v2.GetActionStatusRequest.annotations:type_name -> google.protobuf.Any
+	0,  // 13: c1.connector.v2.GetActionStatusResponse.status:type_name -> c1.connector.v2.BatonActionStatus
+	14, // 14: c1.connector.v2.GetActionStatusResponse.annotations:type_name -> google.protobuf.Any
+	13, // 15: c1.connector.v2.GetActionStatusResponse.response:type_name -> google.protobuf.Struct
+	17, // 16: c1.connector.v2.GetActionStatusResponse.encrypted_data:type_name -> c1.connector.v2.EncryptedData
+	14, // 17: c1.connector.v2.GetActionSchemaRequest.annotations:type_name -> google.protobuf.Any
+	2,  // 18: c1.connector.v2.GetActionSchemaResponse.schema:type_name -> c1.connector.v2.BatonActionSchema
+	14, // 19: c1.connector.v2.GetActionSchemaResponse.annotations:type_name -> google.protobuf.Any
+	14, // 20: c1.connector.v2.ListActionSchemasRequest.annotations:type_name -> google.protobuf.Any
+	2,  // 21: c1.connector.v2.ListActionSchemasResponse.schemas:type_name -> c1.connector.v2.BatonActionSchema
+	14, // 22: c1.connector.v2.ListActionSchemasResponse.annotations:type_name -> google.protobuf.Any
+	3,  // 23: c1.connector.v2.ActionService.InvokeAction:input_type -> c1.connector.v2.InvokeActionRequest
+	5,  // 24: c1.connector.v2.ActionService.GetActionStatus:input_type -> c1.connector.v2.GetActionStatusRequest
+	7,  // 25: c1.connector.v2.ActionService.GetActionSchema:input_type -> c1.connector.v2.GetActionSchemaRequest
+	9,  // 26: c1.connector.v2.ActionService.ListActionSchemas:input_type -> c1.connector.v2.ListActionSchemasRequest
+	4,  // 27: c1.connector.v2.ActionService.InvokeAction:output_type -> c1.connector.v2.InvokeActionResponse
+	6,  // 28: c1.connector.v2.ActionService.GetActionStatus:output_type -> c1.connector.v2.GetActionStatusResponse
+	8,  // 29: c1.connector.v2.ActionService.GetActionSchema:output_type -> c1.connector.v2.GetActionSchemaResponse
+	10, // 30: c1.connector.v2.ActionService.ListActionSchemas:output_type -> c1.connector.v2.ListActionSchemasResponse
+	27, // [27:31] is the sub-list for method output_type
+	23, // [23:27] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_c1_connector_v2_action_proto_init() }
@@ -1180,6 +1291,7 @@ func file_c1_connector_v2_action_proto_init() {
 	if File_c1_connector_v2_action_proto != nil {
 		return
 	}
+	file_c1_connector_v2_resource_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

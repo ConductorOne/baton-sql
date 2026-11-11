@@ -128,6 +128,14 @@ func parseTimeWithEngine(value string, dbEngine database.DbEngine) (*time.Time, 
 			"2006-01-02 15:04:05",
 			time.RFC3339,
 		}
+	case database.DB2:
+		// DB2 common formats, including its native dash/dot TIMESTAMP string form
+		prioritizedFormats = []string{
+			"2006-01-02 15:04:05.000000",
+			"2006-01-02-15.04.05.000000",
+			"2006-01-02 15:04:05",
+			time.RFC3339,
+		}
 	default:
 		// Try the generic time parser for unknown engines
 		return parseTime(value)

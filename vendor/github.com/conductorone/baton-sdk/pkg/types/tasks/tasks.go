@@ -24,6 +24,8 @@ func (tt TaskType) String() string {
 		return "delete_resource"
 	case RotateCredentialsType:
 		return "rotate_credential"
+	case IssueCredentialType:
+		return "issue_credential"
 	case CreateTicketType:
 		return "create_ticket"
 	case ListTicketSchemasType:
@@ -64,8 +66,6 @@ func (tt TaskType) String() string {
 		return "invoke_action"
 	case ActionStatusType:
 		return "action_status"
-	case CreateSyncDiff:
-		return "create_sync_diff"
 	default:
 		return "unknown"
 	}
@@ -102,6 +102,7 @@ const (
 	ActionGetSchemaType
 	ActionInvokeType
 	ActionStatusType
-	CreateSyncDiff
+	_ // was CreateSyncDiff; placeholder pins the ordinals below to their released values
 	ListStaticEntitlementsType
+	IssueCredentialType
 )

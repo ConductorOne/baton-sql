@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/field"
@@ -23,6 +24,30 @@ type RunTimeOpts struct {
 	TokenSource         oauth2.TokenSource
 	SelectedAuthMethod  string
 	SyncResourceTypeIDs []string
+	// EgressPolicy carries the server-computed egress policy delivered on the
+	// connector-config response, when one is present. It is nil for connectors
+	// served without a policy envelope; the connector decides how (and whether)
+	// to enforce it.
+	EgressPolicy *EgressPolicy
+}
+
+// EgressPolicy is the connector-facing projection of a served-policy envelope's
+// egress section: the fields a connector runtime needs to enforce egress,
+// extracted after the SDK verified the envelope's binding to this response.
+// The envelope's digests, versions, and capability section are not surfaced —
+// they are the SDK's contract to verify, not the connector's.
+type EgressPolicy struct {
+	// AllowedHosts is the effective per-instance egress allowlist (canonical
+	// hostnames). A non-nil *EgressPolicy with empty AllowedHosts is a valid
+	// deny-all policy.
+	AllowedHosts []string
+	// HTTPSOnly reports whether the runtime must refuse non-https egress.
+	HTTPSOnly bool
+	// Enforce reports whether AllowedHosts is a deny-gate rather than an
+	// observed-and-reported allowlist. The wire carries an enum; narrowing it to
+	// a bool here keeps an unrecognized future posture from reaching a runtime
+	// that would have to guess at it — anything but an explicit enforce observes.
+	Enforce bool
 }
 
 // GetConnectorFunc is a function type that creates a connector instance.
@@ -39,11 +64,66 @@ func WithSessionCache(ctx context.Context, constructor sessions.SessionStoreCons
 	return context.WithValue(ctx, sessions.SessionStoreKey{}, sessionCache), nil
 }
 
+// ConnectorOpts holds runtime options passed to a connector at initialization time.
 type ConnectorOpts struct {
-	TokenSource         oauth2.TokenSource
-	SelectedAuthMethod  string
+	TokenSource        oauth2.TokenSource
+	SelectedAuthMethod string
+
+	// SyncResourceTypeIDs is the set of resource type IDs the user has requested
+	// to sync. An empty slice means "sync everything the connector advertises"
+	// (subject to OptInRequired{} annotations on resource types). A non-empty
+	// slice means "sync only these types; skip everything else." Connectors
+	// should prefer the helper methods (WillSyncResourceType,
+	// SyncFilterIsExplicit, SyncResourceTypeSet) over reading this slice
+	// directly.
 	SyncResourceTypeIDs []string
+
+	// EgressPolicy carries the server-computed egress policy delivered on the
+	// connector-config response, when one is present. It is nil for connectors
+	// served without a policy envelope; the connector decides how (and whether)
+	// to enforce it.
+	EgressPolicy *EgressPolicy
+
+	syncResourceTypeSetOnce sync.Once
+	syncResourceTypeSetVal  map[string]struct{}
 }
+
+// SyncFilterIsExplicit reports whether the user has explicitly narrowed the set
+// of resource types to sync. Returns false when SyncResourceTypeIDs is empty,
+// meaning "sync all types the connector advertises".
+func (o *ConnectorOpts) SyncFilterIsExplicit() bool {
+	return len(o.SyncResourceTypeIDs) > 0
+}
+
+// SyncResourceTypeSet returns the user's selection as a set for O(1) lookup,
+// or nil if no filter was specified (meaning all resource types should be
+// synced). The set is computed lazily on first call and cached for subsequent
+// calls.
+func (o *ConnectorOpts) SyncResourceTypeSet() map[string]struct{} {
+	if !o.SyncFilterIsExplicit() {
+		return nil
+	}
+	o.syncResourceTypeSetOnce.Do(func() {
+		s := make(map[string]struct{}, len(o.SyncResourceTypeIDs))
+		for _, id := range o.SyncResourceTypeIDs {
+			s[id] = struct{}{}
+		}
+		o.syncResourceTypeSetVal = s
+	})
+	return o.syncResourceTypeSetVal
+}
+
+// WillSyncResourceType reports whether the given resource type ID will be
+// synced under the current configuration. Returns true when the user has not
+// specified any filter (the "default to all" case).
+func (o *ConnectorOpts) WillSyncResourceType(resourceTypeID string) bool {
+	if !o.SyncFilterIsExplicit() {
+		return true
+	}
+	_, ok := o.SyncResourceTypeSet()[resourceTypeID]
+	return ok
+}
+
 type NewConnector[T field.Configurable] func(ctx context.Context, cfg T, opts *ConnectorOpts) (connectorbuilder.ConnectorBuilderV2, []connectorbuilder.Opt, error)
 
 func MakeGenericConfiguration[T field.Configurable](v *viper.Viper, opts ...field.DecodeHookOption) (T, error) {
@@ -99,6 +179,9 @@ func VisitFlags(cmd *cobra.Command, v *viper.Viper) {
 				_ = cmd.Flags().Set(f.Name, v.GetString(f.Name))
 			}
 		case "stringToString":
+			if hasNestedStringMapValue(v.Get(f.Name)) {
+				return
+			}
 			sm := v.GetStringMapString(f.Name)
 			if len(sm) > 0 {
 				// pflag expects "key=value" CSV format.
@@ -112,6 +195,31 @@ func VisitFlags(cmd *cobra.Command, v *viper.Viper) {
 			_ = cmd.Flags().Set(f.Name, v.GetString(f.Name))
 		}
 	})
+}
+
+func hasNestedStringMapValue(value any) bool {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() || rv.Kind() != reflect.Map {
+		return false
+	}
+
+	for _, mapKey := range rv.MapKeys() {
+		mapValue := rv.MapIndex(mapKey)
+		for mapValue.IsValid() && mapValue.Kind() == reflect.Interface {
+			if mapValue.IsNil() {
+				break
+			}
+			mapValue = mapValue.Elem()
+		}
+		if !mapValue.IsValid() {
+			continue
+		}
+		kind := mapValue.Kind()
+		if kind == reflect.Map || kind == reflect.Slice || kind == reflect.Array || kind == reflect.Struct {
+			return true
+		}
+	}
+	return false
 }
 
 func AddCommand(mainCMD *cobra.Command, v *viper.Viper, schema *field.Configuration, subCMD *cobra.Command) (*cobra.Command, error) {

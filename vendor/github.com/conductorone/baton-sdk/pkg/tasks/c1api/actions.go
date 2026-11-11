@@ -128,9 +128,10 @@ func (c *actionInvokeTaskHandler) HandleTask(ctx context.Context) error {
 	}
 
 	reqBuilder := v2.InvokeActionRequest_builder{
-		Name:        t.GetName(),
-		Args:        t.GetArgs(),
-		Annotations: t.GetAnnotations(),
+		Name:              t.GetName(),
+		Args:              t.GetArgs(),
+		Annotations:       t.GetAnnotations(),
+		EncryptionConfigs: t.GetEncryptionConfigs(),
 	}
 	if resourceTypeID := t.GetResourceTypeId(); resourceTypeID != "" {
 		reqBuilder.ResourceTypeId = resourceTypeID
@@ -193,7 +194,7 @@ func (c *actionStatusTaskHandler) HandleTask(ctx context.Context) error {
 	}
 
 	resp, err := cc.GetActionStatus(ctx, v2.GetActionStatusRequest_builder{
-		Name:        t.GetName(),
+		Name:        t.GetName(), //nolint:staticcheck // deprecated for Id below, still sent because a connector may read either
 		Id:          t.GetId(),
 		Annotations: t.GetAnnotations(),
 	}.Build())

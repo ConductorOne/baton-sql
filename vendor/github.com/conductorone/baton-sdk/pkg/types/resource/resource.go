@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -12,6 +13,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 var ErrNoAlias = fmt.Errorf("no aliases found for resource")
@@ -58,6 +61,125 @@ func WithDescription(description string) ResourceOption {
 	}
 }
 
+// WithResourceProfile sets the profile on the resource itself.
+func WithResourceProfile(profile map[string]interface{}) ResourceOption {
+	return func(r *v2.Resource) error {
+		p, err := structpb.NewStruct(profile)
+		if err != nil {
+			return err
+		}
+
+		r.SetProfile(p)
+		return nil
+	}
+}
+
+// WithResourceIcon sets the icon on the resource itself.
+func WithResourceIcon(assetRef *v2.AssetRef) ResourceOption {
+	return func(r *v2.Resource) error {
+		r.SetIcon(assetRef)
+		return nil
+	}
+}
+
+// WithResourceStatus sets the status on the resource itself. details may be
+// empty.
+func WithResourceStatus(resourceStatus v2.Status_ResourceStatus, details string) ResourceOption {
+	return func(r *v2.Resource) error {
+		r.SetStatus(v2.Status_builder{
+			Status:  resourceStatus,
+			Details: details,
+		}.Build())
+		return nil
+	}
+}
+
+// WithResourceCreatedAt sets the creation time on the resource itself.
+func WithResourceCreatedAt(createdAt time.Time) ResourceOption {
+	return func(r *v2.Resource) error {
+		r.SetCreatedAt(timestamppb.New(createdAt))
+		return nil
+	}
+}
+
+// The profile, icon, status, and created_at fields on traits are deprecated
+// and have moved to attributes on Resource. The sync helpers below mirror the
+// deprecated trait fields onto the resource so that connectors using the
+// deprecated trait options still populate the resource-level attributes.
+// Resource-level values that were already set explicitly are not overwritten.
+
+//nolint:staticcheck // intentionally reads deprecated trait fields for backwards compatibility
+func syncUserTraitToResource(r *v2.Resource, ut *v2.UserTrait) {
+	if ut.HasProfile() && !r.HasProfile() {
+		r.SetProfile(ut.GetProfile())
+	}
+	if ut.HasIcon() && !r.HasIcon() {
+		r.SetIcon(ut.GetIcon())
+	}
+	if ut.HasCreatedAt() && !r.HasCreatedAt() {
+		r.SetCreatedAt(ut.GetCreatedAt())
+	}
+	if ut.HasStatus() && !r.HasStatus() {
+		// UserTrait_Status_Status and Status_ResourceStatus enum values are identical.
+		r.SetStatus(v2.Status_builder{
+			Status:  v2.Status_ResourceStatus(ut.GetStatus().GetStatus()),
+			Details: ut.GetStatus().GetDetails(),
+		}.Build())
+	}
+}
+
+//nolint:staticcheck // intentionally reads deprecated trait fields for backwards compatibility
+func syncGroupTraitToResource(r *v2.Resource, gt *v2.GroupTrait) {
+	if gt.HasProfile() && !r.HasProfile() {
+		r.SetProfile(gt.GetProfile())
+	}
+	if gt.HasIcon() && !r.HasIcon() {
+		r.SetIcon(gt.GetIcon())
+	}
+}
+
+//nolint:staticcheck // intentionally reads deprecated trait fields for backwards compatibility
+func syncRoleTraitToResource(r *v2.Resource, rt *v2.RoleTrait) {
+	if rt.HasProfile() && !r.HasProfile() {
+		r.SetProfile(rt.GetProfile())
+	}
+}
+
+//nolint:staticcheck // intentionally reads deprecated trait fields for backwards compatibility
+func syncAppTraitToResource(r *v2.Resource, at *v2.AppTrait) {
+	if at.HasProfile() && !r.HasProfile() {
+		r.SetProfile(at.GetProfile())
+	}
+	if at.HasIcon() && !r.HasIcon() {
+		r.SetIcon(at.GetIcon())
+	}
+}
+
+//nolint:staticcheck // intentionally reads deprecated trait fields for backwards compatibility
+func syncSecretTraitToResource(r *v2.Resource, st *v2.SecretTrait) {
+	if st.HasProfile() && !r.HasProfile() {
+		r.SetProfile(st.GetProfile())
+	}
+	if st.HasCreatedAt() && !r.HasCreatedAt() {
+		r.SetCreatedAt(st.GetCreatedAt())
+	}
+}
+
+//nolint:staticcheck // intentionally reads deprecated trait fields for backwards compatibility
+func syncAgentTraitToResource(r *v2.Resource, at *v2.AgentTrait) {
+	if at.HasProfile() && !r.HasProfile() {
+		r.SetProfile(at.GetProfile())
+	}
+	if at.GetStatus() != v2.AgentTrait_AGENT_STATUS_UNSPECIFIED && !r.HasStatus() {
+		// AgentTrait_AgentStatus is a numeric prefix of Status_ResourceStatus
+		// (READY maps to ENABLED); new AgentStatus values must not reuse
+		// ResourceStatus numbers with different meanings.
+		r.SetStatus(v2.Status_builder{
+			Status: v2.Status_ResourceStatus(at.GetStatus()),
+		}.Build())
+	}
+}
+
 func WithUserTrait(opts ...UserTraitOption) ResourceOption {
 	return func(r *v2.Resource) error {
 		var err error
@@ -87,6 +209,7 @@ func WithUserTrait(opts ...UserTraitOption) ResourceOption {
 
 		annos.Update(ut)
 		r.SetAnnotations(annos)
+		syncUserTraitToResource(r, ut)
 		return nil
 	}
 }
@@ -110,6 +233,7 @@ func WithGroupTrait(opts ...GroupTraitOption) ResourceOption {
 
 		annos.Update(ut)
 		r.SetAnnotations(annos)
+		syncGroupTraitToResource(r, ut)
 		return nil
 	}
 }
@@ -133,6 +257,7 @@ func WithRoleTrait(opts ...RoleTraitOption) ResourceOption {
 
 		annos.Update(rt)
 		r.SetAnnotations(annos)
+		syncRoleTraitToResource(r, rt)
 
 		return nil
 	}
@@ -190,6 +315,7 @@ func WithAppTrait(opts ...AppTraitOption) ResourceOption {
 
 		annos.Update(at)
 		r.SetAnnotations(annos)
+		syncAppTraitToResource(r, at)
 
 		return nil
 	}
@@ -214,9 +340,72 @@ func WithSecretTrait(opts ...SecretTraitOption) ResourceOption {
 
 		annos.Update(rt)
 		r.SetAnnotations(annos)
+		syncSecretTraitToResource(r, rt)
 
 		return nil
 	}
+}
+
+func WithManagedDeviceTrait(opts ...ManagedDeviceTraitOption) ResourceOption {
+	return func(r *v2.Resource) error {
+		rt := &v2.ManagedDeviceTrait{}
+
+		annos := annotations.Annotations(r.GetAnnotations())
+		_, err := annos.Pick(rt)
+		if err != nil {
+			return err
+		}
+
+		for _, o := range opts {
+			err := o(rt)
+			if err != nil {
+				return err
+			}
+		}
+
+		annos.Update(rt)
+		r.SetAnnotations(annos)
+
+		return nil
+	}
+}
+
+// WithNHIType adds or updates a NonHumanIdentityTrait annotation on a
+// resource, marking it as a non-human identity. It is kind-agnostic and may
+// be combined with any resource trait (e.g. TRAIT_APP or TRAIT_ROLE).
+func WithNHIType(nhiType v2.NonHumanIdentityTrait_NhiType, detail string) ResourceOption {
+	return func(r *v2.Resource) error {
+		nhi := &v2.NonHumanIdentityTrait{}
+
+		annos := annotations.Annotations(r.GetAnnotations())
+		_, err := annos.Pick(nhi)
+		if err != nil {
+			return err
+		}
+
+		nhi.SetNhiType(nhiType)
+		nhi.SetNhiDetail(detail)
+
+		annos.Update(nhi)
+		r.SetAnnotations(annos)
+
+		return nil
+	}
+}
+
+// GetNonHumanIdentityTrait returns the NonHumanIdentityTrait from a resource's
+// annotations.
+func GetNonHumanIdentityTrait(resource *v2.Resource) (*v2.NonHumanIdentityTrait, error) {
+	ret := &v2.NonHumanIdentityTrait{}
+	annos := annotations.Annotations(resource.GetAnnotations())
+	ok, err := annos.Pick(ret)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("non-human identity trait was not found on resource")
+	}
+	return ret, nil
 }
 
 // WithAliases sets the aliases id for a resource.
@@ -435,6 +624,23 @@ func NewSecretResource(
 	opts ...ResourceOption,
 ) (*v2.Resource, error) {
 	opts = append(opts, WithSecretTrait(traitOpts...))
+
+	ret, err := NewResource(name, resourceType, objectID, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func NewManagedDeviceResource(
+	name string,
+	resourceType *v2.ResourceType,
+	objectID interface{},
+	traitOpts []ManagedDeviceTraitOption,
+	opts ...ResourceOption,
+) (*v2.Resource, error) {
+	opts = append(opts, WithManagedDeviceTrait(traitOpts...))
 
 	ret, err := NewResource(name, resourceType, objectID, opts...)
 	if err != nil {

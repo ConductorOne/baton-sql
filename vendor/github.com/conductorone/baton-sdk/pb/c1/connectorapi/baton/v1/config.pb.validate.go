@@ -57,6 +57,8 @@ func (m *GetConnectorConfigRequest) validate(all bool) error {
 
 	var errors []error
 
+	// no validation rules for RequestedVersion
+
 	if len(errors) > 0 {
 		return GetConnectorConfigRequestMultiError(errors)
 	}
@@ -188,6 +190,39 @@ func (m *GetConnectorConfigResponse) validate(all bool) error {
 				cause:  err,
 			}
 		}
+	}
+
+	if all {
+		switch v := interface{}(m.GetServedPolicyEnvelope()).(type) {
+		case interface{ ValidateAll() error }:
+			if err := v.ValidateAll(); err != nil {
+				errors = append(errors, GetConnectorConfigResponseValidationError{
+					field:  "ServedPolicyEnvelope",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		case interface{ Validate() error }:
+			if err := v.Validate(); err != nil {
+				errors = append(errors, GetConnectorConfigResponseValidationError{
+					field:  "ServedPolicyEnvelope",
+					reason: "embedded message failed validation",
+					cause:  err,
+				})
+			}
+		}
+	} else if v, ok := interface{}(m.GetServedPolicyEnvelope()).(interface{ Validate() error }); ok {
+		if err := v.Validate(); err != nil {
+			return GetConnectorConfigResponseValidationError{
+				field:  "ServedPolicyEnvelope",
+				reason: "embedded message failed validation",
+				cause:  err,
+			}
+		}
+	}
+
+	if m.ConfigVersion != nil {
+		// no validation rules for ConfigVersion
 	}
 
 	if len(errors) > 0 {

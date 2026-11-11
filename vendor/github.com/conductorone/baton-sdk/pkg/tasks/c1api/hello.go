@@ -12,6 +12,7 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	v1 "github.com/conductorone/baton-sdk/pb/c1/connectorapi/baton/v1"
+	"github.com/conductorone/baton-sdk/pkg/sdk"
 	"github.com/conductorone/baton-sdk/pkg/tasks"
 	"github.com/conductorone/baton-sdk/pkg/types"
 	"github.com/conductorone/baton-sdk/pkg/uotel"
@@ -27,7 +28,9 @@ type helloTaskHandler struct {
 	helpers helloHelpers
 }
 
-func (c *helloTaskHandler) osInfo(ctx context.Context) (*v1.BatonServiceHelloRequest_OSInfo, error) {
+// collectOSInfo queries gopsutil for host info and fills in conservative
+// defaults for any fields the Hello request marks as required.
+func collectOSInfo(ctx context.Context) (*v1.BatonServiceHelloRequest_OSInfo, error) {
 	l := ctxzap.Extract(ctx)
 
 	info, err := host.InfoWithContext(ctx)
@@ -77,12 +80,15 @@ func (c *helloTaskHandler) osInfo(ctx context.Context) (*v1.BatonServiceHelloReq
 	}.Build(), nil
 }
 
-func (c *helloTaskHandler) buildInfo(ctx context.Context) *v1.BatonServiceHelloRequest_BuildInfo {
+// collectBuildInfo reads runtime/debug build metadata, falling back to safe
+// placeholder values when a field is missing.
+func collectBuildInfo(ctx context.Context) *v1.BatonServiceHelloRequest_BuildInfo {
 	l := ctxzap.Extract(ctx)
 	buildInfo := v1.BatonServiceHelloRequest_BuildInfo_builder{
 		LangVersion:    "0.0.0",
 		Package:        "/dummy/path",
 		PackageVersion: "0.0.0",
+		SdkVersion:     sdk.Version,
 	}.Build()
 
 	bi, ok := debug.ReadBuildInfo()
@@ -112,6 +118,29 @@ func (c *helloTaskHandler) buildInfo(ctx context.Context) *v1.BatonServiceHelloR
 	return buildInfo
 }
 
+// sendHello performs a single Hello RPC. It is the shared implementation used
+// by both the startup handshake (taskID == "") and server-scheduled HelloTasks
+// dispatched through Process (taskID == the task's id).
+func sendHello(ctx context.Context, cc types.ConnectorClient, svc batonHelloClient, taskID string) error {
+	mdResp, err := cc.GetMetadata(ctx, &v2.ConnectorServiceGetMetadataRequest{})
+	if err != nil {
+		return err
+	}
+
+	osInfo, err := collectOSInfo(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = svc.Hello(ctx, v1.BatonServiceHelloRequest_builder{
+		TaskId:            taskID,
+		BuildInfo:         collectBuildInfo(ctx),
+		OsInfo:            osInfo,
+		ConnectorMetadata: mdResp.GetMetadata(),
+	}.Build())
+	return err
+}
+
 func (c *helloTaskHandler) HandleTask(ctx context.Context) error {
 	ctx, span := tracer.Start(ctx, "helloTaskHandler.HandleTask")
 	var err error
@@ -125,29 +154,11 @@ func (c *helloTaskHandler) HandleTask(ctx context.Context) error {
 		zap.Stringer("task_type", tasks.GetType(c.task)),
 	)
 
-	cc := c.helpers.ConnectorClient()
-	mdResp, err := cc.GetMetadata(ctx, &v2.ConnectorServiceGetMetadataRequest{})
-	if err != nil {
-		return err
-	}
-
-	taskID := c.task.GetId()
-
-	osInfo, err := c.osInfo(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = c.helpers.HelloClient().Hello(ctx, v1.BatonServiceHelloRequest_builder{
-		TaskId:            taskID,
-		BuildInfo:         c.buildInfo(ctx),
-		OsInfo:            osInfo,
-		ConnectorMetadata: mdResp.GetMetadata(),
-	}.Build())
+	err = sendHello(ctx, c.helpers.ConnectorClient(), c.helpers.HelloClient(), c.task.GetId())
 	if err != nil {
 		l.Error("failed while sending hello", zap.Error(err))
 		return err
 	}
-
 	return nil
 }
 

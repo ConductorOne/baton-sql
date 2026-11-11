@@ -50,6 +50,14 @@ func (c Config) extractTraits(rtID string) ([]v2.ResourceType_Trait, error) {
 		traits = append(traits, v2.ResourceType_TRAIT_APP)
 	}
 
+	if rt.List.Map.Traits.Secret != nil {
+		traits = append(traits, v2.ResourceType_TRAIT_SECRET)
+	}
+
+	if rt.List.Map.Traits.Agent != nil {
+		traits = append(traits, v2.ResourceType_TRAIT_AGENT)
+	}
+
 	return traits, nil
 }
 

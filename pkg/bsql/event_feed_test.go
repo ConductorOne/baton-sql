@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/glebarez/go-sqlite"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
 
 	"google.golang.org/protobuf/proto"
 
@@ -35,8 +35,12 @@ func newEventTestSyncer(t *testing.T, db *sql.DB, resourceIDExpr string) *SQLSyn
 	celEnv, err := bcel.NewEnv(t.Context())
 	require.NoError(t, err)
 	return &SQLSyncer{
-		db:       db,
-		dbEngine: database.SQLite,
+		db:            db,
+		dbs:           map[string]*sql.DB{"primary": db},
+		dbNames:       []string{"primary"},
+		primaryDBName: "primary",
+		currentDBName: "primary",
+		dbEngine:      database.SQLite,
 		config: ResourceType{
 			List: &ListQuery{
 				Map: &ResourceMapping{Id: resourceIDExpr},
@@ -719,10 +723,14 @@ func newListEventsSyncer(t *testing.T, db *sql.DB, rt ResourceType) *SQLSyncer {
 	celEnv, err := bcel.NewEnv(t.Context())
 	require.NoError(t, err)
 	return &SQLSyncer{
-		db:       db,
-		dbEngine: database.SQLite,
-		config:   rt,
-		env:      celEnv,
+		db:            db,
+		dbs:           map[string]*sql.DB{"primary": db},
+		dbNames:       []string{"primary"},
+		primaryDBName: "primary",
+		currentDBName: "primary",
+		dbEngine:      database.SQLite,
+		config:        rt,
+		env:           celEnv,
 	}
 }
 

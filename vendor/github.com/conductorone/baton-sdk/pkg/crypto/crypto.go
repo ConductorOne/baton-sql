@@ -6,6 +6,7 @@ import (
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/crypto/providers"
+	"github.com/conductorone/baton-sdk/pkg/crypto/providers/jwe"
 	"github.com/conductorone/baton-sdk/pkg/crypto/providers/jwk"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -39,7 +40,7 @@ func (pkem *EncryptionManager) Encrypt(ctx context.Context, cred *v2.PlaintextDa
 	encryptedDatas := make([]*v2.EncryptedData, 0, len(pkem.configs))
 
 	for _, config := range pkem.configs {
-		provider, err := providers.GetEncryptionProviderForConfig(ctx, config)
+		provider, err := providers.GetEncryptorForConfig(ctx, config)
 		if err != nil {
 			return nil, err
 		}
@@ -60,6 +61,47 @@ func NewEncryptionManager(co *v2.CredentialOptions, ec []*v2.EncryptionConfig) (
 		configs: ec,
 	}
 	return em, nil
+}
+
+// ValidateEncryptionConfigs checks that every supplied encryption config names a
+// recipient that can be encrypted to. IssueCredential calls it before the
+// connector mints, because issuance always returns a plaintext value to encrypt.
+// CreateAccount and RotateCredential call it only when the connector returned at
+// least one plaintext value, so a zero-output operation is not failed by a config
+// it never uses. An empty list is valid; a nil entry, an unknown provider, or a
+// config the provider rejects is not.
+func ValidateEncryptionConfigs(ec []*v2.EncryptionConfig) error {
+	for i, config := range ec {
+		if config == nil {
+			return status.Errorf(codes.InvalidArgument, "encryption config %d is empty", i)
+		}
+		provider, err := providers.GetEncryptorForConfig(context.Background(), config)
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid encryption config %d: %v", i, err)
+		}
+		if _, ok := provider.(*jwe.Provider); ok && len(ec) != 1 {
+			return status.Error(codes.InvalidArgument, "JWE credential issuance requires exactly one encryption config")
+		}
+		if validator, ok := provider.(providers.EncryptionConfigValidator); ok {
+			if err := validator.ValidateConfig(context.Background(), config); err != nil {
+				return status.Errorf(codes.InvalidArgument, "invalid encryption config %d: %v", i, err)
+			}
+		}
+	}
+	return nil
+}
+
+func ValidateCredentialOutputCardinality(ec []*v2.EncryptionConfig, count int) error {
+	for _, config := range ec {
+		provider, err := providers.GetEncryptorForConfig(context.Background(), config)
+		if err != nil {
+			return err
+		}
+		if _, ok := provider.(*jwe.Provider); ok && count != 1 {
+			return status.Error(codes.Internal, "JWE issuance returned an unexpected value count; reconcile the issued credential without retrying issuance")
+		}
+	}
+	return nil
 }
 
 func decryptPassword(ctx context.Context, encryptedPassword *v2.EncryptedData, decryptionConfig *providers.DecryptionConfig) (string, error) {

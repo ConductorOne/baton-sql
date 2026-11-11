@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -16,21 +17,33 @@ import (
 )
 
 const (
-	userTraitType  = "user"
-	appTraitType   = "app"
-	groupTraitType = "group"
-	roleTraitType  = "role"
+	userTraitType   = "user"
+	appTraitType    = "app"
+	groupTraitType  = "group"
+	roleTraitType   = "role"
+	secretTraitType = "secret"
+	agentTraitType  = "agent"
+
+	scopeCluster        = "cluster"
+	dbIterPageStateType = "db-iter"
+	rowColDatabase      = "database"
 )
 
 var _ connectorbuilder.ResourceTargetedSyncer = (*SQLSyncer)(nil)
 
+// SQLSyncer mutates db / currentDBName between query passes during multi-database
+// iteration. Safe because the SDK calls List/Entitlements/Grants serially per syncer.
 type SQLSyncer struct {
-	resourceType *v2.ResourceType
-	db           *sql.DB
-	dbEngine     database.DbEngine
-	config       ResourceType
-	env          *bcel.Env
-	fullConfig   Config
+	resourceType  *v2.ResourceType
+	db            *sql.DB
+	currentDBName string
+	dbs           map[string]*sql.DB
+	dbNames       []string
+	primaryDBName string
+	dbEngine      database.DbEngine
+	config        ResourceType
+	env           *bcel.Env
+	fullConfig    Config
 }
 
 func (s *SQLSyncer) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -58,13 +71,16 @@ func (s *SQLSyncer) Get(ctx context.Context, resourceId *v2.ResourceId, parentRe
 	vars[resourceIdKey] = resourceId.GetResource()
 
 	var result *v2.Resource
-	_, err = s.runQuery(ctx, &pagination.Token{}, s.config.Get.Query, nil, vars, func(ctx context.Context, row map[string]interface{}) (bool, error) {
-		r, err := s.mapResource(ctx, row)
-		if err != nil {
-			return false, err
-		}
-		result = r
-		return false, nil // stop after first row
+	// Get runs against the primary database only, even when multiple databases are configured.
+	_, err = s.iterateDBs(ctx, scopeCluster, &pagination.Token{}, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, s.db, innerToken, s.config.Get.Query, nil, vars, func(ctx context.Context, row map[string]interface{}) (bool, error) {
+			r, err := s.mapResource(ctx, row)
+			if err != nil {
+				return false, err
+			}
+			result = r
+			return false, nil // stop after first row
+		})
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("baton-sql: failed to execute get query for %s/%s: %w", resourceId.GetResourceType(), resourceId.GetResource(), err)
@@ -75,7 +91,36 @@ func (s *SQLSyncer) Get(ctx context.Context, resourceId *v2.ResourceId, parentRe
 	return result, nil, nil
 }
 
-func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
+// setCurrentDB errors on unknown names rather than silently falling back; the previous
+// fallback could mask a programming bug by routing queries to an unintended database.
+func (s *SQLSyncer) setCurrentDB(name string) error {
+	db, ok := s.dbs[name]
+	if !ok {
+		return fmt.Errorf("setCurrentDB: unknown database %q (configured: %v)", name, s.dbNames)
+	}
+	s.db = db
+	s.currentDBName = name
+	return nil
+}
+
+func sortedDBNames(dbs map[string]*sql.DB) []string {
+	names := make([]string, 0, len(dbs))
+	for name := range dbs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (c Config) GetSQLSyncers(ctx context.Context, dbs map[string]*sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env) ([]connectorbuilder.ResourceSyncer, error) {
+	if len(dbs) == 0 {
+		return nil, fmt.Errorf("GetSQLSyncers: no database handles provided")
+	}
+
+	dbNames := sortedDBNames(dbs)
+	primaryDBName := dbNames[0]
+	primaryDB := dbs[primaryDBName]
+
 	var ret []connectorbuilder.ResourceSyncer
 	for rtID, rtConfig := range c.ResourceTypes {
 		rt, err := c.GetResourceType(ctx, rtID)
@@ -87,15 +132,19 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 
 		// If the resource type has account provisioning, use for account provisioning
 		if rtConfig.AccountProvisioning != nil {
-			rv = newUserSyncer(rt, rtConfig, db, dbEngine, celEnv, c)
+			rv = newUserSyncer(rt, rtConfig, dbs, dbNames, primaryDBName, dbEngine, celEnv, c)
 		} else {
 			rv = &SQLSyncer{
-				resourceType: rt,
-				config:       rtConfig,
-				db:           db,
-				dbEngine:     dbEngine,
-				env:          celEnv,
-				fullConfig:   c,
+				resourceType:  rt,
+				config:        rtConfig,
+				db:            primaryDB,
+				currentDBName: primaryDBName,
+				dbs:           dbs,
+				dbNames:       dbNames,
+				primaryDBName: primaryDBName,
+				dbEngine:      dbEngine,
+				env:           celEnv,
+				fullConfig:    c,
 			}
 		}
 		ret = append(ret, rv)
@@ -104,13 +153,22 @@ func (c Config) GetSQLSyncers(ctx context.Context, db *sql.DB, dbEngine database
 	return ret, nil
 }
 
-func NewActionSyncer(ctx context.Context, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) (*SQLSyncer, error) {
+func NewActionSyncer(ctx context.Context, dbs map[string]*sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) (*SQLSyncer, error) {
+	if len(dbs) == 0 {
+		return nil, fmt.Errorf("NewActionSyncer: no database handles provided")
+	}
+	dbNames := sortedDBNames(dbs)
+	primaryDBName := dbNames[0]
 	return &SQLSyncer{
-		resourceType: nil,
-		db:           db,
-		dbEngine:     dbEngine,
-		env:          celEnv,
-		fullConfig:   fullConfig,
+		resourceType:  nil,
+		db:            dbs[primaryDBName],
+		currentDBName: primaryDBName,
+		dbs:           dbs,
+		dbNames:       dbNames,
+		primaryDBName: primaryDBName,
+		dbEngine:      dbEngine,
+		env:           celEnv,
+		fullConfig:    fullConfig,
 	}, nil
 }
 

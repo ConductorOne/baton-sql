@@ -88,6 +88,30 @@ type DatabaseConfig struct {
 
 	// Params contains additional connection parameters (e.g., {"sslmode": "disable", "timeout": "30s"})
 	Params map[string]string `yaml:"params" json:"params"`
+
+	// Databases opts the connector into per-database iteration: each list/entitlements/grants
+	// query runs once per named database. Leave unset for single-database connectors.
+	Databases *DatabasesConfig `yaml:"databases,omitempty" json:"databases,omitempty"`
+}
+
+type DatabasesConfig struct {
+	Static []string `yaml:"static,omitempty" json:"static,omitempty"`
+
+	// DiscoveryQuery is run against an admin handle (the DSN's Database field) before
+	// the per-database handles are opened; its first column is the list of database names.
+	DiscoveryQuery string `yaml:"discovery_query,omitempty" json:"discovery_query,omitempty"`
+}
+
+func (d *DatabasesConfig) Validate() error {
+	hasStatic := len(d.Static) > 0
+	hasDiscovery := d.DiscoveryQuery != ""
+	if hasStatic && hasDiscovery {
+		return errors.New("databases: only one of static or discovery_query may be set")
+	}
+	if !hasStatic && !hasDiscovery {
+		return errors.New("databases: at least one of static or discovery_query must be set")
+	}
+	return nil
 }
 
 // ResourceType defines configuration for a specific type of resource.
@@ -140,6 +164,10 @@ type ListQuery struct {
 
 	// Map specifies how to map raw query columns to standardized resource fields.
 	Map *ResourceMapping `yaml:"map" json:"map"`
+
+	// Scope = "cluster" opts a query out of per-database iteration; otherwise the query
+	// runs once per database. Ignored when connect.databases is unset.
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 }
 
 // ResourceMapping defines how to map SQL query results to resource properties.
@@ -156,8 +184,26 @@ type ResourceMapping struct {
 	// Traits defines specific attribute mappings for various resource subtypes (e.g., user, role).
 	Traits *Traits `yaml:"traits" json:"traits"`
 
+	// NonHumanIdentity marks the resource as a non-human identity (K3). It is
+	// kind-agnostic: it attaches a NonHumanIdentityTrait annotation alongside
+	// whatever primary trait (if any) the resource carries, so it lives here as
+	// a sibling of Traits rather than inside it.
+	NonHumanIdentity *NonHumanIdentityMapping `yaml:"non_human_identity,omitempty" json:"non_human_identity,omitempty"`
+
 	// Annotations includes additional metadata such as entitlement immutability and external links.
 	Annotations *Annotations `yaml:"annotations" json:"annotations"`
+}
+
+// NonHumanIdentityMapping declares that a resource is a non-human identity (K3).
+// Both fields are CEL expressions evaluated against the query row.
+type NonHumanIdentityMapping struct {
+	// NhiType is the kind of non-human identity.
+	// Supported values: app_registration, assumable_role, managed_identity.
+	NhiType string `yaml:"nhi_type" json:"nhi_type"`
+
+	// NhiDetail is a free-form descriptor of the identity, conventionally
+	// "<platform>.<object>" (e.g. "aws.iam_role").
+	NhiDetail string `yaml:"nhi_detail,omitempty" json:"nhi_detail,omitempty"`
 }
 
 // Annotations holds extra metadata for resource or grant mappings.
@@ -182,6 +228,50 @@ type Traits struct {
 
 	// User contains trait mappings for user resources.
 	User *UserTraitMapping `yaml:"user" json:"user"`
+
+	// Secret contains trait mappings for secret/credential resources (K1).
+	Secret *SecretTraitMapping `yaml:"secret,omitempty" json:"secret,omitempty"`
+
+	// Agent contains trait mappings for AI-agent resources.
+	Agent *AgentTraitMapping `yaml:"agent,omitempty" json:"agent,omitempty"`
+}
+
+// SecretTraitMapping defines attribute mappings for secret/credential resources (K1).
+// All fields are CEL expressions evaluated against the query row.
+type SecretTraitMapping struct {
+	// CredentialType classifies the secret.
+	// Supported values: static_secret, asymmetric_key, certificate.
+	CredentialType string `yaml:"credential_type" json:"credential_type"`
+
+	// CredentialDetail is a free-form descriptor of the credential,
+	// conventionally "<platform>.<object>" (e.g. "postgres.api_token").
+	CredentialDetail string `yaml:"credential_detail,omitempty" json:"credential_detail,omitempty"`
+
+	// ExpiresAt records when the credential expires (parsed using the DB engine's time format).
+	ExpiresAt string `yaml:"expires_at,omitempty" json:"expires_at,omitempty"`
+
+	// LastUsedAt records when the credential was last used.
+	LastUsedAt string `yaml:"last_used_at,omitempty" json:"last_used_at,omitempty"`
+}
+
+// AgentTraitMapping defines attribute mappings for AI-agent resources.
+// String fields are CEL expressions evaluated against the query row.
+type AgentTraitMapping struct {
+	// Status is the agent's lifecycle status.
+	// Supported values: ready (active, enabled), disabled (inactive), deleted.
+	Status string `yaml:"status,omitempty" json:"status,omitempty"`
+
+	// IdentityResourceType is the resource type of the identity the agent
+	// authenticates as. Required (together with IdentityResourceID) to set the
+	// agent's identity reference.
+	IdentityResourceType string `yaml:"identity_resource_type,omitempty" json:"identity_resource_type,omitempty"`
+
+	// IdentityResourceID is the resource id of the identity the agent
+	// authenticates as.
+	IdentityResourceID string `yaml:"identity_resource_id,omitempty" json:"identity_resource_id,omitempty"`
+
+	// Profile is a set of key-value pairs representing agent profile attributes.
+	Profile map[string]string `yaml:"profile,omitempty" json:"profile,omitempty"`
 }
 
 // UserTraitMapping defines attribute mappings specifically for user resources.
@@ -280,6 +370,8 @@ type EntitlementsQuery struct {
 
 	// Map contains mappings that interpret query results as entitlement objects.
 	Map []*EntitlementMapping `yaml:"map" json:"map"`
+
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 }
 
 // EntitlementMapping defines how query results are mapped to an entitlement.
@@ -311,15 +403,39 @@ type EntitlementMapping struct {
 
 	// Provisioning contains the configuration for granting and revoking this entitlement.
 	Provisioning *EntitlementProvisioning `yaml:"provisioning,omitempty" json:"provisioning,omitempty"`
+
+	// ExclusionGroup declares that this entitlement belongs to a mutually
+	// exclusive group on its parent resource. Temporary shape: emitted as a
+	// hand-rolled c1.connector.v2.EntitlementExclusionGroup Any annotation
+	// until the upstream baton-sdk type lands and the encoding can be replaced
+	// with annotations.Update(&v2.EntitlementExclusionGroup{...}).
+	ExclusionGroup *ExclusionGroupMapping `yaml:"exclusion_group,omitempty" json:"exclusion_group,omitempty"`
+}
+
+// ExclusionGroupMapping is the temporary YAML shape for the
+// c1.connector.v2.EntitlementExclusionGroup annotation. All three fields
+// are CEL expressions evaluated against the entitlement row.
+type ExclusionGroupMapping struct {
+	// Id is the opaque exclusion group identifier (proto field 1, string).
+	Id string `yaml:"id" json:"id"`
+
+	// Order is an optional ordering hint within the group (proto field 2, uint32).
+	Order string `yaml:"order,omitempty" json:"order,omitempty"`
+
+	// IsDefault marks this entitlement as the group's default (proto field 3, bool).
+	IsDefault string `yaml:"is_default,omitempty" json:"is_default,omitempty"`
+
+	// ScopeToResource indicates whether to scope the exclusion group to a resource on static entitlement (proto field 4, bool).
+	IsScopeToResource string `yaml:"is_scope_to_resource,omitempty" json:"is_scope_to_resource,omitempty"`
 }
 
 // EntitlementProvisioning defines settings and queries for entitlement provisioning.
 type EntitlementProvisioning struct {
 	// Grant defines the SQL queries and settings for granting this entitlement.
-	Grant *EntitlementProvisioningQueries `yaml:"grant,omitempty" json:"grant,omitempty"`
+	Grant *GrantEntitlementProvisioningQueries `yaml:"grant,omitempty" json:"grant,omitempty"`
 
 	// Revoke defines the SQL queries and settings for revoking this entitlement.
-	Revoke *EntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
+	Revoke *RevokeEntitlementProvisioningQueries `yaml:"revoke,omitempty" json:"revoke,omitempty"`
 
 	// Vars provides variables that can be used within provisioning SQL queries.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
@@ -330,11 +446,76 @@ type EntitlementProvisioningQueries struct {
 	// NoTransaction indicates whether the provisioning queries should be executed without a transaction.
 	NoTransaction bool `yaml:"no_transaction,omitempty" json:"no_transaction,omitempty"`
 
-	// ValidationQueries is a list of SQL statements to execute for validating the provisioning operation before execution.
+	// ValidationQueries is a list of SQL statements run before the provisioning queries.
+	// A query returning no rows fails the operation (an existence precondition), unless
+	// ValidationQueriesSignalIdempotency opts into the DDL no-rows-means-idempotent behavior.
 	ValidationQueries []string `yaml:"validation_queries,omitempty" json:"validation_queries,omitempty"`
+
+	// ValidationQueriesSignalIdempotency opts this entitlement into treating a no-rows
+	// ValidationQueries result as an idempotent success (GrantAlreadyExists on grant,
+	// GrantAlreadyRevoked on revoke) instead of a failed precondition. The reinterpretation
+	// only applies on DDL engines whose GRANT/REVOKE don't report rows-affected (Db2, Oracle);
+	// Db2 does it by default and ignores this flag, so this opt-in is only needed on Oracle. On
+	// every other engine a no-rows result still fails loudly regardless of this flag. Default off.
+	//
+	// Warning: when enabled, do NOT use ValidationQueries as existence preconditions
+	// (e.g. "does this user/role exist?"). A no-rows result is reported as idempotent
+	// success, so a missing or mistyped principal is silently swallowed instead of erroring.
+	// Write the query so no-rows genuinely means "already in the desired state": for a grant,
+	// check the membership is missing; for a revoke, check it is present.
+	ValidationQueriesSignalIdempotency bool `yaml:"validation_queries_signal_idempotency,omitempty" json:"validation_queries_signal_idempotency,omitempty"`
 
 	// Queries is a list of SQL statements to execute for the provisioning operation.
 	Queries []string `yaml:"queries,omitempty" json:"queries,omitempty"`
+}
+
+// RevokeOptions holds optional revoke-only behavior beyond the shared provisioning queries.
+type RevokeOptions struct {
+	// PrincipalExistsCheck probes whether the principal still exists after the revoke queries run.
+	// No rows means the principal was deleted as a side effect of the revoke.
+	PrincipalExistsCheck *PrincipalExistsCheck `yaml:"principal_exists_check,omitempty" json:"principal_exists_check,omitempty"`
+}
+
+// PrincipalExistsCheck configures a probe query that reports whether the principal still exists after a revoke.
+type PrincipalExistsCheck struct {
+	// Query runs with the same provisioning vars once the revoke queries have committed.
+	// Returning at least one row means the principal still exists;
+	// returning no rows means it was deleted as a side effect of the revoke.
+	// A query that fails does not fail the revoke; the deletion just goes unreported.
+	Query string `yaml:"query" json:"query"`
+}
+
+type GrantReplaceProvisioningQueries struct {
+	// Query is the SQL statement used to retrieve grant
+	Query string `yaml:"query" json:"query"`
+	// Map contains mappings to interpret each row of the query result as a grant.
+	Map []*GrantMapping `yaml:"map" json:"map"`
+}
+
+type GrantRejectIfProvisioningQuery struct {
+	// Query is the SQL statement used to determine whether to reject the grant.
+	Query string `yaml:"query" json:"query"`
+
+	// Reason is a CEL expression evaluated against the first returned row.
+	Reason string `yaml:"reason" json:"reason"`
+}
+
+type GrantEntitlementProvisioningQueries struct {
+	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
+
+	// RejectIf defines a policy query that intentionally rejects the grant when it returns at least one row.
+	RejectIf *GrantRejectIfProvisioningQuery `yaml:"reject_if,omitempty" json:"reject_if,omitempty"`
+
+	// GrantReplaceProvisioningQueries defines the SQL queries and settings for replacing existing grants with the new grant during provisioning.
+	GrantReplace *GrantReplaceProvisioningQueries `yaml:"grant_replace,omitempty" json:"grant_replace,omitempty"`
+}
+
+// RevokeEntitlementProvisioningQueries extends the shared provisioning query fields with revoke-only behavior.
+type RevokeEntitlementProvisioningQueries struct {
+	EntitlementProvisioningQueries `yaml:",inline" json:",inline"`
+
+	// RevokeOptions groups optional revoke-only settings such as principal_exists_check.
+	RevokeOptions *RevokeOptions `yaml:"revoke_options,omitempty" json:"revoke_options,omitempty"`
 }
 
 // GrantsQuery defines the structure for querying existing entitlement grants.
@@ -351,6 +532,8 @@ type GrantsQuery struct {
 
 	// Map contains mappings to interpret each row of the query result as a grant.
 	Map []*GrantMapping `yaml:"map" json:"map"`
+
+	Scope string `yaml:"scope,omitempty" json:"scope,omitempty"`
 
 	// EventFeed defines settings for detecting changed grants via the event feed.
 	EventFeed *GrantsEventFeed `yaml:"event_feed,omitempty" json:"event_feed,omitempty"`
@@ -375,6 +558,9 @@ type GrantMapping struct {
 
 	// Expandable indicates whether the grant should be expanded.
 	Expandable *ExpandableGrant `yaml:"expandable,omitempty" json:"expandable,omitempty"`
+
+	// EntitlementResourceId is used for grant replace on grant action
+	EntitlementResourceId string `yaml:"entitlement_resource_id" json:"entitlement_resource_id"`
 }
 
 type ExpandableGrant struct {
@@ -426,12 +612,37 @@ type NoPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
 }
 
+// PasswordConstraintConfig defines a character set constraint for random password generation.
+type PasswordConstraintConfig struct {
+	// CharSet is the set of characters that must appear in the generated password.
+	CharSet string `yaml:"char_set" json:"char_set"`
+
+	// MinCount is the minimum number of characters from CharSet that the password must contain.
+	// Must be greater than zero.
+	MinCount int `yaml:"min_count" json:"min_count"`
+}
+
 // RandomPasswordConfig defines configuration for random password generation.
 type RandomPasswordConfig struct {
 	BaseCredentialConfig `yaml:",inline"`
-	MaxLength            int    `yaml:"max_length" json:"max_length"`
-	MinLength            int    `yaml:"min_length" json:"min_length"`
+
+	// Deprecated: MaxLength  is not implemented and has no effect.
+	// The actual password length is determined by the platform via LocalCredentialOptions.
+	MaxLength int `yaml:"max_length" json:"max_length"`
+
+	// Deprecated: MinLength is not implemented and has no effect.
+	// The actual password length is determined by the platform via LocalCredentialOptions.
+	MinLength int `yaml:"min_length" json:"min_length"`
+
+	// Deprecated: DisallowedCharacters is not implemented and has no effect.
+	// Use Constraints to restrict which characters appear in generated passwords.
 	DisallowedCharacters string `yaml:"disallowed_characters" json:"disallowed_characters"`
+
+	// Constraints defines the character set rules enforced when generating a random password.
+	// Each entry specifies a character set and the minimum number of characters from that set
+	// that must appear in the generated password. When set, these constraints replace any
+	// constraints provided by the platform.
+	Constraints []PasswordConstraintConfig `yaml:"constraints,omitempty" json:"constraints,omitempty"`
 }
 
 // EncryptedPasswordConfig defines configuration for encrypted password generation.

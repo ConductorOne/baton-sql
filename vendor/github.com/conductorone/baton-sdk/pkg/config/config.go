@@ -12,6 +12,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/cli"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/connectorrunner"
+	"github.com/conductorone/baton-sdk/pkg/exit"
 	"github.com/conductorone/baton-sdk/pkg/field"
 	"github.com/conductorone/baton-sdk/pkg/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
@@ -20,21 +21,19 @@ import (
 	"go.uber.org/zap"
 )
 
-func RunConnector[T field.Configurable](
-	ctx context.Context,
-	connectorName string,
-	version string,
-	schema field.Configuration,
-	cf cli.NewConnector[T],
-	options ...connectorrunner.Option,
-) {
-	f := func(ctx context.Context, cfg T, runTimeOpts cli.RunTimeOpts) (types.ConnectorServer, error) {
+func connectorOptsFromRunTime(runTimeOpts cli.RunTimeOpts) *cli.ConnectorOpts {
+	return &cli.ConnectorOpts{
+		TokenSource:         runTimeOpts.TokenSource,
+		SelectedAuthMethod:  runTimeOpts.SelectedAuthMethod,
+		SyncResourceTypeIDs: runTimeOpts.SyncResourceTypeIDs,
+		EgressPolicy:        runTimeOpts.EgressPolicy,
+	}
+}
+
+func runConnectorFunc[T field.Configurable](cf cli.NewConnector[T]) cli.GetConnectorFunc2[T] {
+	return func(ctx context.Context, cfg T, runTimeOpts cli.RunTimeOpts) (types.ConnectorServer, error) {
 		l := ctxzap.Extract(ctx)
-		connector, builderOpts, err := cf(ctx, cfg, &cli.ConnectorOpts{
-			TokenSource:         runTimeOpts.TokenSource,
-			SelectedAuthMethod:  runTimeOpts.SelectedAuthMethod,
-			SyncResourceTypeIDs: runTimeOpts.SyncResourceTypeIDs,
-		})
+		connector, builderOpts, err := cf(ctx, cfg, connectorOptsFromRunTime(runTimeOpts))
 		if err != nil {
 			return nil, err
 		}
@@ -48,20 +47,30 @@ func RunConnector[T field.Configurable](
 		}
 		return c, nil
 	}
+}
+
+func RunConnector[T field.Configurable](
+	ctx context.Context,
+	connectorName string,
+	version string,
+	schema field.Configuration,
+	cf cli.NewConnector[T],
+	options ...connectorrunner.Option,
+) {
+	f := runConnectorFunc(cf)
 
 	_, cmd, err := DefineConfigurationV2(ctx, connectorName, f, schema, options...)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
+		exit.LogExit(err)
 		return
 	}
 
 	cmd.Version = version
+	cmd.AddCommand(cli.NewCheckUpdateCommand(ctx, connectorName, version))
 
 	err = cmd.Execute()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
+		exit.LogExit(err)
 	}
 }
 
@@ -215,7 +224,11 @@ func DefineConfigurationV2[T field.Configurable](
 	if err != nil {
 		return nil, nil, err
 	}
-	if defaultConnector == nil {
+	defaultCapabilitiesFactory, err := connectorrunner.ExtractDefaultCapabilitiesConnectorFactory(ctx, options...)
+	if err != nil {
+		return nil, nil, err
+	}
+	if defaultConnector == nil && defaultCapabilitiesFactory == nil {
 		_, err = cli.AddCommand(mainCMD, v, &schema, &cobra.Command{
 			Use:   "capabilities",
 			Short: "Get connector capabilities",
@@ -281,7 +294,7 @@ func verifyStructFields[T field.Configurable](schema field.Configuration) error 
 		return nil
 	}
 	configType := reflect.TypeOf(config)
-	if configType.Kind() == reflect.Ptr {
+	if configType.Kind() == reflect.Pointer {
 		configType = configType.Elem()
 	}
 	if configType.Kind() != reflect.Struct {

@@ -1,0 +1,56 @@
+---
+# C1 agent-authored v1 golden fixture (Postgres, sync-only).
+# Secrets must live in C1 map values, not in this YAML.
+#
+# Expected c1 sql_connector_map_values keys:
+#   DB_HOST, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD
+#
+# SaaS network: customer DB must allowlist ConductorOne documented egress IPs.
+app_name: Golden Postgres
+app_description: Sync-only Postgres users for C1 SQL catalog golden path
+
+connect:
+  scheme: postgres
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: ${DB_DATABASE}
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  params:
+    # require: default for C1 SaaS / public-internet customer DBs (TLS).
+    # disable: only for non-TLS local lab DBs — not the golden path.
+    sslmode: require
+
+resource_types:
+  user:
+    name: User
+    description: A user row in the database
+    list:
+      query: |
+        SELECT
+          u.id,
+          u.username,
+          u.email,
+          u.status
+        FROM users u
+      pagination:
+        strategy: offset
+        primary_key: id
+      map:
+        # Resource id must be a stable immutable PK (not a renameable login).
+        id: ".id"
+        display_name: ".username"
+        description: ".email"
+        traits:
+          user:
+            status: ".status"
+            login: ".username"
+            emails:
+              - ".email"
+    static_entitlements:
+      - id: member
+        display_name: "'Member'"
+        description: "'Application member'"
+        purpose: assignment
+        grantable_to:
+          - user

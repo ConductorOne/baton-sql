@@ -1,7 +1,5 @@
 # This file is managed by baton-admin. DO NOT EDIT!!!
 version: "2"
-run:
-  modules-download-mode: readonly
 linters:
   default: none
   enable:
@@ -40,6 +38,9 @@ linters:
   settings:
     exhaustive:
       default-signifies-exhaustive: true
+    goconst:
+      # goconst v1.9.0 reports literals inside composite literals. Call is the upstream default; keep it.
+      exclude-types: [Call, CompositeLit]
     gocritic:
       enabled-checks:
         - ruleguard

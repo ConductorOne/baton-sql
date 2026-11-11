@@ -7,6 +7,7 @@ import (
 	"time"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/ratelimit"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -47,9 +48,10 @@ func NewRetryer(ctx context.Context, config RetryConfig) *Retryer {
 }
 
 func (r *Retryer) ShouldWaitAndRetry(ctx context.Context, err error) bool {
-	ctx, span := tracer.Start(ctx, "retry.ShouldWaitAndRetry")
-	defer span.End()
-
+	// Fast paths that are not actually retrying skip span emission. The
+	// success path is hit once per completed action in the syncer loop,
+	// which historically inflated long-running sync traces by thousands
+	// of no-op spans.
 	if err == nil {
 		r.mu.Lock()
 		r.attempts = 0
@@ -59,6 +61,9 @@ func (r *Retryer) ShouldWaitAndRetry(ctx context.Context, err error) bool {
 	if status.Code(err) != codes.Unavailable && status.Code(err) != codes.DeadlineExceeded {
 		return false
 	}
+
+	ctx, span := tracer.Start(ctx, "retry.ShouldWaitAndRetry")
+	defer span.End()
 
 	r.mu.Lock()
 	r.attempts++
@@ -84,6 +89,7 @@ func (r *Retryer) ShouldWaitAndRetry(ctx context.Context, err error) bool {
 	}
 
 	// If error contains rate limit data, use that instead
+	rateLimited := false
 	if st, ok := status.FromError(err); ok {
 		details := st.Details()
 		for _, detail := range details {
@@ -96,6 +102,7 @@ func (r *Retryer) ShouldWaitAndRetry(ctx context.Context, err error) bool {
 				if remaining <= 0 {
 					// No requests remaining, so we need to wait until the reset time.
 					wait = waitResetAt
+					rateLimited = true
 					break
 				}
 				// Divide the wait time by the remaining requests to get the time to wait per request.
@@ -104,6 +111,7 @@ func (r *Retryer) ShouldWaitAndRetry(ctx context.Context, err error) bool {
 				waitResetAt = time.Duration(math.Ceil(waitResetAt.Seconds())) * time.Second
 				if waitResetAt > 0 {
 					wait = waitResetAt
+					rateLimited = true
 					break
 				}
 			}
@@ -116,12 +124,19 @@ func (r *Retryer) ShouldWaitAndRetry(ctx context.Context, err error) bool {
 
 	l.Warn("retrying operation", zap.Error(err), zap.Duration("wait", wait))
 
-	for {
-		select {
-		case <-time.After(wait):
-			return true
-		case <-ctx.Done():
-			return false
-		}
+	// Report actual slept time after the fact via the context wait observer
+	// (the same channel the rate-limit gates use — one reporting mechanism
+	// for every in-process sleep site): a cancelled context cuts the sleep
+	// short and must not inflate wait stats with the planned duration.
+	// Contexts without an observer (e.g. connectorbuilder's connector-side
+	// retryers) make this a no-op.
+	waitStart := time.Now()
+	select {
+	case <-time.After(wait):
+		ratelimit.ObserveWait(ctx, ratelimit.WaitEvent{Duration: wait, Retry: !rateLimited})
+		return true
+	case <-ctx.Done():
+		ratelimit.ObserveWait(ctx, ratelimit.WaitEvent{Duration: time.Since(waitStart), Retry: !rateLimited})
+		return false
 	}
 }

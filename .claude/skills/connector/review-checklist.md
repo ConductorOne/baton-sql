@@ -23,7 +23,7 @@ For each resource type (users, groups, roles):
 - [ ] Implements `ResourceSyncer` interface correctly
 - [ ] Registered with `connectorbuilder.WithResourceSyncers()`
 - [ ] Returns `ResourceType()` with correct traits
-- [ ] `List()` handles empty results without error
+- [ ] `List()` returns an empty page without error when the API genuinely has no items — but never after an error (an empty result plus a nil error is read as deletions)
 - [ ] `Entitlements()` returns at least one entitlement for membership resources
 - [ ] `Grants()` returns grants linking principals to entitlements
 
@@ -82,9 +82,11 @@ return resources, resp.NextPage, nil, nil
 
 **Entity sources (CRITICAL - #1 bug pattern):**
 - [ ] User/account ID comes from `principal.Id.Resource`
-- [ ] Context (workspace/org) comes from `principal.ParentResourceId.Resource`
+- [ ] Context (workspace/org) comes from `principal.ParentResourceId.Resource`, unless the target owns its scope (below)
 - [ ] Role/group ID comes from `entitlement.Resource.Id.Resource`
-- [ ] NO use of `entitlement.Resource.ParentResourceId` for context
+- [ ] NO unchecked use of `entitlement.Resource.ParentResourceId` for context
+- [ ] Target-owned scope only (the target belongs to one fixed scope, e.g. a GitHub team's org): context from `entitlement.Resource.ParentResourceId` is OK when the parent was set by this connector's sync, is nil-checked and parsed, and the vendor call is scoped to both scope and target (org+team). See `patterns-entity-sources.md#exception-target-owned-scope`
+- [ ] Target-owned operations are NOT routed through `principal.ParentResourceId` (the mirror bug: a parentless or multi-org user gives no valid scope)
 
 **Idempotency:**
 - [ ] Grant handles "already exists" as success
@@ -93,7 +95,7 @@ return resources, resp.NextPage, nil, nil
 **Revoke specifically:**
 - [ ] Uses `grant.Principal` for principal info
 - [ ] Uses `grant.Entitlement` for entitlement info
-- [ ] Context still from `grant.Principal.ParentResourceId`
+- [ ] Context still from `grant.Principal.ParentResourceId` (target-owned scope: checked `grant.Entitlement.Resource.ParentResourceId`, as above)
 
 ---
 
@@ -131,6 +133,14 @@ rs.NewUserResource(user.Name, userType, user.Email, ...)
 // CORRECT - use stable ID
 rs.NewUserResource(user.Name, userType, user.ID, ...)
 ```
+
+---
+
+## API Surface Check
+
+- [ ] **Schema change flagged** - any change to the connector's OpenAPI spec is called out in review, and the author confirms it matches the client code
+
+Nothing verifies the spec against the live provider, so a schema change needs a human to look at it. See `build-openapi-spec.md`.
 
 ---
 
@@ -176,9 +186,14 @@ Ask yourself:
 
 ## Review Comment Templates
 
-**For entity source bugs:**
+**For entity source bugs (principal-scoped operations):**
 ```
 This gets the workspace from `entitlement.Resource.ParentResourceId` but it should come from `principal.ParentResourceId`. The principal's context determines where the grant happens.
+```
+
+**For the mirror bug (target-owned operations):**
+```
+This routes the call through `principal.ParentResourceId`, but the target belongs to one fixed scope (e.g. the team's org), not the user's. A parentless or multi-org user gives no valid scope here. Read the scope from `entitlement.Resource.ParentResourceId` with a nil check and parse, and make the vendor call scoped to both scope and target (see patterns-entity-sources.md#exception-target-owned-scope).
 ```
 
 **For pagination bugs:**

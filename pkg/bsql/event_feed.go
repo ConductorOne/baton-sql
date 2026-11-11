@@ -220,38 +220,41 @@ func (f *SQLEventFeed) processResourceChangePage(
 		resourceIDExpr = rc.ResourceId
 	}
 
-	npt, err := s.runQuery(ctx, pToken, rc.Query, rc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		inputs := s.env.SyncInputs(rowMap)
-		resourceID, evalErr := s.env.EvaluateString(ctx, resourceIDExpr, inputs)
-		if evalErr != nil {
-			return false, fmt.Errorf("baton-sql: failed to evaluate resource ID in resource event feed: %w", evalErr)
-		}
-
-		rowTimestamp := since
-		if ts, ok := rowMap[rc.CursorColumn]; ok {
-			t, parseErr := toTime(ts)
-			if parseErr != nil {
-				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in resource event feed: %w", rc.CursorColumn, ts, parseErr)
+	// Event feed queries run against the primary database only, even when multiple databases are configured.
+	npt, err := s.iterateDBs(ctx, scopeCluster, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, s.db, innerToken, rc.Query, rc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			inputs := s.env.SyncInputs(rowMap)
+			resourceID, evalErr := s.env.EvaluateString(ctx, resourceIDExpr, inputs)
+			if evalErr != nil {
+				return false, fmt.Errorf("baton-sql: failed to evaluate resource ID in resource event feed: %w", evalErr)
 			}
-			rowTimestamp = t
-			if t.After(maxSeen) {
-				maxSeen = t
-			}
-		}
 
-		rowKey := grantRowKey(rowMap, rc.Pagination)
-		event := v2.Event_builder{
-			Id:         fmt.Sprintf("resource:%s:%s:%s:%s", source.ResourceType, resourceID, rowTimestamp.UTC().Format(time.RFC3339Nano), rowKey),
-			OccurredAt: timestamppb.New(rowTimestamp),
-			ResourceChangeEvent: v2.ResourceChangeEvent_builder{
-				ResourceId: &v2.ResourceId{
-					ResourceType: source.ResourceType,
-					Resource:     resourceID,
-				},
-			}.Build(),
-		}.Build()
-		events = append(events, event)
-		return true, nil
+			rowTimestamp := since
+			if ts, ok := rowMap[rc.CursorColumn]; ok {
+				t, parseErr := toTime(ts)
+				if parseErr != nil {
+					return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in resource event feed: %w", rc.CursorColumn, ts, parseErr)
+				}
+				rowTimestamp = t
+				if t.After(maxSeen) {
+					maxSeen = t
+				}
+			}
+
+			rowKey := grantRowKey(rowMap, rc.Pagination)
+			event := v2.Event_builder{
+				Id:         fmt.Sprintf("resource:%s:%s:%s:%s", source.ResourceType, resourceID, rowTimestamp.UTC().Format(time.RFC3339Nano), rowKey),
+				OccurredAt: timestamppb.New(rowTimestamp),
+				ResourceChangeEvent: v2.ResourceChangeEvent_builder{
+					ResourceId: &v2.ResourceId{
+						ResourceType: source.ResourceType,
+						Resource:     resourceID,
+					},
+				}.Build(),
+			}.Build()
+			events = append(events, event)
+			return true, nil
+		})
 	})
 	if err != nil {
 		return nil, "", time.Time{}, fmt.Errorf("baton-sql: failed to list resource changes: %w", err)
@@ -293,68 +296,71 @@ func (f *SQLEventFeed) processGrantPage(
 	var events []*v2.Event
 	var maxSeen time.Time
 
-	npt, err := s.runQuery(ctx, pToken, query, gc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		rowTimestamp := since
-		if ts, ok := rowMap[cursorCol]; ok {
-			t, parseErr := toTime(ts)
-			if parseErr != nil {
-				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in grant event feed: %w", cursorCol, ts, parseErr)
-			}
-			rowTimestamp = t
-			if t.After(maxSeen) {
-				maxSeen = t
-			}
-		}
-
-		inputs := s.env.SyncInputs(rowMap)
-		resourceID, evalErr := s.env.EvaluateString(ctx, gc.ResourceId, inputs)
-		if evalErr != nil {
-			return false, fmt.Errorf("baton-sql: failed to evaluate resource_id in grant event feed: %w", evalErr)
-		}
-
-		minimalResource := &v2.Resource{
-			Id: &v2.ResourceId{ResourceType: source.ResourceType, Resource: resourceID},
-		}
-
-		for _, mapping := range source.GrantMap {
-			grant, ok, mapErr := f.mapGrantFromRow(ctx, s, minimalResource, mapping, rowMap)
-			if mapErr != nil {
-				return false, mapErr
-			}
-			if !ok {
-				continue
+	// Event feed queries run against the primary database only, even when multiple databases are configured.
+	npt, err := s.iterateDBs(ctx, scopeCluster, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, s.db, innerToken, query, gc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			rowTimestamp := since
+			if ts, ok := rowMap[cursorCol]; ok {
+				t, parseErr := toTime(ts)
+				if parseErr != nil {
+					return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in grant event feed: %w", cursorCol, ts, parseErr)
+				}
+				rowTimestamp = t
+				if t.After(maxSeen) {
+					maxSeen = t
+				}
 			}
 
-			principalID := grant.GetPrincipal().GetId().GetResource()
-			entitlementID := grant.GetEntitlement().GetId()
-			tsStr := rowTimestamp.UTC().Format(time.RFC3339Nano)
-			rowKey := grantRowKey(rowMap, gc.Pagination)
-
-			var event *v2.Event
-			if isRevoke {
-				event = v2.Event_builder{
-					Id:         fmt.Sprintf("revoke:%s:%s:%s:%s:%s:%s", source.ResourceType, resourceID, entitlementID, principalID, tsStr, rowKey),
-					OccurredAt: timestamppb.New(rowTimestamp),
-					CreateRevokeEvent: v2.CreateRevokeEvent_builder{
-						Entitlement: grant.GetEntitlement(),
-						Principal:   grant.GetPrincipal(),
-						Annotations: grant.GetAnnotations(),
-					}.Build(),
-				}.Build()
-			} else {
-				event = v2.Event_builder{
-					Id:         fmt.Sprintf("grant:%s:%s:%s:%s:%s:%s", source.ResourceType, resourceID, entitlementID, principalID, tsStr, rowKey),
-					OccurredAt: timestamppb.New(rowTimestamp),
-					CreateGrantEvent: v2.CreateGrantEvent_builder{
-						Entitlement: grant.GetEntitlement(),
-						Principal:   grant.GetPrincipal(),
-						Annotations: grant.GetAnnotations(),
-					}.Build(),
-				}.Build()
+			inputs := s.env.SyncInputs(rowMap)
+			resourceID, evalErr := s.env.EvaluateString(ctx, gc.ResourceId, inputs)
+			if evalErr != nil {
+				return false, fmt.Errorf("baton-sql: failed to evaluate resource_id in grant event feed: %w", evalErr)
 			}
-			events = append(events, event)
-		}
-		return true, nil
+
+			minimalResource := &v2.Resource{
+				Id: &v2.ResourceId{ResourceType: source.ResourceType, Resource: resourceID},
+			}
+
+			for _, mapping := range source.GrantMap {
+				grant, ok, mapErr := f.mapGrantFromRow(ctx, s, minimalResource, mapping, rowMap)
+				if mapErr != nil {
+					return false, mapErr
+				}
+				if !ok {
+					continue
+				}
+
+				principalID := grant.GetPrincipal().GetId().GetResource()
+				entitlementID := grant.GetEntitlement().GetId()
+				tsStr := rowTimestamp.UTC().Format(time.RFC3339Nano)
+				rowKey := grantRowKey(rowMap, gc.Pagination)
+
+				var event *v2.Event
+				if isRevoke {
+					event = v2.Event_builder{
+						Id:         fmt.Sprintf("revoke:%s:%s:%s:%s:%s:%s", source.ResourceType, resourceID, entitlementID, principalID, tsStr, rowKey),
+						OccurredAt: timestamppb.New(rowTimestamp),
+						CreateRevokeEvent: v2.CreateRevokeEvent_builder{
+							Entitlement: grant.GetEntitlement(),
+							Principal:   grant.GetPrincipal(),
+							Annotations: grant.GetAnnotations(),
+						}.Build(),
+					}.Build()
+				} else {
+					event = v2.Event_builder{
+						Id:         fmt.Sprintf("grant:%s:%s:%s:%s:%s:%s", source.ResourceType, resourceID, entitlementID, principalID, tsStr, rowKey),
+						OccurredAt: timestamppb.New(rowTimestamp),
+						CreateGrantEvent: v2.CreateGrantEvent_builder{
+							Entitlement: grant.GetEntitlement(),
+							Principal:   grant.GetPrincipal(),
+							Annotations: grant.GetAnnotations(),
+						}.Build(),
+					}.Build()
+				}
+				events = append(events, event)
+			}
+			return true, nil
+		})
 	})
 	if err != nil {
 		return nil, "", time.Time{}, fmt.Errorf("baton-sql: failed to list grant changes: %w", err)

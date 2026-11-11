@@ -1,0 +1,308 @@
+package sync //nolint:revive,nolintlint // we can't change the package name for backwards compatibility
+
+import (
+	"sync"
+	"time"
+
+	"github.com/conductorone/baton-sdk/pkg/dotc1z/c1zstore"
+)
+
+// ConnectorCallStat contains cumulative latency statistics for one connector method.
+type ConnectorCallStat struct {
+	Count   int64 `json:"count"`
+	TotalMs int64 `json:"total_ms"`
+	MaxMs   int64 `json:"max_ms"`
+}
+
+// SessionStoreStat contains cumulative latency and outcome counters for one
+// session-store operation. Timeouts is the deadline-exceeded subset of
+// Errors; MaxMs pinned at a fixed value with Timeouts ≈ Count is the
+// signature of a backend whose every request times out.
+type SessionStoreStat struct {
+	Count    int64 `json:"count"`
+	Errors   int64 `json:"errors,omitempty"`
+	Timeouts int64 `json:"timeouts,omitempty"`
+	TotalMs  int64 `json:"total_ms"`
+	MaxMs    int64 `json:"max_ms"`
+}
+
+// IngestQualityCheckpoint is the checkpointed connector-ingestion quality
+// summary. A nil value means legacy/unknown provenance, not a clean sync.
+type IngestQualityCheckpoint struct {
+	SourceCacheReplayBlocked      bool   `json:"source_cache_replay_blocked,omitempty"`
+	EntitlementsDropped           uint64 `json:"entitlements_dropped,omitempty"`
+	GrantsDropped                 uint64 `json:"grants_dropped,omitempty"`
+	GrantResourcesDropped         uint64 `json:"grant_resources_dropped,omitempty"`
+	ExpansionResourceTypesDropped uint64 `json:"expansion_resource_types_dropped,omitempty"`
+	ExpansionsDropped             uint64 `json:"expansions_dropped,omitempty"`
+	InvalidResourceTypesObserved  uint64 `json:"invalid_resource_types_observed,omitempty"`
+	InvalidResourcesObserved      uint64 `json:"invalid_resources_observed,omitempty"`
+	InvalidEntitlementsObserved   uint64 `json:"invalid_entitlements_observed,omitempty"`
+	ReasonFlags                   uint64 `json:"reason_flags,omitempty"`
+}
+
+// runStats is a sync run's best-effort accounting: where wall time went,
+// what the connector and session store cost, how clean the ingestion was,
+// and — for a compacted artifact — which inputs produced it.
+//
+// Parallel workers write these counters from their own goroutines, so it
+// carries its own mutex. It is held apart from runState because none of it
+// steers the action stack, not because it is less durable — it rides the same
+// token. The field with reach past this type is ingest, which Sync restores
+// into ingestFilterStats on resume, where SourceCacheReplayBlocked decides
+// whether a later sync may replay from this artifact.
+type runStats struct {
+	mu              sync.RWMutex
+	stepDurationsMs map[string]int64
+	connectorCalls  map[string]*ConnectorCallStat
+	sessionOps      map[string]*SessionStoreStat
+	ingest          *IngestQualityCheckpoint
+	// compaction is provenance written by the sync compactor via
+	// BuildCompactedToken; the syncer itself never sets it. Held here so
+	// decoding and re-encoding a token (e.g. an expansion replay token)
+	// preserves it.
+	compaction *CompactionTokenStats
+
+	// This attempt's contribution alone. The maps above start from totals
+	// restored out of the store, so they cannot feed the ledger's run bucket,
+	// which is blind-written per (attempt, worker) and summed across attempts.
+	attemptStepDurationsMs map[string]int64
+	attemptSessionOps      map[string]*SessionStoreStat
+	attemptCounters        map[string]uint64
+}
+
+func newRunStats() *runStats {
+	return &runStats{
+		stepDurationsMs:        make(map[string]int64),
+		connectorCalls:         make(map[string]*ConnectorCallStat),
+		sessionOps:             make(map[string]*SessionStoreStat),
+		attemptStepDurationsMs: make(map[string]int64),
+		attemptSessionOps:      make(map[string]*SessionStoreStat),
+		attemptCounters:        make(map[string]uint64),
+	}
+}
+
+func (s *runStats) addStepDuration(bucket string, duration time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.stepDurationsMs == nil {
+		s.stepDurationsMs = make(map[string]int64)
+	}
+	if s.attemptStepDurationsMs == nil {
+		s.attemptStepDurationsMs = make(map[string]int64)
+	}
+	s.stepDurationsMs[bucket] += duration.Milliseconds()
+	s.attemptStepDurationsMs[bucket] += duration.Milliseconds()
+}
+
+// mergeStepDuration folds a duration already recorded durably elsewhere (a
+// worker bucket's connector-reported wait) into the cumulative view only. The
+// merge* methods never touch the attempt maps: what they merge is already in
+// another bucket, and the run bucket would count it twice.
+func (s *runStats) mergeStepDuration(bucket string, duration time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stepDurationsMs == nil {
+		s.stepDurationsMs = make(map[string]int64)
+	}
+	s.stepDurationsMs[bucket] += duration.Milliseconds()
+}
+
+func (s *runStats) addAttemptCounter(name string, n uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.attemptCounters == nil {
+		s.attemptCounters = make(map[string]uint64)
+	}
+	s.attemptCounters[name] += n
+}
+
+// attemptLedgerCounters is the attempt's run bucket: step durations, session
+// ops and completion counters recorded since this runStats was built, with no
+// restored totals mixed in.
+func (s *runStats) attemptLedgerCounters() c1zstore.LedgerCounters {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := c1zstore.LedgerCounters{
+		Counters:        make(map[string]uint64, len(s.attemptCounters)),
+		StepDurationsMs: make(map[string]int64, len(s.attemptStepDurationsMs)),
+		SessionCalls:    make(map[string]c1zstore.CallStat, len(s.attemptSessionOps)),
+	}
+	for name, n := range s.attemptCounters {
+		out.Counters[name] = n
+	}
+	for bucket, ms := range s.attemptStepDurationsMs {
+		out.StepDurationsMs[bucket] = ms
+	}
+	for op, stat := range s.attemptSessionOps {
+		if stat != nil {
+			out.SessionCalls[op] = c1zstore.CallStat{Count: stat.Count, Errors: stat.Errors, Timeouts: stat.Timeouts, TotalMs: stat.TotalMs, MaxMs: stat.MaxMs}
+		}
+	}
+	return out
+}
+
+func (s *runStats) stepDurations() map[string]int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]int64, len(s.stepDurationsMs))
+	for bucket, duration := range s.stepDurationsMs {
+		out[bucket] = duration
+	}
+	return out
+}
+
+func (s *runStats) recordConnectorCall(method string, duration time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.connectorCalls == nil {
+		s.connectorCalls = make(map[string]*ConnectorCallStat)
+	}
+	stat := s.connectorCalls[method]
+	if stat == nil {
+		stat = &ConnectorCallStat{}
+		s.connectorCalls[method] = stat
+	}
+	durationMs := duration.Milliseconds()
+	stat.Count++
+	stat.TotalMs += durationMs
+	if durationMs > stat.MaxMs {
+		stat.MaxMs = durationMs
+	}
+}
+
+// mergeConnectorCallStat folds pre-aggregated connector-call stats (e.g. a
+// compacted partial's totals) into method's cumulative counters.
+func (s *runStats) mergeConnectorCallStat(method string, add ConnectorCallStat) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.connectorCalls == nil {
+		s.connectorCalls = make(map[string]*ConnectorCallStat)
+	}
+	stat := s.connectorCalls[method]
+	if stat == nil {
+		stat = &ConnectorCallStat{}
+		s.connectorCalls[method] = stat
+	}
+	stat.Count += add.Count
+	stat.TotalMs += add.TotalMs
+	if add.MaxMs > stat.MaxMs {
+		stat.MaxMs = add.MaxMs
+	}
+}
+
+func (s *runStats) connectorCallStats() map[string]ConnectorCallStat {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]ConnectorCallStat, len(s.connectorCalls))
+	for method, stat := range s.connectorCalls {
+		if stat != nil {
+			out[method] = *stat
+		}
+	}
+	return out
+}
+
+func (s *runStats) recordSessionOp(op string, duration time.Duration, opErr error, timedOut bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.sessionOps == nil {
+		s.sessionOps = make(map[string]*SessionStoreStat)
+	}
+	if s.attemptSessionOps == nil {
+		s.attemptSessionOps = make(map[string]*SessionStoreStat)
+	}
+	durationMs := duration.Milliseconds()
+	for _, ops := range []map[string]*SessionStoreStat{s.sessionOps, s.attemptSessionOps} {
+		stat := ops[op]
+		if stat == nil {
+			stat = &SessionStoreStat{}
+			ops[op] = stat
+		}
+		stat.Count++
+		stat.TotalMs += durationMs
+		if durationMs > stat.MaxMs {
+			stat.MaxMs = durationMs
+		}
+		if opErr != nil {
+			stat.Errors++
+			if timedOut {
+				stat.Timeouts++
+			}
+		}
+	}
+}
+
+// mergeSessionStat folds pre-aggregated session stats (e.g. a connector's
+// per-request usage report) into op's cumulative counters.
+func (s *runStats) mergeSessionStat(op string, add SessionStoreStat) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.sessionOps == nil {
+		s.sessionOps = make(map[string]*SessionStoreStat)
+	}
+	stat := s.sessionOps[op]
+	if stat == nil {
+		stat = &SessionStoreStat{}
+		s.sessionOps[op] = stat
+	}
+	stat.Count += add.Count
+	stat.Errors += add.Errors
+	stat.Timeouts += add.Timeouts
+	stat.TotalMs += add.TotalMs
+	if add.MaxMs > stat.MaxMs {
+		stat.MaxMs = add.MaxMs
+	}
+}
+
+func (s *runStats) sessionStoreStats() map[string]SessionStoreStat {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make(map[string]SessionStoreStat, len(s.sessionOps))
+	for op, stat := range s.sessionOps {
+		if stat != nil {
+			out[op] = *stat
+		}
+	}
+	return out
+}
+
+func (s *runStats) setIngestQuality(quality *IngestQualityCheckpoint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ingest = cloneIngestQualityCheckpoint(quality)
+}
+
+func (s *runStats) ingestQuality() *IngestQualityCheckpoint {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return cloneIngestQualityCheckpoint(s.ingest)
+}
+
+func (s *runStats) setCompaction(stats *CompactionTokenStats) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.compaction = stats
+}
+
+func (s *runStats) compactionStats() *CompactionTokenStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.compaction
+}
+
+func cloneIngestQualityCheckpoint(in *IngestQualityCheckpoint) *IngestQualityCheckpoint {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}

@@ -43,32 +43,39 @@ func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) err
 	return nil
 }
 
+// validateScope rejects typos like `scope: clustr` that would silently downgrade to
+// per-database iteration. Empty (default) or "cluster" only.
+func validateScope(scope string) error {
+	switch scope {
+	case "", scopeCluster:
+		return nil
+	default:
+		return fmt.Errorf("invalid scope %q: must be empty or %q", scope, scopeCluster)
+	}
+}
+
 func (l *ListQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if err := validateScope(l.Scope); err != nil {
+		return err
+	}
 	return validateVarsInQuery(s, l.Query, l.Vars)
 }
 
 func (l *EntitlementsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if err := validateScope(l.Scope); err != nil {
+		return err
+	}
 	for _, mapping := range l.Map {
 		if mapping.Provisioning == nil {
 			continue
 		}
 
-		if mapping.Provisioning.Grant != nil {
-			for _, query := range mapping.Provisioning.Grant.Queries {
-				err := validateVarsInQuery(s, query, mapping.Provisioning.Vars)
-				if err != nil {
-					return err
-				}
-			}
+		if err := validateGrantProvisioningQueries(s, mapping.Provisioning.Grant, mapping.Provisioning.Vars); err != nil {
+			return err
 		}
 
-		if mapping.Provisioning.Revoke != nil {
-			for _, query := range mapping.Provisioning.Revoke.Queries {
-				err := validateVarsInQuery(s, query, mapping.Provisioning.Vars)
-				if err != nil {
-					return err
-				}
-			}
+		if err := validateRevokeProvisioningQueries(s, mapping.Provisioning.Revoke, mapping.Provisioning.Vars); err != nil {
+			return err
 		}
 	}
 
@@ -80,21 +87,93 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 		return nil
 	}
 
-	if l.Provisioning.Grant != nil {
-		for _, query := range l.Provisioning.Grant.Queries {
-			err := validateVarsInQuery(s, query, l.Provisioning.Vars)
-			if err != nil {
-				return err
-			}
+	if err := validateGrantProvisioningQueries(s, l.Provisioning.Grant, l.Provisioning.Vars); err != nil {
+		return err
+	}
+
+	if err := validateRevokeProvisioningQueries(s, l.Provisioning.Revoke, l.Provisioning.Vars); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateProvisioningIdempotency validates the validation_queries and the
+// validation_queries_signal_idempotency opt-in shared by grant and revoke. Validation queries are
+// always vars-checked. The opt-in is only valid on DDL engines (Db2, Oracle) and requires at least
+// one validation query. no_transaction is required whenever a no-rows validation is reinterpreted
+// as idempotent (Db2 by default, Oracle on opt-in): Db2/Oracle GRANT/REVOKE report no rows-affected
+// under a tx, which would roll the statement back.
+func validateProvisioningIdempotency(s *SQLSyncer, pq EntitlementProvisioningQueries, vars map[string]string) error {
+	for _, query := range pq.ValidationQueries {
+		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
 		}
 	}
 
-	if l.Provisioning.Revoke != nil {
-		for _, query := range l.Provisioning.Revoke.Queries {
-			err := validateVarsInQuery(s, query, l.Provisioning.Vars)
-			if err != nil {
-				return err
-			}
+	if pq.ValidationQueriesSignalIdempotency {
+		if !isDDLEngine(s.dbEngine) {
+			return errors.New("validation_queries_signal_idempotency is only supported on DDL engines (Db2, Oracle)")
+		}
+		if len(pq.ValidationQueries) < 1 {
+			return errors.New("validation_queries_signal_idempotency requires at least one validation_query")
+		}
+	}
+
+	if len(pq.ValidationQueries) > 0 &&
+		s.validationNoRowsMeansIdempotent(pq.ValidationQueriesSignalIdempotency) &&
+		!pq.NoTransaction {
+		return errors.New("validation_queries with no-rows idempotency require no_transaction: true on DDL engines (Db2/Oracle)")
+	}
+
+	return nil
+}
+
+func validateGrantProvisioningQueries(s *SQLSyncer, grant *GrantEntitlementProvisioningQueries, vars map[string]string) error {
+	if grant == nil {
+		return nil
+	}
+
+	if grant.RejectIf != nil {
+		if err := validateVarsInQuery(s, grant.RejectIf.Query, vars); err != nil {
+			return err
+		}
+	}
+
+	if err := validateProvisioningIdempotency(s, grant.EntitlementProvisioningQueries, vars); err != nil {
+		return err
+	}
+
+	for _, query := range grant.Queries {
+		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateRevokeProvisioningQueries(s *SQLSyncer, revoke *RevokeEntitlementProvisioningQueries, vars map[string]string) error {
+	if revoke == nil {
+		return nil
+	}
+
+	if err := validateProvisioningIdempotency(s, revoke.EntitlementProvisioningQueries, vars); err != nil {
+		return err
+	}
+
+	for _, query := range revoke.Queries {
+		if err := validateVarsInQuery(s, query, vars); err != nil {
+			return err
+		}
+	}
+
+	if revoke.RevokeOptions != nil && revoke.RevokeOptions.PrincipalExistsCheck != nil {
+		if revoke.RevokeOptions.PrincipalExistsCheck.Query == "" {
+			return errors.New("principal_exists_check requires a non-empty query")
+		}
+		if err := validateVarsInQuery(s, revoke.RevokeOptions.PrincipalExistsCheck.Query, vars); err != nil {
+			return err
 		}
 	}
 
@@ -102,12 +181,27 @@ func (l *EntitlementMapping) staticValidate(ctx context.Context, s *SQLSyncer) e
 }
 
 func (l *GrantsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if err := validateScope(l.Scope); err != nil {
+		return err
+	}
 	if err := validateVarsInQuery(s, l.Query, l.Vars); err != nil {
 		return err
 	}
 	if l.EventFeed != nil {
 		if err := l.EventFeed.staticValidate(ctx, s); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validatePasswordConstraints(constraints []PasswordConstraintConfig) error {
+	for i, c := range constraints {
+		if c.CharSet == "" {
+			return fmt.Errorf("random password constraint[%d]: char_set must not be empty", i)
+		}
+		if c.MinCount <= 0 {
+			return fmt.Errorf("random password constraint[%d]: min_count must be greater than zero", i)
 		}
 	}
 	return nil
@@ -125,16 +219,8 @@ func (l *AccountProvisioning) staticValidate(ctx context.Context, s *SQLSyncer) 
 	}
 
 	if l.Credentials.RandomPassword != nil {
-		if l.Credentials.RandomPassword.MaxLength <= 0 {
-			return errors.New("random password max_length must be greater than zero")
-		}
-
-		if l.Credentials.RandomPassword.MinLength <= 0 {
-			return errors.New("random password min_length must be greater than zero")
-		}
-
-		if l.Credentials.RandomPassword.MinLength > l.Credentials.RandomPassword.MaxLength {
-			return errors.New("random password min_length cannot be greater than max_length")
+		if err := validatePasswordConstraints(l.Credentials.RandomPassword.Constraints); err != nil {
+			return err
 		}
 	}
 
@@ -313,6 +399,17 @@ func (l *ActionConfig) staticValidate(ctx context.Context, s *SQLSyncer) error {
 
 	for k, config := range l.Arguments {
 		availableVars[k] = config.Type
+	}
+
+	// An action defines either `query` or `queries`; both forms are accepted by
+	// ActionConfig.Validate and by the action handler, so validate whichever is set.
+	if len(l.Queries) > 0 {
+		for _, query := range l.Queries {
+			if err := validateVarsInQuery(s, query, availableVars); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	return validateVarsInQuery(s, l.Query, availableVars)

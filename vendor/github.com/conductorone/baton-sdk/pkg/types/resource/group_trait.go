@@ -8,8 +8,25 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+type GroupSourceType string
+
+const (
+	GroupSourceTypeNative          GroupSourceType = "native"
+	GroupSourceTypeAppImported     GroupSourceType = "app_imported"
+	GroupSourceTypeBuiltIn         GroupSourceType = "built_in"
+	GroupSourceTypeDirectorySynced GroupSourceType = "directory_synced"
+	GroupSourceTypeDynamic         GroupSourceType = "dynamic"
+	GroupSourceTypeDistribution    GroupSourceType = "distribution"
+)
+
 type GroupTraitOption func(gt *v2.GroupTrait) error
 
+// WithGroupProfile sets the group's profile.
+//
+// Deprecated: profile has moved from GroupTrait to an attribute on Resource.
+// This option still works — it also populates the resource-level profile when
+// used with WithGroupTrait or NewGroupResource — but new code should use
+// WithResourceProfile instead.
 func WithGroupProfile(profile map[string]interface{}) GroupTraitOption {
 	return func(gt *v2.GroupTrait) error {
 		p, err := structpb.NewStruct(profile)
@@ -23,9 +40,29 @@ func WithGroupProfile(profile map[string]interface{}) GroupTraitOption {
 	}
 }
 
+// WithGroupIcon sets the group's icon.
+//
+// Deprecated: icon has moved from GroupTrait to an attribute on Resource.
+// This option still works — it also populates the resource-level icon when
+// used with WithGroupTrait or NewGroupResource — but new code should use
+// WithResourceIcon instead.
 func WithGroupIcon(assetRef *v2.AssetRef) GroupTraitOption {
 	return func(gt *v2.GroupTrait) error {
 		gt.SetIcon(assetRef)
+		return nil
+	}
+}
+
+func WithGroupSourceType(sourceType GroupSourceType) GroupTraitOption {
+	return func(gt *v2.GroupTrait) error {
+		gt.SetGroupSourceType(string(sourceType))
+		return nil
+	}
+}
+
+func WithRawGroupSourceType(raw string) GroupTraitOption {
+	return func(gt *v2.GroupTrait) error {
+		gt.SetRawGroupSourceType(raw)
 		return nil
 	}
 }

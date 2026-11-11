@@ -2,6 +2,8 @@ package field
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
 
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -9,6 +11,19 @@ import (
 	v1_conf "github.com/conductorone/baton-sdk/pb/c1/config/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+)
+
+// Same pattern as Field.content_type in proto/c1/config/v1/config.proto.
+// Validate isn't always called on the proto, so we validate in schemaFieldToV1().
+var contentTypePattern = regexp.MustCompile(`^[^/]+/[^/]+$`)
+var fieldTagPattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+
+const (
+	// Field.tags in proto/c1/config/v1/config.proto: at most 16 unique items, each 1-128 characters.
+	maxFieldTags   = 16
+	maxFieldTagLen = 128
+	// Field.content_type in proto/c1/config/v1/config.proto: at most 128 characters.
+	maxContentTypeLen = 128
 )
 
 var RelationshipToConstraintKind = map[Relationship]v1_conf.ConstraintKind{
@@ -164,7 +179,43 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 		IsRequired:  f.Required,
 		IsOps:       f.ExportTarget == ExportTargetOps,
 		IsSecret:    f.Secret,
+		ContentType: f.ContentType,
+		Tags:        f.Tags,
 	}.Build()
+
+	if f.ContentType != "" {
+		// Only StringVariant, StringSliceVariant, and StringMapVariant fields can have a content type.
+		if !slices.Contains([]Variant{StringVariant, StringSliceVariant, StringMapVariant}, f.Variant) {
+			return nil, fmt.Errorf("content type is not supported for field type '%s' in field '%s'", f.Variant, f.FieldName)
+		}
+		if len(f.ContentType) > maxContentTypeLen {
+			return nil, fmt.Errorf("invalid content type '%s' in field '%s': must be at most %d characters", f.ContentType, f.FieldName, maxContentTypeLen)
+		}
+		if !contentTypePattern.MatchString(f.ContentType) {
+			return nil, fmt.Errorf("invalid content type '%s' in field '%s': expected type/subtype", f.ContentType, f.FieldName)
+		}
+	}
+
+	if len(f.Tags) > maxFieldTags {
+		return nil, fmt.Errorf("field '%s' has too many tags: must be at most %d items", f.FieldName, maxFieldTags)
+	}
+
+	seen := make(map[string]struct{}, len(f.Tags))
+	for _, tag := range f.Tags {
+		if len(tag) == 0 {
+			return nil, fmt.Errorf("empty tag in field '%s'", f.FieldName)
+		}
+		if len(tag) > maxFieldTagLen {
+			return nil, fmt.Errorf("invalid tag '%s' in field '%s': must be at most %d characters", tag, f.FieldName, maxFieldTagLen)
+		}
+		if !fieldTagPattern.MatchString(tag) {
+			return nil, fmt.Errorf("invalid tag '%s' in field '%s': must match pattern ^[a-zA-Z0-9_.-]+$", tag, f.FieldName)
+		}
+		if _, ok := seen[tag]; ok {
+			return nil, fmt.Errorf("duplicate tag '%s' in field '%s'", tag, f.FieldName)
+		}
+		seen[tag] = struct{}{}
+	}
 
 	switch f.Variant {
 	case IntVariant:
@@ -175,6 +226,13 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 		}
 		if d != nil {
 			intField.SetDefaultValue(int64(*d))
+		}
+		s, err := GetSuggestedValue[int](f)
+		if err != nil {
+			return nil, err
+		}
+		if s != nil {
+			intField.SetSuggestedValue(int64(*s))
 		}
 
 		field.SetIntField(proto.ValueOrDefault(intField))
@@ -188,6 +246,13 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 		if d != nil {
 			boolField.SetDefaultValue(*d)
 		}
+		s, err := GetSuggestedValue[bool](f)
+		if err != nil {
+			return nil, err
+		}
+		if s != nil {
+			boolField.SetSuggestedValue(*s)
+		}
 		field.SetBoolField(proto.ValueOrDefault(boolField))
 	case StringSliceVariant:
 		stringSliceField := v1_conf.StringSliceField_builder{Rules: f.Rules.ss}.Build()
@@ -198,6 +263,13 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 		if d != nil {
 			stringSliceField.SetDefaultValue(*d)
 		}
+		s, err := GetSuggestedValue[[]string](f)
+		if err != nil {
+			return nil, err
+		}
+		if s != nil {
+			stringSliceField.SetSuggestedValue(*s)
+		}
 		field.SetStringSliceField(proto.ValueOrDefault(stringSliceField))
 	case StringMapVariant:
 		stringMapField := v1_conf.StringMapField_builder{Rules: f.Rules.sm}.Build()
@@ -206,21 +278,22 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 			return nil, err
 		}
 		if d != nil {
-			// Convert map[string]any to map[string]*anypb.Any
-			anyMap := make(map[string]*anypb.Any)
-			for k, v := range *d {
-				// Convert the value to a structpb.Value
-				value, err := structpb.NewValue(v)
-				if err != nil {
-					return nil, fmt.Errorf("failed to convert map value to structpb.Value: %w", err)
-				}
-				anyValue, err := anypb.New(value)
-				if err != nil {
-					return nil, fmt.Errorf("failed to convert structpb.Value to Any: %w", err)
-				}
-				anyMap[k] = anyValue
+			anyMap, err := anyMapFromStringMap(*d)
+			if err != nil {
+				return nil, err
 			}
 			stringMapField.SetDefaultValue(anyMap)
+		}
+		s, err := GetSuggestedValue[map[string]any](f)
+		if err != nil {
+			return nil, err
+		}
+		if s != nil {
+			anyMap, err := anyMapFromStringMap(*s)
+			if err != nil {
+				return nil, err
+			}
+			stringMapField.SetSuggestedValue(anyMap)
 		}
 		field.SetStringMapField(proto.ValueOrDefault(stringMapField))
 	case StringVariant:
@@ -231,6 +304,13 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 		}
 		if d != nil {
 			stringField.SetDefaultValue(*d)
+		}
+		sv, err := GetSuggestedValue[string](f)
+		if err != nil {
+			return nil, err
+		}
+		if sv != nil {
+			stringField.SetSuggestedValue(*sv)
 		}
 
 		switch f.ConnectorConfig.FieldType {
@@ -245,6 +325,8 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 		case FileUpload:
 			stringField.SetType(v1_conf.StringFieldType_STRING_FIELD_TYPE_FILE_UPLOAD)
 			stringField.SetAllowedExtensions(f.ConnectorConfig.BonusStrings)
+		case Multiline:
+			stringField.SetType(v1_conf.StringFieldType_STRING_FIELD_TYPE_MULTILINE)
 		default:
 			return nil, fmt.Errorf("invalid field type: '%s'", f.ConnectorConfig.FieldType)
 		}
@@ -255,4 +337,20 @@ func schemaFieldToV1(f SchemaField) (*v1_conf.Field, error) {
 	}
 
 	return field, nil
+}
+
+func anyMapFromStringMap(m map[string]any) (map[string]*anypb.Any, error) {
+	anyMap := make(map[string]*anypb.Any, len(m))
+	for k, v := range m {
+		value, err := structpb.NewValue(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert map value to structpb.Value: %w", err)
+		}
+		anyValue, err := anypb.New(value)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert structpb.Value to Any: %w", err)
+		}
+		anyMap[k] = anyValue
+	}
+	return anyMap, nil
 }

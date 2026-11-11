@@ -15,6 +15,8 @@ import (
 
 	"filippo.io/age"
 	"github.com/go-jose/go-jose/v4"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 )
@@ -30,12 +32,31 @@ func unmarshalJWK(jwkBytes []byte) (*jose.JSONWebKey, error) {
 	jwk := &jose.JSONWebKey{}
 	err := jwk.UnmarshalJSON(jwkBytes)
 	if err != nil {
-		return nil, fmt.Errorf("jwk: failed to unmarshal jwk: %w", err)
+		return nil, status.Errorf(codes.InvalidArgument, "jwk: failed to unmarshal jwk: %v", err)
 	}
 	return jwk, nil
 }
 
 type JWKEncryptionProvider struct{}
+
+func (j *JWKEncryptionProvider) ValidateConfig(_ context.Context, conf *v2.EncryptionConfig) error {
+	if conf == nil || conf.GetJwkPublicKeyConfig() == nil {
+		return status.Error(codes.InvalidArgument, "jwk: public key configuration is required")
+	}
+	if len(conf.GetJwkPublicKeyConfig().GetAdditionalAuthenticatedData()) != 0 {
+		return status.Error(codes.InvalidArgument, "jwk: authenticated data is not supported")
+	}
+	key, err := unmarshalJWK(conf.GetJwkPublicKeyConfig().GetPubKey())
+	if err != nil {
+		return err
+	}
+	switch key.Public().Key.(type) {
+	case ed25519.PublicKey, *ecdsa.PublicKey, *rsa.PublicKey:
+		return nil
+	default:
+		return ErrJWKUnsupportedKeyType
+	}
+}
 
 func (j *JWKEncryptionProvider) GenerateKey(ctx context.Context) (*v2.EncryptionConfig, *jose.JSONWebKey, error) {
 	_, privKey, err := ed25519.GenerateKey(nil)
@@ -72,6 +93,9 @@ func (j *JWKEncryptionProvider) marshalKey(ctx context.Context, privKeyJWK *jose
 }
 
 func (j *JWKEncryptionProvider) Encrypt(ctx context.Context, conf *v2.EncryptionConfig, plainText *v2.PlaintextData) (*v2.EncryptedData, error) {
+	if len(conf.GetJwkPublicKeyConfig().GetAdditionalAuthenticatedData()) != 0 {
+		return nil, status.Error(codes.InvalidArgument, "jwk: authenticated data is not supported")
+	}
 	jwk, err := unmarshalJWK(conf.GetJwkPublicKeyConfig().GetPubKey())
 	if err != nil {
 		return nil, err
@@ -107,7 +131,7 @@ func (j *JWKEncryptionProvider) Encrypt(ctx context.Context, conf *v2.Encryption
 
 	return v2.EncryptedData_builder{
 		Provider:       EncryptionProviderJwk,
-		KeyId:          tp,
+		KeyId:          tp, //nolint:staticcheck // deprecated for KeyIds below, still sent because a consumer may read either
 		Name:           plainText.GetName(),
 		Description:    plainText.GetDescription(),
 		Schema:         plainText.GetSchema(),

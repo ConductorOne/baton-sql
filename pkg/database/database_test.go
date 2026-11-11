@@ -4,8 +4,31 @@ package database
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 )
+
+func Test_ConnectMany_RejectsEmptyList(t *testing.T) {
+	_, _, err := ConnectMany(t.Context(), ConnectOptions{Scheme: "postgres"}, nil)
+	if err == nil {
+		t.Fatal("expected error for empty dbNames")
+	}
+	if !strings.Contains(err.Error(), "dbNames is empty") {
+		t.Errorf("expected dbNames error, got: %v", err)
+	}
+}
+
+func Test_ConnectMany_UnsupportedSchemePropagates(t *testing.T) {
+	// Use an unsupported scheme so Connect rejects each opts before any *sql.DB is opened.
+	// ConnectMany must propagate the error rather than swallow it.
+	_, _, err := ConnectMany(t.Context(), ConnectOptions{Scheme: "unsupported-engine"}, []string{"a", "b"})
+	if err == nil {
+		t.Fatal("expected unsupported-scheme error")
+	}
+	if !strings.Contains(err.Error(), "unsupported database scheme") {
+		t.Errorf("expected scheme error, got: %v", err)
+	}
+}
 
 func Test_updateDSNFromEnv(t *testing.T) {
 	type args struct {
@@ -525,7 +548,7 @@ func Test_expandDSN(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			got, err := expandDSN(tt.dsn)
+			got, err := expandDSN(tt.dsn, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("expandDSN() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -608,7 +631,7 @@ func Test_extractPlaceholders(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			gotSentinel, gotMapping, err := extractPlaceholders(tt.input)
+			gotSentinel, gotMapping, err := extractPlaceholders(tt.input, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("extractPlaceholders() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -777,6 +800,118 @@ func Test_buildConnectionURL(t *testing.T) {
 
 			if got.String() != tt.want {
 				t.Fatalf("buildConnectionURL() = %s, want %s", got.String(), tt.want)
+			}
+		})
+	}
+}
+
+func Test_buildConnectionURL_PostgresQueryExecMode(t *testing.T) {
+	const modeKey = "default_query_exec_mode"
+
+	tests := []struct {
+		name      string
+		opts      ConnectOptions
+		wantMode  string // empty means key must be absent
+		wantOther map[string]string
+	}{
+		{
+			name: "unset postgres DSN does not inject default_query_exec_mode",
+			opts: ConnectOptions{
+				DSN: "postgres://user:pass@localhost:5432/db",
+			},
+			wantMode: "",
+		},
+		{
+			name: "structured postgres with sslmode only has no mode key",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "db.example",
+				Port:     "5432",
+				Database: "app",
+				User:     "u",
+				Password: "p",
+				Params: map[string]string{
+					"sslmode": "require",
+				},
+			},
+			wantMode: "",
+			wantOther: map[string]string{
+				"sslmode": "require",
+			},
+		},
+		{
+			name: "DSN already sets cache_statement is preserved",
+			opts: ConnectOptions{
+				DSN: "postgres://user:pass@localhost:5432/db?default_query_exec_mode=cache_statement",
+			},
+			wantMode: "cache_statement",
+		},
+		{
+			name: "Params set exec is preserved",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "db.example",
+				Database: "app",
+				Params: map[string]string{
+					"default_query_exec_mode": "exec",
+				},
+			},
+			wantMode: "exec",
+		},
+		{
+			name: "Params set simple_protocol is preserved",
+			opts: ConnectOptions{
+				Scheme:   "postgres",
+				Host:     "db.example",
+				Database: "app",
+				Params: map[string]string{
+					"default_query_exec_mode": "simple_protocol",
+				},
+			},
+			wantMode: "simple_protocol",
+		},
+		{
+			name: "mysql scheme does not inject mode",
+			opts: ConnectOptions{
+				Scheme:   "mysql",
+				Host:     "db.example",
+				Port:     "3306",
+				Database: "app",
+				User:     "u",
+				Password: "p",
+			},
+			wantMode: "",
+		},
+		{
+			name: "mysql DSN does not inject mode",
+			opts: ConnectOptions{
+				DSN: "mysql://user:pass@localhost:3306/db",
+			},
+			wantMode: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildConnectionURL(tt.opts)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			q := got.Query()
+			gotMode := q.Get(modeKey)
+			if gotMode != tt.wantMode {
+				t.Fatalf("%s = %q, want %q (url=%s)", modeKey, gotMode, tt.wantMode, got.String())
+			}
+			if tt.wantMode == "" {
+				if _, ok := q[modeKey]; ok {
+					t.Fatalf("%s present when unset: %s", modeKey, got.String())
+				}
+			}
+			for k, want := range tt.wantOther {
+				if got := q.Get(k); got != want {
+					t.Fatalf("query %s = %q, want %q", k, got, want)
+				}
 			}
 		})
 	}

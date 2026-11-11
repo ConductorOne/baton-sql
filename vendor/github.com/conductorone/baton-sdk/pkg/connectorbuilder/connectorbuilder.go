@@ -22,6 +22,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/metrics"
 	"github.com/conductorone/baton-sdk/pkg/retry"
 	"github.com/conductorone/baton-sdk/pkg/sdk"
+	"github.com/conductorone/baton-sdk/pkg/session"
 	"github.com/conductorone/baton-sdk/pkg/types"
 	"github.com/conductorone/baton-sdk/pkg/types/sessions"
 	"github.com/conductorone/baton-sdk/pkg/types/tasks"
@@ -60,6 +61,16 @@ type ConnectorBuilderV2 interface {
 	ResourceSyncers(ctx context.Context) []ResourceSyncerV2
 }
 
+type closeHook func(context.Context) error
+
+type closeWithContext interface {
+	Close(context.Context) error
+}
+
+type closeWithoutContext interface {
+	Close() error
+}
+
 type builder struct {
 	ticketingEnabled        bool
 	m                       *metrics.M
@@ -75,9 +86,11 @@ type builder struct {
 	resourceDeleters        map[string]ResourceDeleterV2Limited
 	resourceTargetedSyncers map[string]ResourceTargetedSyncerLimited
 	credentialManagers      map[string]CredentialManagerLimited
+	credentialIssuers       map[string]CredentialIssuerLimited
 	eventFeeds              map[string]EventFeed
 	accountManagers         map[string]AccountManagerLimited
 	actionManager           ActionManager // Unified action manager for all actions
+	closeHook               closeHook
 }
 
 // NewConnector creates a new ConnectorServer for a new resource.
@@ -113,9 +126,11 @@ func NewConnector(ctx context.Context, in interface{}, opts ...Opt) (types.Conne
 		resourceDeleters:        make(map[string]ResourceDeleterV2Limited),
 		resourceTargetedSyncers: make(map[string]ResourceTargetedSyncerLimited),
 		credentialManagers:      make(map[string]CredentialManagerLimited),
+		credentialIssuers:       make(map[string]CredentialIssuerLimited),
 		eventFeeds:              make(map[string]EventFeed),
 		accountManagers:         make(map[string]AccountManagerLimited),
 		actionManager:           actionMgr,
+		closeHook:               closeHookFor(in),
 	}
 
 	// WithTicketingEnabled checks for the ticketManager
@@ -177,12 +192,19 @@ func NewConnector(ctx context.Context, in interface{}, opts ...Opt) (types.Conne
 			return err
 		}
 
+		if err := b.addCredentialIssuer(ctx, rType, rs); err != nil {
+			return err
+		}
+
 		return nil
 	}
 
 	if cb, ok := in.(ConnectorBuilder); ok {
 		for _, rb := range cb.ResourceSyncers(ctx) {
 			rType := rb.ResourceType(ctx)
+			if err := validateTypeScopedRegistration(rType, rb); err != nil {
+				return nil, err
+			}
 			if err := addResourceType(ctx, rType.GetId(), rb); err != nil {
 				return nil, err
 			}
@@ -193,6 +215,9 @@ func NewConnector(ctx context.Context, in interface{}, opts ...Opt) (types.Conne
 	if cb2, ok := in.(ConnectorBuilderV2); ok {
 		for _, rb := range cb2.ResourceSyncers(ctx) {
 			rType := rb.ResourceType(ctx)
+			if err := validateTypeScopedRegistration(rType, rb); err != nil {
+				return nil, err
+			}
 			if err := addResourceType(ctx, rType.GetId(), rb); err != nil {
 				return nil, err
 			}
@@ -255,6 +280,29 @@ func (b *builder) addConnectorBuilderProviders(_ context.Context, in interface{}
 	return nil
 }
 
+func closeHookFor(in any) closeHook {
+	if in == nil {
+		return nil
+	}
+
+	if closer, ok := in.(closeWithContext); ok {
+		return closer.Close
+	}
+	if closer, ok := in.(closeWithoutContext); ok {
+		return func(context.Context) error {
+			return closer.Close()
+		}
+	}
+	return nil
+}
+
+func (b *builder) Close(ctx context.Context) error {
+	if b.closeHook == nil {
+		return nil
+	}
+	return b.closeHook(ctx)
+}
+
 // GetMetadata gets all metadata for a connector.
 func (b *builder) GetMetadata(ctx context.Context, request *v2.ConnectorServiceGetMetadataRequest) (*v2.ConnectorServiceGetMetadataResponse, error) {
 	ctx, span := tracer.Start(ctx, "builder.GetMetadata")
@@ -298,24 +346,26 @@ func (b *builder) Validate(ctx context.Context, request *v2.ConnectorServiceVali
 	})
 
 	for {
-		annos, err := b.validateProvider.Validate(ctx)
-		if err == nil {
+		annos, validateErr := b.validateProvider.Validate(ctx)
+		if validateErr == nil {
 			return v2.ConnectorServiceValidateResponse_builder{
 				Annotations: annos,
 				SdkVersion:  sdk.Version,
 			}.Build(), nil
 		}
 
-		if retryer.ShouldWaitAndRetry(ctx, err) {
+		if retryer.ShouldWaitAndRetry(ctx, validateErr) {
 			continue
 		}
 
-		return nil, fmt.Errorf("validate failed: %w", err)
+		err = fmt.Errorf("validate failed: %w", validateErr)
+		return nil, err
 	}
 }
 
 func (b *builder) Cleanup(ctx context.Context, request *v2.ConnectorServiceCleanupRequest) (*v2.ConnectorServiceCleanupResponse, error) {
 	l := ctxzap.Extract(ctx)
+	ctx, sessionUsage := session.WithUsageCollector(ctx)
 	if b.sessionStore != nil {
 		// Limit c1z size before we upload, because the uploads time out...
 		//  TODO(kans): we could hold onto the session store if we are in debug mode.
@@ -332,6 +382,7 @@ func (b *builder) Cleanup(ctx context.Context, request *v2.ConnectorServiceClean
 		l.Warn("error clearing http caches", zap.Error(err))
 	}
 	resp := &v2.ConnectorServiceCleanupResponse{}
+	resp.SetAnnotations(appendSessionUsage(resp.GetAnnotations(), sessionUsage))
 	return resp, err
 }
 
@@ -367,6 +418,10 @@ func (b *builder) GetCapabilities(ctx context.Context) (*v2.ConnectorCapabilitie
 			caps = append(caps, v2.Capability_CAPABILITY_CREDENTIAL_ROTATION)
 		}
 
+		if _, exists := b.credentialIssuers[resourceTypeID]; exists {
+			caps = append(caps, v2.Capability_CAPABILITY_CREDENTIAL_ISSUE, v2.Capability_CAPABILITY_CREDENTIAL_ENCRYPTION_JWE_XWING_V1)
+		}
+
 		// Extend the capabilities with the resource type specificcapabilities
 		for _, cap := range caps {
 			connectorCaps[cap] = struct{}{}
@@ -379,12 +434,33 @@ func (b *builder) GetCapabilities(ctx context.Context) (*v2.ConnectorCapabilitie
 		if err != nil {
 			return nil, err
 		}
+		var issueDetails *v2.CredentialDetailsCredentialIssue
+		if issuer, exists := b.credentialIssuers[resourceTypeID]; exists {
+			issueDetails, _, err = issuer.IssueCapabilityDetails(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("error: getting credential issuance details for %s: %w", resourceTypeID, err)
+			}
+			if err := validateCredentialIssueCapabilityDetails(issueDetails); err != nil {
+				return nil, fmt.Errorf("error: validating credential issuance details for %s: %w", resourceTypeID, err)
+			}
+			for _, descriptor := range issueDetails.GetOptions() {
+				secretType := descriptor.GetSecretResourceTypeId()
+				_, managerDeletes := b.resourceManagers[secretType]
+				_, deleterExists := b.resourceDeleters[secretType]
+				if !managerDeletes && !deleterExists {
+					return nil, fmt.Errorf("credential issue option %s returns secret resource type %q without ResourceDeleterV2", descriptor.GetOption(), secretType)
+				}
+			}
+		}
 
 		resourceTypeCapabilities = append(resourceTypeCapabilities, v2.ResourceTypeCapability_builder{
-			ResourceType:  rb.ResourceType(ctx),
-			Capabilities:  caps,
-			Permissions:   p,
-			OptInRequired: annos.Contains(&v2.OptInRequired{}),
+			ResourceType:             rb.ResourceType(ctx),
+			Capabilities:             caps,
+			Permissions:              p,
+			OptInRequired:            annos.Contains(&v2.OptInRequired{}),
+			SkipSyncAnomalyDetection: annos.Contains(&v2.SkipSyncAnomalyDetection{}),
+			CredentialIssue:          issueDetails,
+			Deprecated:               annos.Contains(&v2.Deprecated{}),
 		}.Build())
 	}
 
@@ -447,6 +523,143 @@ func validateCapabilityDetails(_ context.Context, credDetails *v2.CredentialDeta
 		}
 	}
 
+	return nil
+}
+
+func validateCredentialIssueCapabilityDetails(issue *v2.CredentialDetailsCredentialIssue) error {
+	if issue == nil || issue.GetPreferredOption() == v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_UNSPECIFIED {
+		return status.Error(codes.InvalidArgument, "preferred credential issue option is not set")
+	}
+	seen := make(map[credentialIssueDescriptorKey]struct{}, len(issue.GetOptions()))
+	perOption := make(map[v2.CapabilityDetailCredentialOption]int, len(issue.GetOptions()))
+	preferredPerOption := make(map[v2.CapabilityDetailCredentialOption]int, len(issue.GetOptions()))
+	for _, descriptor := range issue.GetOptions() {
+		if descriptor == nil || descriptor.GetOption() == v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_UNSPECIFIED {
+			return status.Error(codes.InvalidArgument, "credential issue option descriptor is invalid")
+		}
+		if descriptor.GetResourceMode() == v2.CredentialResourceMode_CREDENTIAL_RESOURCE_MODE_UNSPECIFIED {
+			return status.Error(codes.InvalidArgument, "credential issue resource mode is not set")
+		}
+		if descriptor.GetSecretResourceTypeId() == "" {
+			return status.Error(codes.InvalidArgument, "credential issue secret resource type is not set")
+		}
+		if len(descriptor.GetSecretResourceTypeId()) > maxCredentialIssueSecretResourceTypeIDBytes {
+			return status.Errorf(codes.InvalidArgument, "credential issue secret resource type must be at most %d bytes",
+				maxCredentialIssueSecretResourceTypeIDBytes)
+		}
+		if err := validateCredentialIssueDescriptorShape(descriptor); err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid credential issue option %s: %v", descriptor.GetOption(), err)
+		}
+		for _, profile := range descriptor.GetKeyProfiles() {
+			if err := validateKeyGenerationProfile(profile); err != nil {
+				return status.Errorf(codes.InvalidArgument, "invalid credential issue key profile: %v", err)
+			}
+		}
+		if err := validateIssuanceExpiryCapability(descriptor.GetExpiry()); err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid credential issue expiry capability: %v", err)
+		}
+		key := credentialIssueDescriptorKey{
+			option:               descriptor.GetOption(),
+			secretResourceTypeID: descriptor.GetSecretResourceTypeId(),
+		}
+		if _, exists := seen[key]; exists {
+			return status.Errorf(codes.InvalidArgument, "duplicate credential issue option %s for secret resource type %q",
+				descriptor.GetOption(), descriptor.GetSecretResourceTypeId())
+		}
+		seen[key] = struct{}{}
+		perOption[descriptor.GetOption()]++
+		if descriptor.GetPreferred() {
+			preferredPerOption[descriptor.GetOption()]++
+		}
+	}
+	if err := validateCredentialIssuePreference(issue.GetOptions(), perOption, preferredPerOption); err != nil {
+		return err
+	}
+	if perOption[issue.GetPreferredOption()] == 0 {
+		return status.Error(codes.InvalidArgument, "preferred credential issue option is not part of the supported options")
+	}
+	return nil
+}
+
+// validateCredentialIssuePreference enforces that every option resolves to one
+// default descriptor. It walks the descriptors in declaration order so the
+// error names the first offending option rather than a random one.
+func validateCredentialIssuePreference(
+	descriptors []*v2.CredentialIssueOptionDescriptor,
+	perOption map[v2.CapabilityDetailCredentialOption]int,
+	preferredPerOption map[v2.CapabilityDetailCredentialOption]int,
+) error {
+	reported := make(map[v2.CapabilityDetailCredentialOption]struct{}, len(perOption))
+	for _, descriptor := range descriptors {
+		option := descriptor.GetOption()
+		if _, done := reported[option]; done {
+			continue
+		}
+		reported[option] = struct{}{}
+		if preferredPerOption[option] > 1 {
+			return status.Errorf(codes.InvalidArgument,
+				"credential issue option %s has %d preferred descriptors, expected at most one",
+				option, preferredPerOption[option])
+		}
+		if perOption[option] > 1 && preferredPerOption[option] == 0 {
+			return status.Errorf(codes.InvalidArgument,
+				"credential issue option %s has %d descriptors and none is preferred",
+				option, perOption[option])
+		}
+	}
+	return nil
+}
+
+func validateCredentialIssueDescriptorShape(descriptor *v2.CredentialIssueOptionDescriptor) error {
+	hasScopes := len(descriptor.GetScopes()) != 0 || descriptor.GetCustomScopesAllowed()
+	hasAudiences := len(descriptor.GetAudiences()) != 0 || descriptor.GetCustomAudiencesAllowed()
+	hasKeyProfiles := len(descriptor.GetKeyProfiles()) != 0
+	switch descriptor.GetOption() {
+	case v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_API_KEY:
+		if hasKeyProfiles || hasAudiences {
+			return fmt.Errorf("API key options may only advertise scopes and expiry")
+		}
+	case v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_KEYPAIR:
+		if !hasKeyProfiles {
+			return fmt.Errorf("keypair options must advertise at least one key profile")
+		}
+		if hasScopes || hasAudiences {
+			return fmt.Errorf("keypair options may only advertise key profiles and expiry")
+		}
+	case v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_TOKEN:
+		if hasKeyProfiles {
+			return fmt.Errorf("token options may only advertise scopes, audiences, and expiry")
+		}
+	case v2.CapabilityDetailCredentialOption_CAPABILITY_DETAIL_CREDENTIAL_OPTION_CLIENT_SECRET:
+		if hasKeyProfiles || hasScopes || hasAudiences {
+			return fmt.Errorf("client secret options may only advertise expiry")
+		}
+	default:
+		return fmt.Errorf("unsupported issuance option")
+	}
+	return nil
+}
+
+func validateIssuanceExpiryCapability(capability *v2.IssuanceExpiryCapability) error {
+	if capability == nil {
+		return nil
+	}
+	var minDuration, maxDuration time.Duration
+	if capability.GetMin() != nil {
+		if err := capability.GetMin().CheckValid(); err != nil || capability.GetMin().AsDuration() <= 0 {
+			return fmt.Errorf("minimum must be a valid positive duration")
+		}
+		minDuration = capability.GetMin().AsDuration()
+	}
+	if capability.GetMax() != nil {
+		if err := capability.GetMax().CheckValid(); err != nil || capability.GetMax().AsDuration() <= 0 {
+			return fmt.Errorf("maximum must be a valid positive duration")
+		}
+		maxDuration = capability.GetMax().AsDuration()
+	}
+	if minDuration != 0 && maxDuration != 0 && minDuration > maxDuration {
+		return fmt.Errorf("minimum must not exceed maximum")
+	}
 	return nil
 }
 

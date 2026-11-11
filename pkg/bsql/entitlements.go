@@ -22,6 +22,11 @@ func (s *SQLSyncer) Entitlements(ctx context.Context, resource *v2.Resource, pTo
 func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
 	inputs := s.env.SyncInputsWithResource(nil, resource)
 
+	resourceTypes, err := s.fullConfig.GetResourceTypes(ctx)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
 	var ret []*v2.Entitlement
 	for _, e := range s.config.StaticEntitlements {
 		entitlement := &v2.Entitlement{
@@ -61,9 +66,26 @@ func (s *SQLSyncer) staticEntitlements(ctx context.Context, resource *v2.Resourc
 			entitlement.Purpose = v2.Entitlement_PURPOSE_VALUE_UNSPECIFIED
 		}
 
+		for _, rt := range e.GrantableTo {
+			for _, r := range resourceTypes {
+				if r.Id == rt {
+					entitlement.GrantableTo = append(entitlement.GrantableTo, r)
+				}
+			}
+		}
+
 		annos := annotations.Annotations(entitlement.Annotations)
 		if e.Immutable {
 			annos.Update(&v2.EntitlementImmutable{})
+		}
+		if e.ExclusionGroup != nil {
+			exAny, err := s.buildExclusionGroupAny(ctx, e.ExclusionGroup, inputs)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			if exAny != nil {
+				annos.Merge(exAny)
+			}
 		}
 		entitlement.Annotations = annos
 		ret = append(ret, entitlement)
@@ -86,19 +108,21 @@ func (s *SQLSyncer) dynamicEntitlements(ctx context.Context, resource *v2.Resour
 		return nil, "", nil, err
 	}
 
-	npt, err := s.runQuery(ctx, pToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-		for _, mapping := range s.config.Entitlements.Map {
-			r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
-			if err != nil {
-				return false, err
-			}
+	npt, err := s.iterateDBs(ctx, s.config.Entitlements.Scope, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, s.db, innerToken, s.config.Entitlements.Query, s.config.Entitlements.Pagination, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			for _, mapping := range s.config.Entitlements.Map {
+				r, ok, err := s.mapEntitlement(ctx, resource, mapping, rowMap)
+				if err != nil {
+					return false, err
+				}
 
-			if ok {
-				r.Resource = resource
-				ret = append(ret, r)
+				if ok {
+					r.Resource = resource
+					ret = append(ret, r)
+				}
 			}
-		}
-		return true, nil
+			return true, nil
+		})
 	})
 	if err != nil {
 		return nil, "", nil, err
@@ -190,6 +214,15 @@ func (s *SQLSyncer) mapEntitlement(ctx context.Context, resource *v2.Resource, m
 	annos := annotations.Annotations(ret.Annotations)
 	if mappings.Immutable {
 		annos.Update(&v2.EntitlementImmutable{})
+	}
+	if mappings.ExclusionGroup != nil {
+		exAny, err := s.buildExclusionGroupAny(ctx, mappings.ExclusionGroup, inputs)
+		if err != nil {
+			return nil, false, err
+		}
+		if exAny != nil {
+			annos.Merge(exAny)
+		}
 	}
 	ret.Annotations = annos
 

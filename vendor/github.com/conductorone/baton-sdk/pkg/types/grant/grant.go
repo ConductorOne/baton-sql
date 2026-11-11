@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	v3 "github.com/conductorone/baton-sdk/pb/c1/storage/v3"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	eopt "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"google.golang.org/protobuf/proto"
@@ -19,6 +20,34 @@ type GrantPrincipal interface {
 
 // Sometimes C1 doesn't have the grant ID, but does have the principal and entitlement.
 const UnknownGrantId string = "🧸_UNKNOWN_GRANT_ID"
+
+// Source records one source entitlement's contribution to an expanded grant.
+type Source struct {
+	EntitlementID string
+	IsDirect      bool
+}
+
+type Sources []Source
+
+func (s Sources) ToBoolMap() map[string]bool {
+	if len(s) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(s))
+	for _, src := range s {
+		out[src.EntitlementID] = src.IsDirect
+	}
+	return out
+}
+
+func (s Sources) DirectFor(entitlementID string) bool {
+	for _, src := range s {
+		if src.EntitlementID == entitlementID {
+			return src.IsDirect
+		}
+	}
+	return false
+}
 
 func WithGrantMetadata(metadata map[string]interface{}) GrantOption {
 	return func(g *v2.Grant) error {
@@ -94,6 +123,13 @@ func NewGrant(resource *v2.Resource, entitlementName string, principal GrantPrin
 	return grant
 }
 
+// NewGrantID returns the public grant id for a principal on an entitlement.
+// The raw ":"-join is an external-consumer contract: ids must stay
+// byte-identical across SDK versions (C1 carries configuration keyed on
+// them), so this join is deliberately lossy and MUST NOT be used as an
+// internal identity — storage keys derive from the structured
+// entitlement/principal refs instead (see
+// pkg/dotc1z/engine/pebble/identity.go).
 func NewGrantID(principal GrantPrincipal, entitlement *v2.Entitlement) string {
 	var resourceID *v2.ResourceId
 	switch p := principal.(type) {
@@ -109,4 +145,23 @@ func NewGrantID(principal GrantPrincipal, entitlement *v2.Entitlement) string {
 		panic("principal resource must have a valid resource ID")
 	}
 	return fmt.Sprintf("%s:%s:%s", entitlement.GetId(), resourceID.GetResourceType(), resourceID.GetResource())
+}
+
+// NewGrantIDFromRecord returns the public grant id for a stored record: the
+// record's external id when set, otherwise the NewGrantID join of the
+// entitlement id and principal. It returns "" when the external id is empty
+// and the entitlement or principal ref is missing a field.
+func NewGrantIDFromRecord(r *v3.GrantRecord) string {
+	if ext := r.GetExternalId(); ext != "" {
+		return ext
+	}
+	ent := r.GetEntitlement()
+	if ent.GetResourceTypeId() == "" || ent.GetResourceId() == "" || ent.GetEntitlementId() == "" {
+		return ""
+	}
+	princ := r.GetPrincipal()
+	if princ.GetResourceTypeId() == "" || princ.GetResourceId() == "" {
+		return ""
+	}
+	return ent.GetEntitlementId() + ":" + princ.GetResourceTypeId() + ":" + princ.GetResourceId()
 }

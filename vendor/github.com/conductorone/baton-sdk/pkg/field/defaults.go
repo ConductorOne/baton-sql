@@ -15,11 +15,19 @@ const (
 	OtelCollectorEndpointTLSInsecureFieldName = "otel-collector-endpoint-tls-insecure"
 	OtelTracingDisabledFieldName              = "otel-tracing-disabled"
 	OtelLoggingDisabledFieldName              = "otel-logging-disabled"
+
+	// LogEventLogFieldName is the name of the flag that redirects logging to
+	// the Windows event log. The field is only registered on Windows builds
+	// (see defaults_windows.go), so the flag does not exist on other platforms.
+	LogEventLogFieldName = "log-event-log"
+
+	// TaskConcurrencySchemaDefault is the configured default for [TaskConcurrencyField].
+	TaskConcurrencySchemaDefault = 3
 )
 
 func defaultLogFormat() any {
 	// If stdout is a TTY, use console format, otherwise use JSON
-	//nolint:gosec // os.Stdout.Fd() is a process-owned fd and safe for terminal detection.
+
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		return logging.LogFormatConsole
 	}
@@ -81,6 +89,7 @@ var (
 		WithPersistent(true), WithExportTarget(ExportTargetNone))
 	logFormatField = StringField("log-format", WithDefaultValueFunc(defaultLogFormat), WithDescription("The output format for logs: json, console"),
 		WithPersistent(true), WithExportTarget(ExportTargetNone))
+	logOutputPathField     = StringSliceField("log-path", WithDescription("The file path to write logs to"), WithPersistent(true), WithExportTarget(ExportTargetNone))
 	revokeGrantField       = StringField("revoke-grant", WithHidden(true), WithDescription("The grant to revoke"), WithPersistent(true), WithExportTarget(ExportTargetNone))
 	rotateCredentialsField = StringField("rotate-credentials", WithHidden(true), WithDescription("The id of the resource to rotate credentials on"),
 		WithPersistent(true), WithExportTarget(ExportTargetNone))
@@ -123,29 +132,17 @@ var (
 		WithHidden(true),
 	)
 
+	listPageWindow = IntField("list-page-window",
+		WithDescription("Bound successful pages per list walk; 0 = unbounded"),
+		WithPersistent(true),
+		WithExportTarget(ExportTargetNone),
+		WithHidden(true),
+	)
+
 	syncResourceTypeIDs = StringSliceField("sync-resource-types",
 		WithDescription("The resource type IDs to sync"),
 		WithPersistent(true),
 		WithExportTarget(ExportTargetNone))
-	diffSyncsField = BoolField(
-		"diff-syncs",
-		WithDescription("Create a new partial SyncID from a base and applied sync."),
-		WithHidden(true),
-		WithPersistent(true),
-		WithExportTarget(ExportTargetNone),
-	)
-	diffSyncsBaseSyncField = StringField("base-sync-id",
-		WithDescription("The base sync to diff from."),
-		WithHidden(true),
-		WithPersistent(true),
-		WithExportTarget(ExportTargetNone),
-	)
-	diffSyncsAppliedSyncField = StringField("applied-sync-id",
-		WithDescription("The sync to show diffs when applied to the base sync."),
-		WithHidden(true),
-		WithPersistent(true),
-		WithExportTarget(ExportTargetNone),
-	)
 
 	compactSyncsField = BoolField("compact-syncs",
 		WithDescription("Provide a list of sync files to compact into a single c1z file and sync ID."),
@@ -188,6 +185,12 @@ var (
 	invokeActionResourceTypeField = StringField("invoke-action-resource-type",
 		WithHidden(true),
 		WithDescription("The resource type ID for resource-scoped actions"),
+		WithPersistent(true),
+		WithExportTarget(ExportTargetNone),
+	)
+	printCredentialsField = BoolField("print-credentials",
+		WithHidden(true),
+		WithDescription("Print decrypted credentials returned by local operations"),
 		WithPersistent(true),
 		WithExportTarget(ExportTargetNone),
 	)
@@ -259,6 +262,25 @@ var (
 		WithDescription("The entitlement that external users, groups must have access to sync external baton resources"),
 		WithPersistent(true),
 		WithExportTarget(ExportTargetNone))
+	externalResourceTraitsField = StringSliceField("external-resource-traits",
+		WithDescription("Resource type traits (e.g. \"user\", \"group\", \"app\") to sync and match from the external resource c1z. "+
+			"When unset the matcher falls back to user and group; passing this flag replaces the full set rather than adding to it."),
+		WithPersistent(true),
+		WithExportTarget(ExportTargetNone))
+
+	// KeepPreviousSyncC1ZField is the CUSTOMER's runtime half of the
+	// service-mode ETag-replay opt-in: keep the last successfully
+	// uploaded c1z on disk as a spare and feed it to the next full sync
+	// as the previous-sync replay source. It only takes effect on
+	// connectors whose author also declared ETag-replay support at build
+	// time (connectorrunner.WithKeepPreviousSyncC1Z) — both are
+	// required. Costs one c1z of local disk.
+	KeepPreviousSyncC1ZField = BoolField("keep-previous-sync-c1z",
+		WithDescription("Keep the previously synced c1z on disk to enable ETag replay across service-mode syncs "+
+			"(requires a connector that supports ETag replay; costs one c1z of local disk)"),
+		WithDefaultValue(false),
+		WithPersistent(true),
+		WithExportTarget(ExportTargetNone))
 
 	LambdaServerClientIDField = StringField("lambda-client-id", WithRequired(true), WithDescription("The oauth client id to use with the configuration endpoint"),
 		WithExportTarget(ExportTargetNone))
@@ -325,6 +347,31 @@ var (
 		WithInt(func(r *IntRuler) {
 			r.Gte(1).Lte(1800)
 		}))
+
+	// StorageEngineField selects the dotc1z storage engine for sync tasks.
+	// Pebble is the only engine; the flag is kept so existing configs that
+	// pass "pebble" keep working.
+	StorageEngineField = StringField("storage-engine",
+		WithDescription("The storage engine to use when opening the sync c1z file. "+
+			"Only pebble is supported; defaults to pebble when unset."),
+		WithPersistent(true),
+		WithExportTarget(ExportTargetNone),
+		WithString(func(r *StringRuler) {
+			r.In([]string{"", "pebble"})
+		}))
+
+	// TaskConcurrencyField limits concurrent Baton task execution in the runner
+	// (service mode). Semantics match [WorkerCountField] / sync worker parallelism.
+	TaskConcurrencyField = IntField("task-concurrency",
+		WithDescription("The number of Baton tasks to run concurrently in service mode. "+
+			"Tasks may include sync, grant, revoke, and more. "+
+			"Minimum value is 1, maximum value is 100."),
+		WithDefaultValue(TaskConcurrencySchemaDefault),
+		WithInt(func(r *IntRuler) {
+			r.Gte(1).Lte(100)
+		}),
+		WithPersistent(true),
+		WithExportTarget(ExportTargetNone))
 )
 
 func LambdaServerFields() []SchemaField {
@@ -342,7 +389,9 @@ func LambdaServerFields() []SchemaField {
 var LambdaServerRelationships = make([]SchemaFieldRelationship, 0)
 
 // DefaultFields list the default fields expected in every single connector.
-var DefaultFields = []SchemaField{
+// platformDefaultFields (defined per-platform) holds additional fields that
+// only exist on some platforms, e.g. the Windows event log flag.
+var DefaultFields = append([]SchemaField{
 	createTicketField,
 	bulkCreateTicketField,
 	bulkTicketTemplatePathField,
@@ -368,6 +417,7 @@ var DefaultFields = []SchemaField{
 	grantPrincipalField,
 	grantPrincipalTypeField,
 	logFormatField,
+	logOutputPathField,
 	revokeGrantField,
 	rotateCredentialsField,
 	rotateCredentialsTypeField,
@@ -380,11 +430,11 @@ var DefaultFields = []SchemaField{
 	syncResourceTypeIDs,
 	skipEntitlementsAndGrants,
 	skipGrants,
+	listPageWindow,
 	externalResourceC1ZField,
 	externalResourceEntitlementIdFilter,
-	diffSyncsField,
-	diffSyncsBaseSyncField,
-	diffSyncsAppliedSyncField,
+	externalResourceTraitsField,
+	KeepPreviousSyncC1ZField,
 	compactSyncIDsField,
 	compactFilePathsField,
 	compactOutputDirectoryField,
@@ -392,6 +442,7 @@ var DefaultFields = []SchemaField{
 	invokeActionField,
 	invokeActionArgsField,
 	invokeActionResourceTypeField,
+	printCredentialsField,
 	listActionSchemasField,
 	listActionSchemasResourceTypeField,
 	listResourceActionsField,
@@ -416,7 +467,9 @@ var DefaultFields = []SchemaField{
 	healthCheckBindAddressField,
 
 	HttpTimeoutField,
-}
+	StorageEngineField,
+	TaskConcurrencyField,
+}, platformDefaultFields...)
 
 func IsFieldAmongDefaultList(f SchemaField) bool {
 	for _, v := range DefaultFields {

@@ -3,14 +3,42 @@ package connectorbuilder
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/actions"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/types/tasks"
 	"github.com/conductorone/baton-sdk/pkg/uotel"
-	"google.golang.org/protobuf/types/known/structpb"
 )
+
+const (
+	// maxConsecutiveStatusErrors bounds how many status-check failures or
+	// indeterminate statuses in a row the legacy action poll loop tolerates
+	// before failing the action.
+	maxConsecutiveStatusErrors = 3
+)
+
+// legacyPollIntervals paces the legacy status poll: it starts fast and backs
+// off to a cap so a slow action doesn't drain a remote manager's rate-limit
+// budget. Captured at registration, so tests can drive the loop without
+// real-time waits and the detached poll goroutine never reads shared
+// mutable state.
+type legacyPollIntervals struct {
+	initial time.Duration
+	max     time.Duration
+}
+
+var defaultLegacyPollIntervals = legacyPollIntervals{
+	initial: time.Second,
+	max:     30 * time.Second,
+}
 
 // ActionManager defines the interface for managing actions in the connector builder.
 // This is the internal interface used by the builder for dispatch.
@@ -32,6 +60,17 @@ type ActionManager interface {
 		args *structpb.Struct,
 	) (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations, error)
 
+	// InvokeActionWithWait is InvokeAction with an explicit bound on how long
+	// the call may block waiting for the handler; zero or negative keeps the
+	// manager's default.
+	InvokeActionWithWait(
+		ctx context.Context,
+		name string,
+		resourceTypeID string,
+		args *structpb.Struct,
+		inlineWait time.Duration,
+	) (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations, error)
+
 	// GetActionStatus returns the status of an outstanding action.
 	GetActionStatus(ctx context.Context, id string) (v2.BatonActionStatus, string, *structpb.Struct, annotations.Annotations, error)
 
@@ -41,6 +80,20 @@ type ActionManager interface {
 	// HasActions returns true if there are any registered actions.
 	HasActions() bool
 }
+
+type encryptedActionManager interface {
+	InvokeActionWithWaitAndEncryption(
+		ctx context.Context,
+		name string,
+		resourceTypeID string,
+		args *structpb.Struct,
+		inlineWait time.Duration,
+		encryptionConfigs []*v2.EncryptionConfig,
+	) (string, v2.BatonActionStatus, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations, error)
+	GetActionStatusWithEncryptedData(ctx context.Context, id string) (v2.BatonActionStatus, string, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations, error)
+}
+
+var _ encryptedActionManager = (*actions.ActionManager)(nil)
 
 // GlobalActionProvider allows connectors to register global (non-resource-scoped) actions.
 // This is the preferred method for registering global actions in new connectors.
@@ -154,18 +207,32 @@ func (b *builder) InvokeAction(ctx context.Context, request *v2.InvokeActionRequ
 
 	resourceTypeID := request.GetResourceTypeId()
 
-	id, actionStatus, resp, annos, err := b.actionManager.InvokeAction(ctx, request.GetName(), resourceTypeID, request.GetArgs())
+	encryptedManager, ok := b.actionManager.(encryptedActionManager)
+	if !ok {
+		err = status.Error(codes.Internal, "action manager does not support encrypted action results")
+		b.m.RecordTaskFailure(ctx, tt, b.nowFunc().Sub(start), err)
+		return nil, err
+	}
+	id, actionStatus, resp, encryptedData, annos, err := encryptedManager.InvokeActionWithWaitAndEncryption(
+		ctx,
+		request.GetName(),
+		resourceTypeID,
+		request.GetArgs(),
+		request.GetInlineWait().AsDuration(),
+		request.GetEncryptionConfigs(),
+	)
 	if err != nil {
 		b.m.RecordTaskFailure(ctx, tt, b.nowFunc().Sub(start), err)
 		return nil, fmt.Errorf("error: invoking action failed: %w", err)
 	}
 
 	rv := v2.InvokeActionResponse_builder{
-		Id:          id,
-		Name:        request.GetName(),
-		Status:      actionStatus,
-		Annotations: annos,
-		Response:    resp,
+		Id:            id,
+		Name:          request.GetName(),
+		Status:        actionStatus,
+		Annotations:   annos,
+		Response:      resp,
+		EncryptedData: encryptedData,
 	}.Build()
 
 	b.m.RecordTaskSuccess(ctx, tt, b.nowFunc().Sub(start))
@@ -180,30 +247,150 @@ func (b *builder) GetActionStatus(ctx context.Context, request *v2.GetActionStat
 	start := b.nowFunc()
 	tt := tasks.ActionStatusType
 
-	actionStatus, name, rv, annos, err := b.actionManager.GetActionStatus(ctx, request.GetId())
+	encryptedManager, ok := b.actionManager.(encryptedActionManager)
+	if !ok {
+		err = status.Error(codes.Internal, "action manager does not support encrypted action results")
+		b.m.RecordTaskFailure(ctx, tt, b.nowFunc().Sub(start), err)
+		return nil, err
+	}
+	actionStatus, name, rv, encryptedData, annos, err := encryptedManager.GetActionStatusWithEncryptedData(ctx, request.GetId())
 	if err != nil {
 		b.m.RecordTaskFailure(ctx, tt, b.nowFunc().Sub(start), err)
 		return nil, fmt.Errorf("error: action status for id %s not found: %w", request.GetId(), err)
 	}
 
 	resp := v2.GetActionStatusResponse_builder{
-		Id:          request.GetId(),
-		Name:        name,
-		Status:      actionStatus,
-		Annotations: annos,
-		Response:    rv,
+		Id:            request.GetId(),
+		Name:          name,
+		Status:        actionStatus,
+		Annotations:   annos,
+		Response:      rv,
+		EncryptedData: encryptedData,
 	}.Build()
 	b.m.RecordTaskSuccess(ctx, tt, b.nowFunc().Sub(start))
 	return resp, nil
 }
 
 // registerLegacyAction wraps a legacy CustomActionManager action as an ActionHandler and registers it.
-func registerLegacyAction(ctx context.Context, registry actions.ActionRegistry, schema *v2.BatonActionSchema, legacyManager CustomActionManager) error {
+func registerLegacyAction(
+	ctx context.Context,
+	registry actions.ActionRegistry,
+	schema *v2.BatonActionSchema,
+	legacyManager CustomActionManager,
+	intervals legacyPollIntervals,
+) error {
+	// A zero or negative interval would busy-loop the status poll. An
+	// inverted pair needs no guard: the cap applies from the second tick.
+	if intervals.initial <= 0 || intervals.max <= 0 {
+		intervals = defaultLegacyPollIntervals
+	}
 	handler := func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
-		_, _, resp, annos, err := legacyManager.InvokeAction(ctx, schema.GetName(), "", args)
-		return resp, annos, err
+		// The inner call keeps the detached handler context; its one-hour
+		// deadline is the execution backstop for however long the legacy
+		// manager runs.
+		id, actionStatus, resp, annos, err := legacyManager.InvokeAction(ctx, schema.GetName(), "", args)
+		if err != nil {
+			return resp, annos, err
+		}
+
+		// Legacy managers were never required to populate id or status — the
+		// wrapper used to discard both — so the never-populated shape
+		// resolves the outer action with the response, as it always did.
+		if actionStatus == v2.BatonActionStatus_BATON_ACTION_STATUS_UNSPECIFIED {
+			return resp, annos, nil
+		}
+
+		// A settled status at the invoke seam resolves like a terminal
+		// poll. The SDK's own manager reports handler failures in-band as
+		// FAILED with a nil error, so this must not resolve as success.
+		if actions.IsSettled(actionStatus) {
+			return resp, annos, legacyStatusErr(schema.GetName(), actionStatus, resp)
+		}
+
+		// An unresolved claim without an id cannot be polled; resolve with
+		// the response, matching the old fire-and-forget behavior.
+		if id == "" {
+			return resp, annos, nil
+		}
+
+		// In-flight and indeterminate statuses alike are polled: an
+		// indeterminate answer gets the same tolerance here as one arriving
+		// from a later poll.
+
+		// Poll to a terminal status so the outer result carries the action's
+		// real outcome. A few consecutive status-check failures are tolerated:
+		// one flaky remote lookup must not convert a succeeding action into a
+		// failure. The interval backs off to a cap so a slow action doesn't
+		// drain a remote manager's rate-limit budget.
+		l := ctxzap.Extract(ctx)
+		statusErrs := 0
+		interval := intervals.initial
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return resp, annos, fmt.Errorf("legacy action %q did not reach a terminal status: %w", schema.GetName(), context.Cause(ctx))
+			case <-timer.C:
+			}
+			interval = min(interval*2, intervals.max)
+			timer.Reset(interval)
+
+			st, _, pollResp, pollAnnos, err := legacyManager.GetActionStatus(ctx, id)
+			if err != nil {
+				statusErrs++
+				if statusErrs >= maxConsecutiveStatusErrors {
+					return resp, annos, fmt.Errorf("legacy action %q status lookup failed: %w", schema.GetName(), err)
+				}
+				l.Warn("legacy action status check failed, retrying",
+					zap.String("action", schema.GetName()),
+					zap.Int("consecutive_anomalies", statusErrs),
+					zap.Error(err))
+				continue
+			}
+			// Keep the last meaningful response for the error exits above;
+			// an indeterminate poll's payload must not replace it.
+			if pollResp != nil && (actions.IsInFlight(st) || actions.IsSettled(st)) {
+				resp, annos = pollResp, pollAnnos
+			}
+
+			switch {
+			case actions.IsInFlight(st):
+				statusErrs = 0
+			case actions.IsSettled(st):
+				// The settling poll's own payload is the failure account;
+				// resp may hold an older in-flight snapshot.
+				return resp, annos, legacyStatusErr(schema.GetName(), st, pollResp)
+			default:
+				// An indeterminate status gets the same tolerance as a
+				// lookup error: transient anomalies recover, persistent
+				// ones fail closed.
+				statusErrs++
+				if statusErrs >= maxConsecutiveStatusErrors {
+					return resp, annos, fmt.Errorf("legacy action %q returned unexpected status %s", schema.GetName(), st.String())
+				}
+				l.Warn("legacy action returned indeterminate status, retrying",
+					zap.String("action", schema.GetName()),
+					zap.String("status", st.String()),
+					zap.Int("consecutive_anomalies", statusErrs))
+			}
+		}
 	}
 	return registry.Register(ctx, schema, handler)
+}
+
+// legacyStatusErr maps a settled legacy status — COMPLETE or FAILED, the
+// only values both call sites pass — to the outer handler error, carrying
+// the error message the settling response reports, since the outer error
+// replaces the response's error field.
+func legacyStatusErr(name string, st v2.BatonActionStatus, resp *structpb.Struct) error {
+	if st == v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE {
+		return nil
+	}
+	if inner := resp.GetFields()["error"].GetStringValue(); inner != "" {
+		return fmt.Errorf("legacy action %q failed: %s", name, inner)
+	}
+	return fmt.Errorf("legacy action %q failed", name)
 }
 
 // addActionManager handles deprecated CustomActionManager and RegisterActionManagerLimited interfaces
@@ -216,7 +403,7 @@ func (b *builder) addActionManager(ctx context.Context, in interface{}, registry
 			return fmt.Errorf("error listing schemas from custom action manager: %w", err)
 		}
 		for _, schema := range schemas {
-			if err := registerLegacyAction(ctx, registry, schema, customManager); err != nil {
+			if err := registerLegacyAction(ctx, registry, schema, customManager, defaultLegacyPollIntervals); err != nil {
 				return fmt.Errorf("error registering legacy action %s: %w", schema.GetName(), err)
 			}
 		}
@@ -237,7 +424,7 @@ func (b *builder) addActionManager(ctx context.Context, in interface{}, registry
 			return fmt.Errorf("error listing schemas from custom action manager: %w", err)
 		}
 		for _, schema := range schemas {
-			if err := registerLegacyAction(ctx, registry, schema, customManager); err != nil {
+			if err := registerLegacyAction(ctx, registry, schema, customManager, defaultLegacyPollIntervals); err != nil {
 				return fmt.Errorf("error registering legacy action %s: %w", schema.GetName(), err)
 			}
 		}

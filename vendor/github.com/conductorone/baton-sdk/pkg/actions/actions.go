@@ -11,26 +11,70 @@ import (
 	config "github.com/conductorone/baton-sdk/pb/c1/config/v1"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
+	"github.com/conductorone/baton-sdk/pkg/crypto"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"github.com/segmentio/ksuid"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type ActionHandler func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error)
 
+// ActionHandlerWithSecrets returns public values separately from plaintext
+// secret values. The action manager encrypts PlaintextData before publishing
+// the result or retaining it for a later status request.
+type ActionHandlerWithSecrets func(
+	ctx context.Context,
+	args *structpb.Struct,
+) (*structpb.Struct, []*v2.PlaintextData, annotations.Annotations, error)
+
+type actionHandlerResult struct {
+	response      *structpb.Struct
+	plaintextData []*v2.PlaintextData
+	annotations   annotations.Annotations
+	err           error
+}
+
+type registeredActionHandler struct {
+	invoke                    func(context.Context, *structpb.Struct) actionHandlerResult
+	secretReturnNames         map[string]struct{}
+	requiredSecretReturnNames []string
+}
+
+type actionEncryptFunc func(context.Context, *crypto.EncryptionManager, *v2.PlaintextData) ([]*v2.EncryptedData, error)
+
+// IsInFlight reports whether the status describes an action
+// still executing: PENDING or RUNNING.
+func IsInFlight(s v2.BatonActionStatus) bool {
+	return s == v2.BatonActionStatus_BATON_ACTION_STATUS_PENDING || s == v2.BatonActionStatus_BATON_ACTION_STATUS_RUNNING
+}
+
+// IsSettled reports whether the status is terminal: COMPLETE or
+// FAILED. It is the single gate deciding which statuses are final; a new
+// terminal enum value must be added here to be treated as settled anywhere.
+func IsSettled(s v2.BatonActionStatus) bool {
+	return s == v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE || s == v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED
+}
+
 type OutstandingAction struct {
-	Id        string
-	Name      string
-	Status    v2.BatonActionStatus
-	Rv        *structpb.Struct
-	Annos     annotations.Annotations
-	Err       error
-	StartedAt time.Time
+	Id            string
+	Name          string
+	Status        v2.BatonActionStatus
+	Rv            *structpb.Struct
+	EncryptedData []*v2.EncryptedData
+	Annos         annotations.Annotations
+	Err           error
+	StartedAt     time.Time
 	sync.Mutex
+
+	// cancelled marks a FAILED status that came from request cancellation
+	// rather than from the handler; the handler's late outcome replaces it.
+	cancelled bool
 }
 
 func NewOutstandingAction(id, name string) *OutstandingAction {
@@ -45,44 +89,231 @@ func NewOutstandingAction(id, name string) *OutstandingAction {
 func (oa *OutstandingAction) SetStatus(ctx context.Context, status v2.BatonActionStatus) {
 	oa.Lock()
 	defer oa.Unlock()
-	l := ctxzap.Extract(ctx).With(
-		zap.String("action_id", oa.Id),
-		zap.String("action_name", oa.Name),
-		zap.String("status", status.String()),
-	)
-	if oa.Status == v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE || oa.Status == v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED {
-		l.Error("cannot set status on completed action")
+	oa.setStatusLocked(ctx, status)
+}
+
+// setStatusLocked applies a lifecycle transition and reports whether it was
+// accepted. Terminal statuses are final and RUNNING is only reachable from
+// PENDING; rejected transitions are dropped. These fire in normal operation
+// (a handler finishing after its request was cancelled), hence debug level.
+// It requires oa's mutex to be held.
+func (oa *OutstandingAction) setStatusLocked(ctx context.Context, status v2.BatonActionStatus) bool {
+	if IsSettled(oa.Status) {
+		ctxzap.Extract(ctx).Debug("dropping status transition on terminal action",
+			zap.String("action_id", oa.Id),
+			zap.String("action_name", oa.Name),
+			zap.String("status", oa.Status.String()),
+			zap.String("requested_status", status.String()))
+		return false
 	}
 	if status == v2.BatonActionStatus_BATON_ACTION_STATUS_RUNNING && oa.Status != v2.BatonActionStatus_BATON_ACTION_STATUS_PENDING {
-		l.Error("cannot set status to running unless action is pending")
+		ctxzap.Extract(ctx).Debug("dropping running transition on non-pending action",
+			zap.String("action_id", oa.Id),
+			zap.String("action_name", oa.Name),
+			zap.String("status", oa.Status.String()))
+		return false
 	}
 
 	oa.Status = status
+	return true
 }
 
-func (oa *OutstandingAction) setError(_ context.Context, err error) {
-	oa.Lock()
-	defer oa.Unlock()
-	if oa.Rv == nil {
-		oa.Rv = &structpb.Struct{}
+// setErrorLocked requires oa's mutex to be held.
+func (oa *OutstandingAction) setErrorLocked(err error) {
+	// Rebuild rather than mutate: a concurrent caller may hold the previously
+	// published struct from a result() snapshot and be marshaling it.
+	fields := make(map[string]*structpb.Value, len(oa.Rv.GetFields())+1)
+	for k, v := range oa.Rv.GetFields() {
+		fields[k] = v
 	}
-	if oa.Rv.Fields == nil {
-		oa.Rv.Fields = make(map[string]*structpb.Value)
-	}
-	oa.Rv.Fields["error"] = &structpb.Value{
+	fields["error"] = &structpb.Value{
 		Kind: &structpb.Value_StringValue{
 			StringValue: err.Error(),
 		},
 	}
+	oa.Rv = &structpb.Struct{Fields: fields}
 	oa.Err = err
 }
 
+// SetError records the error and marks the action failed in one critical
+// section, so no snapshot can observe the error with a non-terminal status.
+// A FAILED action may refresh its error payload, but a COMPLETE action stays
+// complete. This is a real handler failure, so it clears any provisional
+// cancellation mark.
 func (oa *OutstandingAction) SetError(ctx context.Context, err error) {
-	oa.setError(ctx, err)
-	oa.SetStatus(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED)
+	oa.Lock()
+	defer oa.Unlock()
+	if oa.Status == v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED {
+		oa.EncryptedData = nil
+		oa.setErrorLocked(err)
+		oa.cancelled = false
+		return
+	}
+	if oa.setStatusLocked(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED) {
+		oa.EncryptedData = nil
+		oa.setErrorLocked(err)
+	}
 }
 
-const maxOldActions = 1000
+// setCancelled records a cancellation as a provisional failure: unlike other
+// terminal states, the handler's own late outcome replaces it, since the
+// action's side effects can still complete after the request goes away.
+func (oa *OutstandingAction) setCancelled(ctx context.Context, err error) {
+	oa.Lock()
+	defer oa.Unlock()
+	if oa.setStatusLocked(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED) {
+		oa.setErrorLocked(err)
+		oa.cancelled = true
+	}
+}
+
+// isProvisional reports whether the action's FAILED status is a provisional
+// cancellation mark that the handler's late outcome may still replace.
+func (oa *OutstandingAction) isProvisional() bool {
+	oa.Lock()
+	defer oa.Unlock()
+	return oa.cancelled
+}
+
+// evictable reports whether the action has reached a state cleanup may
+// remove: terminal, and not a provisional cancellation whose record can
+// still improve.
+func (oa *OutstandingAction) evictable() bool {
+	oa.Lock()
+	defer oa.Unlock()
+	if oa.cancelled {
+		return false
+	}
+	return IsSettled(oa.Status)
+}
+
+// Result returns the action's identity and current outcome. The snapshot is
+// internally consistent; the returned message and annotations are owned by
+// the action and must not be modified.
+func (oa *OutstandingAction) Result() (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations) {
+	return oa.result()
+}
+
+// result is the unexported form of Result.
+func (oa *OutstandingAction) result() (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations) {
+	id, status, response, _, annos := oa.resultWithEncryptedData()
+	return id, status, response, annos
+}
+
+// ResultWithEncryptedData returns the action's public and encrypted outcomes.
+// The returned messages are owned by the action and must not be modified.
+func (oa *OutstandingAction) ResultWithEncryptedData() (string, v2.BatonActionStatus, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations) {
+	return oa.resultWithEncryptedData()
+}
+
+func (oa *OutstandingAction) resultWithEncryptedData() (string, v2.BatonActionStatus, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations) {
+	oa.Lock()
+	defer oa.Unlock()
+	return oa.Id, oa.Status, oa.Rv, oa.EncryptedData, oa.Annos
+}
+
+// setOutcome publishes the handler's result and terminal status in one
+// critical section, so no snapshot observes one without the other. The
+// values are cloned at this publication seam: the handler owns what it
+// returned and may keep mutating it. Terminal statuses are final, with one
+// exception: a cancellation-FAILED status is provisional, and the handler's
+// own outcome — success or failure — replaces it.
+func (oa *OutstandingAction) setOutcome(ctx context.Context, rv *structpb.Struct, annos annotations.Annotations, err error) {
+	oa.setOutcomeWithEncryptedData(ctx, rv, nil, annos, err)
+}
+
+func (oa *OutstandingAction) setOutcomeWithEncryptedData(
+	ctx context.Context,
+	rv *structpb.Struct,
+	encryptedData []*v2.EncryptedData,
+	annos annotations.Annotations,
+	err error,
+) {
+	if rv != nil {
+		rv = proto.Clone(rv).(*structpb.Struct)
+	}
+	if encryptedData != nil {
+		encryptedDataCopy := make([]*v2.EncryptedData, len(encryptedData))
+		for i, encrypted := range encryptedData {
+			if encrypted != nil {
+				encryptedDataCopy[i] = proto.Clone(encrypted).(*v2.EncryptedData)
+			}
+		}
+		encryptedData = encryptedDataCopy
+	}
+	if annos != nil {
+		annosCopy := make(annotations.Annotations, len(annos))
+		for i, a := range annos {
+			if a != nil {
+				annosCopy[i] = proto.Clone(a).(*anypb.Any)
+			}
+		}
+		annos = annosCopy
+	}
+
+	oa.Lock()
+	defer oa.Unlock()
+
+	if err != nil {
+		if oa.Status == v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED || oa.setStatusLocked(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED) {
+			oa.Rv = rv
+			oa.EncryptedData = nil
+			oa.Annos = annos
+			oa.setErrorLocked(err)
+			oa.cancelled = false
+		}
+		return
+	}
+
+	if oa.cancelled {
+		// Deliberate cross-terminal replacement: the cancellation was a
+		// transport event, not the action's outcome.
+		ctxzap.Extract(ctx).Debug("replacing provisional cancellation with handler outcome",
+			zap.String("action_id", oa.Id),
+			zap.String("action_name", oa.Name))
+		oa.cancelled = false
+		oa.Status = v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE
+		oa.Rv = rv
+		oa.EncryptedData = encryptedData
+		oa.Annos = annos
+		oa.Err = nil
+		return
+	}
+
+	if oa.setStatusLocked(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE) {
+		oa.Rv = rv
+		oa.EncryptedData = encryptedData
+		oa.Annos = annos
+	}
+}
+
+const (
+	maxOldActions = 1000
+
+	// defaultInlineWait bounds the invoke-time wait when the caller does not
+	// request one.
+	defaultInlineWait = 1 * time.Second
+
+	// maxInlineWait caps the requested wait at the handler context budget:
+	// holding the call open longer than a handler may run is never useful,
+	// and a saturated Duration must not pin the request forever on the
+	// deadline-less contexts service mode and the Lambda transport produce.
+	maxInlineWait = 1 * time.Hour
+)
+
+// clampInlineWait bounds a requested inline wait: non-positive values take
+// the server default and oversized values are capped at maxInlineWait. Not
+// every transport enforces the wire validation rules, so this clamp is the
+// only universal bound.
+func clampInlineWait(inlineWait time.Duration) time.Duration {
+	if inlineWait <= 0 {
+		return defaultInlineWait
+	}
+	if inlineWait > maxInlineWait {
+		return maxInlineWait
+	}
+	return inlineWait
+}
 
 // ActionRegistry provides methods for registering actions.
 // Used by both GlobalActionProvider (global actions) and ResourceActionProvider (resource-scoped actions).
@@ -95,6 +326,26 @@ type ActionRegistry interface {
 	RegisterAction(ctx context.Context, name string, schema *v2.BatonActionSchema, handler ActionHandler) error
 }
 
+type actionRegistryWithSecrets interface {
+	RegisterWithSecrets(ctx context.Context, schema *v2.BatonActionSchema, handler ActionHandlerWithSecrets) error
+}
+
+// RegisterWithSecrets registers an action whose handler can return plaintext
+// secret values. The registry validates and encrypts those values before they
+// are observable through InvokeAction or GetActionStatus.
+func RegisterWithSecrets(
+	ctx context.Context,
+	registry ActionRegistry,
+	schema *v2.BatonActionSchema,
+	handler ActionHandlerWithSecrets,
+) error {
+	secretRegistry, ok := registry.(actionRegistryWithSecrets)
+	if !ok {
+		return errors.New("action registry does not support secret results")
+	}
+	return secretRegistry.RegisterWithSecrets(ctx, schema, handler)
+}
+
 // Deprecated: Use ActionRegistry instead.
 // ResourceTypeActionRegistry is an alias for ActionRegistry for backwards compatibility.
 type ResourceTypeActionRegistry = ActionRegistry
@@ -103,25 +354,29 @@ type ResourceTypeActionRegistry = ActionRegistry
 type ActionManager struct {
 	// Global actions (no resource type)
 	schemas  map[string]*v2.BatonActionSchema // actionName -> schema
-	handlers map[string]ActionHandler         // actionName -> handler
+	handlers map[string]registeredActionHandler
 
 	// Resource-scoped actions (keyed by resource type)
 	resourceSchemas  map[string]map[string]*v2.BatonActionSchema // resourceTypeID -> actionName -> schema
-	resourceHandlers map[string]map[string]ActionHandler         // resourceTypeID -> actionName -> handler
+	resourceHandlers map[string]map[string]registeredActionHandler
 
 	// Outstanding actions (shared across global and resource-scoped)
 	actions map[string]*OutstandingAction // actionID -> outstanding action
 
-	mu sync.RWMutex
+	encryptPlaintext actionEncryptFunc
+	mu               sync.RWMutex
 }
 
 func NewActionManager(_ context.Context) *ActionManager {
 	return &ActionManager{
 		schemas:          make(map[string]*v2.BatonActionSchema),
-		handlers:         make(map[string]ActionHandler),
+		handlers:         make(map[string]registeredActionHandler),
 		resourceSchemas:  make(map[string]map[string]*v2.BatonActionSchema),
-		resourceHandlers: make(map[string]map[string]ActionHandler),
+		resourceHandlers: make(map[string]map[string]registeredActionHandler),
 		actions:          make(map[string]*OutstandingAction),
+		encryptPlaintext: func(ctx context.Context, manager *crypto.EncryptionManager, plaintext *v2.PlaintextData) ([]*v2.EncryptedData, error) {
+			return manager.Encrypt(ctx, plaintext)
+		},
 	}
 }
 
@@ -163,8 +418,7 @@ func (a *ActionManager) CleanupOldActions(ctx context.Context) {
 	count := 0
 	// Delete the oldest actions
 	for i := 0; i < len(actionList)-maxOldActions; i++ {
-		action := actionList[i]
-		if action.Status == v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE || action.Status == v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED {
+		if actionList[i].evictable() {
 			count++
 			delete(a.actions, actionList[i].Id)
 		}
@@ -197,10 +451,51 @@ func (a *ActionManager) Register(ctx context.Context, schema *v2.BatonActionSche
 // Deprecated: Use Register instead.
 // RegisterAction registers a global action (not scoped to a resource type).
 func (a *ActionManager) RegisterAction(ctx context.Context, name string, schema *v2.BatonActionSchema, handler ActionHandler) error {
+	if handler == nil {
+		return errors.New("action handler cannot be nil")
+	}
+	if hasSecretReturnTypes(schema) {
+		return errors.New("action schemas with secret return types must use RegisterWithSecrets")
+	}
+	return a.registerGlobalAction(ctx, name, schema, registeredActionHandler{
+		invoke: func(ctx context.Context, args *structpb.Struct) actionHandlerResult {
+			response, annos, err := handler(ctx, args)
+			return actionHandlerResult{response: response, annotations: annos, err: err}
+		},
+	})
+}
+
+// RegisterWithSecrets registers a global action that returns plaintext secret
+// values separately from its public response.
+func (a *ActionManager) RegisterWithSecrets(ctx context.Context, schema *v2.BatonActionSchema, handler ActionHandlerWithSecrets) error {
+	if schema == nil {
+		return errors.New("action schema cannot be nil")
+	}
+	if handler == nil {
+		return errors.New("action handler cannot be nil")
+	}
+	if !hasSecretReturnTypes(schema) {
+		return errors.New("secret action handler requires at least one secret return type")
+	}
+	secretReturnNames, requiredSecretReturnNames, err := validateSecretReturnTypes(schema.GetReturnTypes())
+	if err != nil {
+		return err
+	}
+	return a.registerGlobalAction(ctx, schema.GetName(), schema, registeredActionHandler{
+		invoke: func(ctx context.Context, args *structpb.Struct) actionHandlerResult {
+			response, plaintextData, annos, err := handler(ctx, args)
+			return actionHandlerResult{response: response, plaintextData: plaintextData, annotations: annos, err: err}
+		},
+		secretReturnNames:         secretReturnNames,
+		requiredSecretReturnNames: requiredSecretReturnNames,
+	})
+}
+
+func (a *ActionManager) registerGlobalAction(ctx context.Context, name string, schema *v2.BatonActionSchema, handler registeredActionHandler) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if handler == nil {
+	if handler.invoke == nil {
 		return errors.New("action handler cannot be nil")
 	}
 	err := a.registerActionSchema(ctx, name, schema)
@@ -232,6 +527,57 @@ func (a *ActionManager) RegisterResourceAction(
 	schema *v2.BatonActionSchema,
 	handler ActionHandler,
 ) error {
+	if handler == nil {
+		return errors.New("action handler cannot be nil")
+	}
+	if hasSecretReturnTypes(schema) {
+		return errors.New("action schemas with secret return types must use RegisterResourceActionWithSecrets")
+	}
+	return a.registerResourceAction(ctx, resourceTypeID, schema, registeredActionHandler{
+		invoke: func(ctx context.Context, args *structpb.Struct) actionHandlerResult {
+			response, annos, err := handler(ctx, args)
+			return actionHandlerResult{response: response, annotations: annos, err: err}
+		},
+	})
+}
+
+// RegisterResourceActionWithSecrets registers a resource-scoped action that
+// returns plaintext secret values separately from its public response.
+func (a *ActionManager) RegisterResourceActionWithSecrets(
+	ctx context.Context,
+	resourceTypeID string,
+	schema *v2.BatonActionSchema,
+	handler ActionHandlerWithSecrets,
+) error {
+	if schema == nil {
+		return errors.New("action schema cannot be nil")
+	}
+	if handler == nil {
+		return errors.New("action handler cannot be nil")
+	}
+	if !hasSecretReturnTypes(schema) {
+		return errors.New("secret action handler requires at least one secret return type")
+	}
+	secretReturnNames, requiredSecretReturnNames, err := validateSecretReturnTypes(schema.GetReturnTypes())
+	if err != nil {
+		return err
+	}
+	return a.registerResourceAction(ctx, resourceTypeID, schema, registeredActionHandler{
+		invoke: func(ctx context.Context, args *structpb.Struct) actionHandlerResult {
+			response, plaintextData, annos, err := handler(ctx, args)
+			return actionHandlerResult{response: response, plaintextData: plaintextData, annotations: annos, err: err}
+		},
+		secretReturnNames:         secretReturnNames,
+		requiredSecretReturnNames: requiredSecretReturnNames,
+	})
+}
+
+func (a *ActionManager) registerResourceAction(
+	ctx context.Context,
+	resourceTypeID string,
+	schema *v2.BatonActionSchema,
+	handler registeredActionHandler,
+) error {
 	if resourceTypeID == "" {
 		return errors.New("resource type ID cannot be empty")
 	}
@@ -241,7 +587,7 @@ func (a *ActionManager) RegisterResourceAction(
 	if schema.GetName() == "" {
 		return errors.New("action schema name cannot be empty")
 	}
-	if handler == nil {
+	if handler.invoke == nil {
 		return fmt.Errorf("handler cannot be nil for action %s", schema.GetName())
 	}
 
@@ -255,7 +601,7 @@ func (a *ActionManager) RegisterResourceAction(
 		a.resourceSchemas[resourceTypeID] = make(map[string]*v2.BatonActionSchema)
 	}
 	if a.resourceHandlers[resourceTypeID] == nil {
-		a.resourceHandlers[resourceTypeID] = make(map[string]ActionHandler)
+		a.resourceHandlers[resourceTypeID] = make(map[string]registeredActionHandler)
 	}
 
 	actionName := schema.GetName()
@@ -301,6 +647,10 @@ type resourceTypeActionRegistry struct {
 
 func (r *resourceTypeActionRegistry) Register(ctx context.Context, schema *v2.BatonActionSchema, handler ActionHandler) error {
 	return r.actionManager.RegisterResourceAction(ctx, r.resourceTypeID, schema, handler)
+}
+
+func (r *resourceTypeActionRegistry) RegisterWithSecrets(ctx context.Context, schema *v2.BatonActionSchema, handler ActionHandlerWithSecrets) error {
+	return r.actionManager.RegisterResourceActionWithSecrets(ctx, r.resourceTypeID, schema, handler)
 }
 
 // Deprecated: Use Register instead.
@@ -387,18 +737,29 @@ func (a *ActionManager) GetActionSchema(_ context.Context, name string) (*v2.Bat
 	return schema, nil, nil
 }
 
-func (a *ActionManager) GetActionStatus(_ context.Context, actionId string) (v2.BatonActionStatus, string, *structpb.Struct, annotations.Annotations, error) {
+func (a *ActionManager) GetActionStatus(ctx context.Context, actionId string) (v2.BatonActionStatus, string, *structpb.Struct, annotations.Annotations, error) {
+	status, name, response, _, annos, err := a.GetActionStatusWithEncryptedData(ctx, actionId)
+	return status, name, response, annos, err
+}
+
+// GetActionStatusWithEncryptedData returns an outstanding action's public and
+// encrypted results in one consistent snapshot.
+func (a *ActionManager) GetActionStatusWithEncryptedData(
+	_ context.Context,
+	actionId string,
+) (v2.BatonActionStatus, string, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
 	oa := a.actions[actionId]
 	if oa == nil {
-		return v2.BatonActionStatus_BATON_ACTION_STATUS_UNKNOWN, "", nil, nil, status.Error(codes.NotFound, fmt.Sprintf("action id %s not found", actionId))
+		return v2.BatonActionStatus_BATON_ACTION_STATUS_UNKNOWN, "", nil, nil, nil, status.Error(codes.NotFound, fmt.Sprintf("action id %s not found", actionId))
 	}
 
 	// Don't return oa.Err here because error is for GetActionStatus, not the action itself.
 	// oa.Rv contains any error.
-	return oa.Status, oa.Name, oa.Rv, oa.Annos, nil
+	_, st, rv, encryptedData, annos := oa.resultWithEncryptedData()
+	return st, oa.Name, rv, encryptedData, annos, nil
 }
 
 // InvokeAction invokes an action. If resourceTypeID is set, it invokes a resource-scoped action.
@@ -409,63 +770,76 @@ func (a *ActionManager) InvokeAction(
 	resourceTypeID string,
 	args *structpb.Struct,
 ) (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations, error) {
+	return a.InvokeActionWithWait(ctx, name, resourceTypeID, args, 0)
+}
+
+// InvokeActionWithWait is InvokeAction with an explicit bound on how long the
+// call may block waiting for the handler before returning the action's
+// in-flight status; zero or negative keeps the default.
+func (a *ActionManager) InvokeActionWithWait(
+	ctx context.Context,
+	name string,
+	resourceTypeID string,
+	args *structpb.Struct,
+	inlineWait time.Duration,
+) (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations, error) {
+	id, actionStatus, response, _, annos, err := a.InvokeActionWithWaitAndEncryption(
+		ctx,
+		name,
+		resourceTypeID,
+		args,
+		inlineWait,
+		nil,
+	)
+	return id, actionStatus, response, annos, err
+}
+
+// InvokeActionWithWaitAndEncryption invokes an action with recipients for any
+// secret return values.
+func (a *ActionManager) InvokeActionWithWaitAndEncryption(
+	ctx context.Context,
+	name string,
+	resourceTypeID string,
+	args *structpb.Struct,
+	inlineWait time.Duration,
+	encryptionConfigs []*v2.EncryptionConfig,
+) (string, v2.BatonActionStatus, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations, error) {
+	clamped := clampInlineWait(inlineWait)
+	if clamped < inlineWait {
+		ctxzap.Extract(ctx).Warn("capping requested inline wait",
+			zap.Duration("requested", inlineWait),
+			zap.Duration("capped", clamped))
+	}
+	inlineWait = clamped
+
 	if resourceTypeID != "" {
-		return a.invokeResourceAction(ctx, resourceTypeID, name, args)
+		return a.invokeResourceAction(ctx, resourceTypeID, name, args, inlineWait, encryptionConfigs)
 	}
 
-	return a.invokeGlobalAction(ctx, name, args)
+	return a.invokeGlobalAction(ctx, name, args, inlineWait, encryptionConfigs)
 }
 
 // invokeGlobalAction invokes a global (non-resource-scoped) action.
-func (a *ActionManager) invokeGlobalAction(ctx context.Context, name string, args *structpb.Struct) (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations, error) {
+func (a *ActionManager) invokeGlobalAction(
+	ctx context.Context,
+	name string,
+	args *structpb.Struct,
+	inlineWait time.Duration,
+	encryptionConfigs []*v2.EncryptionConfig,
+) (string, v2.BatonActionStatus, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations, error) {
 	a.mu.RLock()
 	handler, ok := a.handlers[name]
 	schema, schemaOk := a.schemas[name]
 	a.mu.RUnlock()
 
 	if !ok {
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.NotFound, fmt.Sprintf("handler for action %s not found", name))
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.NotFound, fmt.Sprintf("handler for action %s not found", name))
 	}
 	if !schemaOk || schema == nil {
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.Internal, fmt.Sprintf("schema for action %s not found", name))
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.Internal, fmt.Sprintf("schema for action %s not found", name))
 	}
 
-	// Validate constraints
-	if err := validateActionConstraints(schema.GetConstraints(), args); err != nil {
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-
-	oa := a.GetNewAction(name)
-
-	done := make(chan struct{})
-
-	// If handler exits within a second, return result.
-	// If handler takes longer than 1 second, return status pending.
-	// If handler takes longer than an hour, return status failed.
-	go func() { //nolint:gosec // We want to run this in the background.
-		defer close(done)
-		oa.SetStatus(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_RUNNING)
-		bgCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
-		handlerCtx, cancel := context.WithTimeoutCause(bgCtx, 1*time.Hour, errors.New("action handler timed out"))
-		defer cancel()
-		var oaErr error
-		oa.Rv, oa.Annos, oaErr = handler(handlerCtx, args)
-		if oaErr == nil {
-			oa.SetStatus(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE)
-		} else {
-			oa.SetError(ctx, oaErr)
-		}
-	}()
-
-	select {
-	case <-done:
-		return oa.Id, oa.Status, oa.Rv, oa.Annos, nil
-	case <-time.After(1 * time.Second):
-		return oa.Id, oa.Status, oa.Rv, oa.Annos, nil
-	case <-ctx.Done():
-		oa.SetError(ctx, ctx.Err())
-		return oa.Id, oa.Status, oa.Rv, oa.Annos, ctx.Err()
-	}
+	return a.invokeRegisteredAction(ctx, name, "", args, inlineWait, encryptionConfigs, schema, handler)
 }
 
 // invokeResourceAction invokes a resource-scoped action.
@@ -474,19 +848,21 @@ func (a *ActionManager) invokeResourceAction(
 	resourceTypeID string,
 	actionName string,
 	args *structpb.Struct,
-) (string, v2.BatonActionStatus, *structpb.Struct, annotations.Annotations, error) {
+	inlineWait time.Duration,
+	encryptionConfigs []*v2.EncryptionConfig,
+) (string, v2.BatonActionStatus, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations, error) {
 	if resourceTypeID == "" {
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.InvalidArgument, "resource type ID is required")
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.InvalidArgument, "resource type ID is required")
 	}
 	if actionName == "" {
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.InvalidArgument, "action name is required")
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.InvalidArgument, "action name is required")
 	}
 
 	a.mu.RLock()
 	handlers, ok := a.resourceHandlers[resourceTypeID]
 	if !ok {
 		a.mu.RUnlock()
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.NotFound, fmt.Sprintf("no actions found for resource type %s", resourceTypeID))
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.NotFound, fmt.Sprintf("no actions found for resource type %s", resourceTypeID))
 	}
 
 	handler, ok := handlers[actionName]
@@ -496,57 +872,231 @@ func (a *ActionManager) invokeResourceAction(
 			v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED,
 			nil,
 			nil,
+			nil,
 			status.Error(codes.NotFound, fmt.Sprintf("handler for action %s not found for resource type %s", actionName, resourceTypeID))
 	}
 
 	schemas, ok := a.resourceSchemas[resourceTypeID]
 	if !ok {
 		a.mu.RUnlock()
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.Internal, fmt.Sprintf("schemas not found for resource type %s", resourceTypeID))
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.Internal, fmt.Sprintf("schemas not found for resource type %s", resourceTypeID))
 	}
 
 	schema, ok := schemas[actionName]
 	if !ok {
 		a.mu.RUnlock()
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.Internal, fmt.Sprintf("schema not found for action %s", actionName))
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.Internal, fmt.Sprintf("schema not found for action %s", actionName))
 	}
 	a.mu.RUnlock()
 
-	// Validate constraints
+	return a.invokeRegisteredAction(ctx, actionName, resourceTypeID, args, inlineWait, encryptionConfigs, schema, handler)
+}
+
+func (a *ActionManager) invokeRegisteredAction(
+	ctx context.Context,
+	actionName string,
+	resourceTypeID string,
+	args *structpb.Struct,
+	inlineWait time.Duration,
+	encryptionConfigs []*v2.EncryptionConfig,
+	schema *v2.BatonActionSchema,
+	handler registeredActionHandler,
+) (string, v2.BatonActionStatus, *structpb.Struct, []*v2.EncryptedData, annotations.Annotations, error) {
 	if err := validateActionConstraints(schema.GetConstraints(), args); err != nil {
-		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, status.Error(codes.InvalidArgument, err.Error())
+		return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	var encryptionManager *crypto.EncryptionManager
+	if len(handler.secretReturnNames) > 0 {
+		if len(encryptionConfigs) == 0 {
+			return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Error(codes.InvalidArgument, "at least one encryption config is required for secret action results")
+		}
+		encryptionConfigs = cloneEncryptionConfigs(encryptionConfigs)
+		if err := crypto.ValidateEncryptionConfigs(encryptionConfigs); err != nil {
+			return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, err
+		}
+		var err error
+		encryptionManager, err = crypto.NewEncryptionManager(nil, encryptionConfigs)
+		if err != nil {
+			return "", v2.BatonActionStatus_BATON_ACTION_STATUS_FAILED, nil, nil, nil, status.Errorf(codes.InvalidArgument, "create encryption manager: %v", err)
+		}
 	}
 
 	oa := a.GetNewAction(actionName)
 	done := make(chan struct{})
 
-	// Invoke handler in goroutine
-	go func() { //nolint:gosec // We want to run this in the background.
+	// The handler runs detached. Return its final result if it finishes
+	// within the inline wait; otherwise return the in-flight status.
+	go func() { // #nosec G118 -- action handlers intentionally outlive the request context and keep only trace/log metadata.
 		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				if len(handler.secretReturnNames) > 0 {
+					ctxzap.Extract(ctx).Error("panic in action handler",
+						zap.String("resource_type", resourceTypeID),
+						zap.String("action", actionName),
+						zap.Stack("stack"))
+					oa.SetError(ctx, errors.New("panic in action handler"))
+				} else {
+					ctxzap.Extract(ctx).Error("panic in action handler",
+						zap.String("resource_type", resourceTypeID),
+						zap.String("action", actionName),
+						zap.Any("panic", r),
+						zap.Stack("stack"))
+					oa.SetError(ctx, fmt.Errorf("panic in action handler: %v", r))
+				}
+			}
+		}()
 		oa.SetStatus(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_RUNNING)
 		bgCtx := trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(ctx))
 		bgCtx = ctxzap.ToContext(bgCtx, ctxzap.Extract(ctx))
 		handlerCtx, cancel := context.WithTimeoutCause(bgCtx, 1*time.Hour, errors.New("action handler timed out"))
 		defer cancel()
-		var oaErr error
-		oa.Rv, oa.Annos, oaErr = handler(handlerCtx, args)
-		if oaErr == nil {
-			oa.SetStatus(ctx, v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE)
-		} else {
-			oa.SetError(ctx, oaErr)
+		result := handler.invoke(handlerCtx, args)
+		encryptedData, resultErr := prepareActionResult(
+			handlerCtx,
+			handler,
+			encryptionManager,
+			a.encryptPlaintext,
+			result.response,
+			result.plaintextData,
+			result.err == nil,
+		)
+		if resultErr != nil {
+			result.response = nil
+			result.err = errors.Join(result.err, resultErr)
 		}
+		oa.setOutcomeWithEncryptedData(ctx, result.response, encryptedData, result.annotations, result.err)
 	}()
 
-	// Wait for completion or timeout
+	// Stop releases the timer deterministically when the handler wins the
+	// select; an abandoned time.After timer would only be GC-eligible.
+	waitTimer := time.NewTimer(inlineWait)
+	defer waitTimer.Stop()
+
 	select {
 	case <-done:
-		return oa.Id, oa.Status, oa.Rv, oa.Annos, nil
-	case <-time.After(1 * time.Second):
-		return oa.Id, oa.Status, oa.Rv, oa.Annos, nil
+		id, st, rv, encryptedData, annos := oa.resultWithEncryptedData()
+		return id, st, rv, encryptedData, annos, nil
+	case <-waitTimer.C:
+		id, st, rv, encryptedData, annos := oa.resultWithEncryptedData()
+		return id, st, rv, encryptedData, annos, nil
 	case <-ctx.Done():
-		oa.SetError(ctx, ctx.Err())
-		return oa.Id, oa.Status, oa.Rv, oa.Annos, ctx.Err()
+		// The handler may have finished in the same instant; prefer its
+		// completed result over a spurious cancellation return.
+		select {
+		case <-done:
+			id, st, rv, encryptedData, annos := oa.resultWithEncryptedData()
+			return id, st, rv, encryptedData, annos, nil
+		default:
+		}
+		oa.setCancelled(ctx, ctx.Err())
+		id, st, rv, encryptedData, annos := oa.resultWithEncryptedData()
+		if st == v2.BatonActionStatus_BATON_ACTION_STATUS_COMPLETE {
+			// The handler won the race to the lock; its completed result is
+			// the authoritative pairing, not the cancellation.
+			return id, st, rv, encryptedData, annos, nil
+		}
+		return id, st, rv, encryptedData, annos, ctx.Err()
 	}
+}
+
+func hasSecretReturnTypes(schema *v2.BatonActionSchema) bool {
+	if schema == nil {
+		return false
+	}
+	for _, field := range schema.GetReturnTypes() {
+		if field.GetIsSecret() {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSecretReturnTypes(returnTypes []*config.Field) (map[string]struct{}, []string, error) {
+	seen := make(map[string]struct{}, len(returnTypes))
+	requiredNames := make([]string, 0)
+	for _, field := range returnTypes {
+		if field == nil || !field.GetIsSecret() {
+			continue
+		}
+		name := field.GetName()
+		if name == "" {
+			return nil, nil, errors.New("secret return type name cannot be empty")
+		}
+		if _, ok := seen[name]; ok {
+			return nil, nil, fmt.Errorf("duplicate secret return type %q", name)
+		}
+		seen[name] = struct{}{}
+		if field.GetIsRequired() {
+			requiredNames = append(requiredNames, name)
+		}
+	}
+	return seen, requiredNames, nil
+}
+
+func cloneEncryptionConfigs(configs []*v2.EncryptionConfig) []*v2.EncryptionConfig {
+	cloned := make([]*v2.EncryptionConfig, len(configs))
+	for i, config := range configs {
+		if config != nil {
+			cloned[i] = proto.Clone(config).(*v2.EncryptionConfig)
+		}
+	}
+	return cloned
+}
+
+func prepareActionResult(
+	ctx context.Context,
+	handler registeredActionHandler,
+	encryptionManager *crypto.EncryptionManager,
+	encryptPlaintext actionEncryptFunc,
+	response *structpb.Struct,
+	plaintextData []*v2.PlaintextData,
+	encrypt bool,
+) ([]*v2.EncryptedData, error) {
+	if len(handler.secretReturnNames) == 0 {
+		return nil, nil
+	}
+
+	for name := range response.GetFields() {
+		if _, ok := handler.secretReturnNames[name]; ok {
+			return nil, fmt.Errorf("secret return value %q must not be included in the public response", name)
+		}
+	}
+
+	seen := make(map[string]struct{}, len(plaintextData))
+	for i, plaintext := range plaintextData {
+		if plaintext == nil || plaintext.GetName() == "" || len(plaintext.GetBytes()) == 0 {
+			return nil, fmt.Errorf("plaintext return value %d must have a name and non-empty bytes", i)
+		}
+		if _, ok := handler.secretReturnNames[plaintext.GetName()]; !ok {
+			return nil, fmt.Errorf("plaintext return value %q is not declared as a secret return type", plaintext.GetName())
+		}
+		if _, ok := seen[plaintext.GetName()]; ok {
+			return nil, fmt.Errorf("duplicate plaintext return value %q", plaintext.GetName())
+		}
+		seen[plaintext.GetName()] = struct{}{}
+	}
+
+	if !encrypt {
+		return nil, nil
+	}
+
+	for _, name := range handler.requiredSecretReturnNames {
+		if _, ok := seen[name]; !ok {
+			return nil, fmt.Errorf("required secret return type %q is missing", name)
+		}
+	}
+
+	var encryptedData []*v2.EncryptedData
+	for _, plaintext := range plaintextData {
+		encrypted, err := encryptPlaintext(ctx, encryptionManager, plaintext)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt action return value %q: %w", plaintext.GetName(), err)
+		}
+		encryptedData = append(encryptedData, encrypted...)
+	}
+	return encryptedData, nil
 }
 
 // validateActionConstraints validates that the provided args satisfy the schema constraints.

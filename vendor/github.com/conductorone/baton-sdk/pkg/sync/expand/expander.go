@@ -2,34 +2,85 @@ package expand
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"os"
-	"strconv"
 
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
-
+	"github.com/cockroachdb/pebble/v2/vfs"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	reader_v2 "github.com/conductorone/baton-sdk/pb/c1/reader/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/connectorstore"
+	v3 "github.com/conductorone/baton-sdk/pb/c1/storage/v3"
+	batonGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const defaultMaxDepth int64 = 20
+// immutableAnnotationAny is the GrantImmutable annotation every expanded
+// grant carries. The payload is a constant empty GrantImmutable, so it is
+// marshaled once here instead of per grant — anypb.New per call was ~1.5GB
+// of allocations on a large expansion. The *anypb.Any is treated as
+// read-only; each grant's annotation slice references the shared pointer.
+var immutableAnnotationAny = func() *anypb.Any {
+	a, err := anypb.New(&v2.GrantImmutable{})
+	if err != nil {
+		panic(fmt.Errorf("expand: marshal GrantImmutable annotation: %w", err))
+	}
+	return a
+}()
 
-var maxDepth, _ = strconv.ParseInt(os.Getenv("BATON_GRAPH_EXPAND_MAX_DEPTH"), 10, 64)
-
-// ErrMaxDepthExceeded is returned when the expansion graph exceeds the maximum allowed depth.
+// Deprecated: no expansion path returns this; kept so importers compile.
 var ErrMaxDepthExceeded = errors.New("max depth exceeded")
 
-// ExpanderStore defines the minimal store interface needed for grant expansion.
-// This interface can be implemented by the connectorstore or by a mock for testing.
+// ExpanderStore is implemented by expanderStoreAdapter, the Pebble store
+// adapter in pkg/sync. Tests use mocks.
+//
+// ListGrantsForEntitlement must return an entitlement's grants in
+// non-decreasing principal (resource type, resource id) order across pages.
+// buildProjectionDB fails with "projection SST keys out of order" otherwise.
+//
+// StoreExpandedGrants writes a batch of expanded grants back to storage,
+// preserving existing expansion metadata columns on the underlying rows.
+// See c1zstore.GrantStore.StoreExpandedGrants for the full contract.
 type ExpanderStore interface {
 	GetEntitlement(ctx context.Context, req *reader_v2.EntitlementsReaderServiceGetEntitlementRequest) (*reader_v2.EntitlementsReaderServiceGetEntitlementResponse, error)
 	ListGrantsForEntitlement(ctx context.Context, req *reader_v2.GrantsReaderServiceListGrantsForEntitlementRequest) (*reader_v2.GrantsReaderServiceListGrantsForEntitlementResponse, error)
-	UpsertGrants(ctx context.Context, opts connectorstore.GrantUpsertOptions, grants ...*v2.Grant) error
+	StoreExpandedGrants(ctx context.Context, grants ...*v2.Grant) error
+}
+
+// newExpandedGrantStorer is an optional fast path for stores that can persist
+// caller-proven-new expanded grants without read-before-write. Pebble implements
+// it; SQLite and tests can omit it and fall back to StoreExpandedGrants.
+type newExpandedGrantStorer interface {
+	StoreNewExpandedGrants(ctx context.Context, grants ...*v2.Grant) error
+}
+
+// synthesizedContributionStorer is an optional store fast path for
+// caller-proven-new synthesized grants expressed as raw contributions
+// (destination + principal refs + sources) rather than materialized
+// v2.Grants, skipping both the grant construction and the read-before-write.
+// Pebble implements it; other stores fall back to StoreExpandedGrants via
+// the caller.
+type synthesizedContributionStorer interface {
+	StoreNewExpandedGrantContributions(ctx context.Context, dest *v2.Entitlement, principals []*v3.PrincipalRef, sources []batonGrant.Sources) error
+}
+
+// synthesizedContributionLayerStorer is an optional store fast path that
+// accumulates one topological layer's synthesized grants into sorted bulk
+// writes (SST ingests on Pebble) instead of committing each destination's
+// rows out of key order as they are produced.
+//
+// Begin returning false routes the caller to the
+// StoreNewExpandedGrantContributions fallback. Today the Pebble engine
+// always returns true when a sync is open (the by_principal index is
+// unconditionally rebuilt at EndSync, so a layer session never skips index
+// maintenance); the boolean exists so a future store can decline. Rows
+// streamed via Add become readable in bulk publishes no later than Finish
+// returning — callers must not rely on visibility before Finish, nor on
+// invisibility before it (large layers publish interior segments early).
+// Abort discards an in-flight session.
+type synthesizedContributionLayerStorer interface {
+	BeginExpandedGrantLayer(ctx context.Context) (bool, error)
+	AddExpandedGrantLayerContributions(ctx context.Context, dest *v2.Entitlement, principals []*v3.PrincipalRef, sources []batonGrant.Sources) error
+	FinishExpandedGrantLayer(ctx context.Context) error
+	AbortExpandedGrantLayer(ctx context.Context) error
 }
 
 // Expander handles the grant expansion algorithm.
@@ -37,6 +88,17 @@ type ExpanderStore interface {
 type Expander struct {
 	store ExpanderStore
 	graph *EntitlementGraph
+	// dropStats, when set, aggregates dropped-edge reporting for the
+	// whole sync (the syncer owns it across step-wise Expander
+	// reconstruction). Nil is safe: recording no-ops.
+	dropStats *DroppedEdgeStats
+	// Nil uses an on-disk temporary directory.
+	projectionScratchFS vfs.FS
+}
+
+// SetDropStats installs the sync-scoped dropped-edge aggregator.
+func (e *Expander) SetDropStats(s *DroppedEdgeStats) {
+	e.dropStats = s
 }
 
 // NewExpander creates a new Expander with the given store and graph.
@@ -66,271 +128,13 @@ func (e *Expander) Run(ctx context.Context) error {
 	}
 }
 
-// RunSingleStep executes one step of the expansion algorithm.
-// Returns true when the graph is fully expanded, false if more work is needed.
-// This matches the syncer's step-by-step execution model.
 func (e *Expander) RunSingleStep(ctx context.Context) error {
-	l := ctxzap.Extract(ctx)
-	l = l.With(zap.Int("depth", e.graph.Depth))
-	l.Debug("expander: starting step")
-
-	// Process current action if any
-	if len(e.graph.Actions) > 0 {
-		action := e.graph.Actions[0]
-		nextPageToken, err := e.runAction(ctx, action)
-		if err != nil {
-			l.Error("expander: error running graph action", zap.Error(err), zap.Any("action", action))
-			_ = e.graph.DeleteEdge(ctx, action.SourceEntitlementID, action.DescendantEntitlementID)
-			if errors.Is(err, sql.ErrNoRows) {
-				// Skip action and delete the edge that caused the error.
-				e.graph.Actions = e.graph.Actions[1:]
-				return nil
-			}
-			return err
-		}
-
-		if nextPageToken != "" {
-			// More pages to process
-			action.PageToken = nextPageToken
-		} else {
-			// Action is complete - mark edge expanded and remove from queue
-			e.graph.MarkEdgeExpanded(action.SourceEntitlementID, action.DescendantEntitlementID)
-			e.graph.Actions = e.graph.Actions[1:]
-		}
-	}
-
-	// If there are still actions remaining, continue processing
-	if len(e.graph.Actions) > 0 {
+	if e.IsDone(ctx) {
 		return nil
 	}
-
-	// Check max depth
-	depth := maxDepth
-	if depth == 0 {
-		depth = defaultMaxDepth
-	}
-
-	if int64(e.graph.Depth) > depth {
-		l.Error("expander: exceeded max depth", zap.Int64("max_depth", depth))
-		return fmt.Errorf("expander: %w (%d)", ErrMaxDepthExceeded, depth)
-	}
-
-	// Generate new actions from expandable entitlements
-	for sourceEntitlementID := range e.graph.GetExpandableEntitlements(ctx) {
-		for descendantEntitlementID, grantInfo := range e.graph.GetExpandableDescendantEntitlements(ctx, sourceEntitlementID) {
-			e.graph.Actions = append(e.graph.Actions, &EntitlementGraphAction{
-				SourceEntitlementID:     sourceEntitlementID,
-				DescendantEntitlementID: descendantEntitlementID,
-				PageToken:               "",
-				Shallow:                 grantInfo.IsShallow,
-				ResourceTypeIDs:         grantInfo.ResourceTypeIDs,
-			})
-		}
-	}
-
-	e.graph.Depth++
-	l.Debug("expander: graph is not expanded, incrementing depth")
-	return nil
+	return e.RunTopologicalMergeProjection(ctx)
 }
 
 func (e *Expander) IsDone(ctx context.Context) bool {
 	return e.graph.IsExpanded()
-}
-
-// runAction processes a single action and returns the next page token.
-// If the returned page token is empty, the action is complete.
-func (e *Expander) runAction(ctx context.Context, action *EntitlementGraphAction) (string, error) {
-	l := ctxzap.Extract(ctx)
-	l = l.With(
-		zap.Int("depth", e.graph.Depth),
-		zap.String("source_entitlement_id", action.SourceEntitlementID),
-		zap.String("descendant_entitlement_id", action.DescendantEntitlementID),
-	)
-
-	// Fetch source and descendant entitlement
-	sourceEntitlement, err := e.store.GetEntitlement(ctx, reader_v2.EntitlementsReaderServiceGetEntitlementRequest_builder{
-		EntitlementId: action.SourceEntitlementID,
-	}.Build())
-	if err != nil {
-		l.Error("runAction: error fetching source entitlement", zap.Error(err))
-		return "", fmt.Errorf("runAction: error fetching source entitlement: %w", err)
-	}
-
-	descendantEntitlement, err := e.store.GetEntitlement(ctx, reader_v2.EntitlementsReaderServiceGetEntitlementRequest_builder{
-		EntitlementId: action.DescendantEntitlementID,
-	}.Build())
-	if err != nil {
-		l.Error("runAction: error fetching descendant entitlement", zap.Error(err))
-		return "", fmt.Errorf("runAction: error fetching descendant entitlement: %w", err)
-	}
-
-	// Fetch a page of source grants
-	sourceGrants, err := e.store.ListGrantsForEntitlement(ctx, reader_v2.GrantsReaderServiceListGrantsForEntitlementRequest_builder{
-		Entitlement:              sourceEntitlement.GetEntitlement(),
-		PageToken:                action.PageToken,
-		PrincipalResourceTypeIds: action.ResourceTypeIDs,
-	}.Build())
-	if err != nil {
-		l.Error("runAction: error fetching source grants", zap.Error(err))
-		return "", fmt.Errorf("runAction: error fetching source grants: %w", err)
-	}
-
-	var newGrants = make([]*v2.Grant, 0)
-	for _, sourceGrant := range sourceGrants.GetList() {
-		// If this is a shallow action, then we only want to expand grants that have no sources
-		// which indicates that it was directly assigned.
-		if action.Shallow {
-			sourcesMap := sourceGrant.GetSources().GetSources()
-			// If we have no sources, this is a direct grant
-			foundDirectGrant := len(sourcesMap) == 0
-			// If the source grant has sources, then we need to see if any of them are the source entitlement itself
-			if sourcesMap[action.SourceEntitlementID] != nil {
-				foundDirectGrant = true
-			}
-
-			// This is not a direct grant, so skip it since we are a shallow action
-			if !foundDirectGrant {
-				continue
-			}
-		}
-
-		// Determine if the source grant is direct: either it has no sources (never expanded),
-		// or it has a self-reference (direct grant that was also expanded).
-		sgSources := sourceGrant.GetSources().GetSources()
-		isSourceDirect := len(sgSources) == 0 || sgSources[action.SourceEntitlementID] != nil
-
-		// Unroll all grants for the principal on the descendant entitlement.
-		pageToken := ""
-		for {
-			req := reader_v2.GrantsReaderServiceListGrantsForEntitlementRequest_builder{
-				Entitlement: descendantEntitlement.GetEntitlement(),
-				PrincipalId: sourceGrant.GetPrincipal().GetId(),
-				PageToken:   pageToken,
-				Annotations: nil,
-			}.Build()
-
-			resp, err := e.store.ListGrantsForEntitlement(ctx, req)
-			if err != nil {
-				l.Error("runAction: error fetching descendant grants", zap.Error(err))
-				return "", fmt.Errorf("runAction: error fetching descendant grants: %w", err)
-			}
-			descendantGrants := resp.GetList()
-
-			// If we have no grants for the principal in the descendant entitlement, make one.
-			if pageToken == "" && resp.GetNextPageToken() == "" && len(descendantGrants) == 0 {
-				descendantGrant, err := newExpandedGrant(descendantEntitlement.GetEntitlement(), sourceGrant.GetPrincipal(), action.SourceEntitlementID, isSourceDirect)
-				if err != nil {
-					l.Error("runAction: error creating new grant", zap.Error(err))
-					return "", fmt.Errorf("runAction: error creating new grant: %w", err)
-				}
-				newGrants = append(newGrants, descendantGrant)
-				newGrants, err = PutGrantsInChunks(ctx, e.store, newGrants, 10000)
-				if err != nil {
-					l.Error("runAction: error updating descendant grants", zap.Error(err))
-					return "", fmt.Errorf("runAction: error updating descendant grants: %w", err)
-				}
-				break
-			}
-
-			// Add the source entitlement as a source to all descendant grants.
-			grantsToUpdate := make([]*v2.Grant, 0)
-			for _, descendantGrant := range descendantGrants {
-				sourcesMap := descendantGrant.GetSources().GetSources()
-				if sourcesMap == nil {
-					sourcesMap = make(map[string]*v2.GrantSources_GrantSource)
-				}
-
-				updated := false
-
-				if len(sourcesMap) == 0 {
-					// If we are already granted this entitlement, make sure to add ourselves as a source.
-					sourcesMap[action.DescendantEntitlementID] = &v2.GrantSources_GrantSource{IsDirect: true}
-					updated = true
-				}
-				// Include the source grant as a source.
-				if sourcesMap[action.SourceEntitlementID] == nil {
-					sourcesMap[action.SourceEntitlementID] = &v2.GrantSources_GrantSource{IsDirect: isSourceDirect}
-					updated = true
-				}
-
-				if updated {
-					sources := v2.GrantSources_builder{Sources: sourcesMap}.Build()
-					descendantGrant.SetSources(sources)
-					grantsToUpdate = append(grantsToUpdate, descendantGrant)
-				}
-			}
-			newGrants = append(newGrants, grantsToUpdate...)
-
-			newGrants, err = PutGrantsInChunks(ctx, e.store, newGrants, 10000)
-			if err != nil {
-				l.Error("runAction: error updating descendant grants", zap.Error(err))
-				return "", fmt.Errorf("runAction: error updating descendant grants: %w", err)
-			}
-
-			pageToken = resp.GetNextPageToken()
-			if pageToken == "" {
-				break
-			}
-		}
-	}
-
-	_, err = PutGrantsInChunks(ctx, e.store, newGrants, 0)
-	if err != nil {
-		l.Error("runAction: error updating descendant grants", zap.Error(err))
-		return "", fmt.Errorf("runAction: error updating descendant grants: %w", err)
-	}
-
-	return sourceGrants.GetNextPageToken(), nil
-}
-
-// PutGrantsInChunks accumulates grants until the buffer exceeds minChunkSize,
-// then writes all grants to the store at once.
-func PutGrantsInChunks(ctx context.Context, store ExpanderStore, grants []*v2.Grant, minChunkSize int) ([]*v2.Grant, error) {
-	if len(grants) < minChunkSize {
-		return grants, nil
-	}
-
-	err := store.UpsertGrants(ctx, connectorstore.GrantUpsertOptions{
-		Mode: connectorstore.GrantUpsertModePreserveExpansion,
-	}, grants...)
-	if err != nil {
-		return nil, fmt.Errorf("PutGrantsInChunks: error putting grants: %w", err)
-	}
-
-	return make([]*v2.Grant, 0), nil
-}
-
-// newExpandedGrant creates a new grant for a principal on a descendant entitlement.
-func newExpandedGrant(descEntitlement *v2.Entitlement, principal *v2.Resource, sourceEntitlementID string, isSourceDirect bool) (*v2.Grant, error) {
-	enResource := descEntitlement.GetResource()
-	if enResource == nil {
-		return nil, fmt.Errorf("newExpandedGrant: entitlement has no resource")
-	}
-
-	if principal == nil {
-		return nil, fmt.Errorf("newExpandedGrant: principal is nil")
-	}
-
-	// Add immutable annotation since this function is only called if no direct grant exists
-	var annos annotations.Annotations
-	annos.Update(&v2.GrantImmutable{})
-
-	var sources *v2.GrantSources
-	if sourceEntitlementID != "" {
-		sources = &v2.GrantSources{
-			Sources: map[string]*v2.GrantSources_GrantSource{
-				sourceEntitlementID: {IsDirect: isSourceDirect},
-			},
-		}
-	}
-
-	grant := v2.Grant_builder{
-		Id:          fmt.Sprintf("%s:%s:%s", descEntitlement.GetId(), principal.GetId().GetResourceType(), principal.GetId().GetResource()),
-		Entitlement: descEntitlement,
-		Principal:   principal,
-		Sources:     sources,
-		Annotations: annos,
-	}.Build()
-
-	return grant, nil
 }

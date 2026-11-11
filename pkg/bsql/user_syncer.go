@@ -22,14 +22,27 @@ type userSyncer struct {
 var _ connectorbuilder.AccountManager = &userSyncer{}
 var _ connectorbuilder.CredentialManager = &userSyncer{}
 
-func newUserSyncer(rt *v2.ResourceType, rtConfig ResourceType, db *sql.DB, dbEngine database.DbEngine, celEnv *bcel.Env, fullConfig Config) *userSyncer {
+func newUserSyncer(
+	rt *v2.ResourceType,
+	rtConfig ResourceType,
+	dbs map[string]*sql.DB,
+	dbNames []string,
+	primaryDBName string,
+	dbEngine database.DbEngine,
+	celEnv *bcel.Env,
+	fullConfig Config,
+) *userSyncer {
 	sqlSyncer := &SQLSyncer{
-		resourceType: rt,
-		config:       rtConfig,
-		db:           db,
-		dbEngine:     dbEngine,
-		env:          celEnv,
-		fullConfig:   fullConfig,
+		resourceType:  rt,
+		config:        rtConfig,
+		db:            dbs[primaryDBName],
+		currentDBName: primaryDBName,
+		dbs:           dbs,
+		dbNames:       dbNames,
+		primaryDBName: primaryDBName,
+		dbEngine:      dbEngine,
+		env:           celEnv,
+		fullConfig:    fullConfig,
 	}
 
 	return &userSyncer{
@@ -153,7 +166,7 @@ func (s *userSyncer) CreateAccount(
 
 	// Execute account creation queries
 	useTransaction := !provisioningConfig.Create.NoTransaction
-	if err := s.RunProvisioningQueries(ctx, provisioningConfig.Create.Queries, nil, queryInputs, useTransaction); err != nil {
+	if err := s.RunProvisioningQueries(ctx, provisioningConfig.Create.Queries, nil, queryInputs, ProvisioningOptions{UseTransaction: useTransaction}); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -186,7 +199,15 @@ func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, cred
 	queryInputs["resource_id"] = resourceId.Resource
 	credentials := make(map[string]any)
 	var plaintextDataList []*v2.PlaintextData
-	password, err := generatePassword(ctx, credentialOptions)
+	var randPwdConfig *RandomPasswordConfig
+	if rotationConfig.Credentials != nil {
+		randPwdConfig = rotationConfig.Credentials.RandomPassword
+	}
+	effectiveOptions, err := applyPasswordConstraints(credentialOptions, randPwdConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	password, err := generatePassword(ctx, effectiveOptions)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -203,7 +224,7 @@ func (s *userSyncer) Rotate(ctx context.Context, resourceId *v2.ResourceId, cred
 
 	// Execute account creation queries
 	useTransaction := !rotationConfig.Update.NoTransaction
-	if err := s.RunProvisioningQueries(ctx, rotationConfig.Update.Queries, nil, queryInputs, useTransaction); err != nil {
+	if err := s.RunProvisioningQueries(ctx, rotationConfig.Update.Queries, nil, queryInputs, ProvisioningOptions{UseTransaction: useTransaction}); err != nil {
 		return nil, nil, err
 	}
 

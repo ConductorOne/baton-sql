@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/crypto"
+	sdkResource "github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 var ErrUnableFindResourceProvisioning = errors.New("unable to find resource for account provisioning")
@@ -72,13 +75,31 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 	}
 
 	useTx := !provisioningConfig.Grant.NoTransaction
-	err = s.RunProvisioningQueries(ctx, provisioningConfig.Grant.Queries, provisioningConfig.Grant.ValidationQueries, provisioningVars, useTx)
+	anno, err := s.RunGrantProvisioning(
+		ctx,
+		principal,
+		provisioningConfig.Grant.Queries,
+		provisioningConfig.Grant.ValidationQueries,
+		provisioningVars,
+		ProvisioningOptions{
+			SignalIdempotency: provisioningConfig.Grant.ValidationQueriesSignalIdempotency,
+			UseTransaction:    useTx,
+		},
+		provisioningConfig.Grant.GrantReplace,
+		provisioningConfig.Grant.RejectIf,
+	)
 	if err != nil {
 		if errors.Is(err, ErrQueryAffectedZeroRows) {
 			l.Debug("entitlement is already granted", zap.String("entitlement_id", entitlement.GetId()))
-			anno := annotations.Annotations{}
-			anno.Update(&v2.GrantAlreadyExists{})
-			return anno, nil
+			// On the transactional path the zero-rows return rolls the tx back, undoing any
+			// grant_replace revoke, so a reused GrantReplaced would misreport a removal the DB
+			// no longer reflects. Keep the returned annotations only on the no_transaction path,
+			// where the replace already committed.
+			if provisioningConfig.Grant.NoTransaction {
+				anno.Update(&v2.GrantAlreadyExists{})
+				return anno, nil
+			}
+			return annotations.New(&v2.GrantAlreadyExists{}), nil
 		}
 		return nil, err
 	}
@@ -88,7 +109,7 @@ func (s *SQLSyncer) Grant(ctx context.Context, principal *v2.Resource, entitleme
 		zap.String("principal_id", principal.GetId().GetResource()),
 		zap.String("entitlement_id", entitlement.GetId()),
 	)
-	return nil, nil
+	return anno, nil
 }
 
 func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
@@ -123,19 +144,45 @@ func (s *SQLSyncer) Revoke(ctx context.Context, grant *v2.Grant) (annotations.An
 	}
 
 	useTx := !provisioningConfig.Revoke.NoTransaction
-	err = s.RunProvisioningQueries(ctx, provisioningConfig.Revoke.Queries, provisioningConfig.Revoke.ValidationQueries, provisioningVars, useTx)
-	if err != nil {
-		if errors.Is(err, ErrQueryAffectedZeroRows) {
-			anno := annotations.Annotations{}
-			anno.Update(&v2.GrantAlreadyRevoked{})
-			return anno, nil
-		}
-
+	var existsCheck *PrincipalExistsCheck
+	if provisioningConfig.Revoke.RevokeOptions != nil {
+		existsCheck = provisioningConfig.Revoke.RevokeOptions.PrincipalExistsCheck
+	}
+	principalDeleted, err := s.RunRevokeProvisioning(
+		ctx,
+		provisioningConfig.Revoke.Queries,
+		provisioningConfig.Revoke.ValidationQueries,
+		existsCheck,
+		provisioningVars,
+		ProvisioningOptions{
+			SignalIdempotency: provisioningConfig.Revoke.ValidationQueriesSignalIdempotency,
+			UseTransaction:    useTx,
+		},
+	)
+	// The exists-check still runs when the revoke queries affected zero rows, so
+	// principalDeleted is only meaningful on the success and already-revoked paths.
+	alreadyRevoked := errors.Is(err, ErrQueryAffectedZeroRows)
+	if err != nil && !alreadyRevoked {
 		return nil, err
 	}
 
+	anno := annotations.Annotations{}
+	if principalDeleted {
+		anno.Append(sdkResource.NewResourceDeleted(grant.GetPrincipal().GetId()))
+		l.Info(
+			"revoke deleted principal; reporting ResourceDeleted",
+			zap.String("grant_id", grant.GetId()),
+			zap.String("principal_id", grant.GetPrincipal().GetId().GetResource()),
+		)
+	}
+
+	if alreadyRevoked {
+		anno.Update(&v2.GrantAlreadyRevoked{})
+		return anno, nil
+	}
+
 	l.Debug("revoked grant", zap.String("grant_id", grant.GetId()))
-	return nil, nil
+	return anno, nil
 }
 
 func (s *SQLSyncer) prepareProvisioningVars(ctx context.Context, vars map[string]string, principal *v2.Resource, entitlement *v2.Entitlement) (map[string]any, error) {
@@ -180,7 +227,7 @@ func (s *SQLSyncer) validateAccount(ctx context.Context, accountProvisioning *Ac
 	}
 
 	var ret *v2.Resource
-	_, err = s.runQuery(ctx, nil, accountProvisioning.Validate.Query, nil, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+	_, err = s.runQuery(ctx, s.db, nil, accountProvisioning.Validate.Query, nil, queryVars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
 		r, err := s.mapResource(ctx, rowMap)
 		if err != nil {
 			return false, err
@@ -252,8 +299,15 @@ func (s *SQLSyncer) prepareQueryInputs(
 	credentials := make(map[string]any)
 	var plaintextDataList []*v2.PlaintextData
 	if credentialOptions != nil {
-		var err error
-		password, err := generatePassword(ctx, credentialOptions)
+		var randPwdConfig *RandomPasswordConfig
+		if provisioningConfig.Credentials != nil {
+			randPwdConfig = provisioningConfig.Credentials.RandomPassword
+		}
+		effectiveOptions, err := applyPasswordConstraints(credentialOptions, randPwdConfig)
+		if err != nil {
+			return nil, nil, err
+		}
+		password, err := generatePassword(ctx, effectiveOptions)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -283,6 +337,59 @@ func (s *SQLSyncer) prepareQueryInputs(
 	}
 
 	return queryInputs, plaintextDataList, nil
+}
+
+// applyPasswordConstraints returns a clone of credentialOptions with the constraints from randomPwdConfig
+// applied to the RandomPassword option. When the config defines constraints they replace any constraints
+// provided by the platform, giving the connector admin full control over the character set policy.
+// proto.Clone is used so that all fields — including unknown proto fields from newer platform versions —
+// are preserved; only the Constraints field is overwritten.
+func applyPasswordConstraints(credentialOptions *v2.LocalCredentialOptions, randomPwdConfig *RandomPasswordConfig) (*v2.LocalCredentialOptions, error) {
+	if credentialOptions == nil || randomPwdConfig == nil || len(randomPwdConfig.Constraints) == 0 {
+		return credentialOptions, nil
+	}
+
+	if _, ok := credentialOptions.Options.(*v2.LocalCredentialOptions_RandomPassword_); !ok {
+		return credentialOptions, nil
+	}
+
+	var pwdCharSet string
+	var pwdCharCount int64
+
+	constraints := make([]*v2.PasswordConstraint, 0, len(randomPwdConfig.Constraints))
+	for _, c := range randomPwdConfig.Constraints {
+		var minimumCount uint32
+		if c.MinCount > 0 && c.MinCount < math.MaxUint32 {
+			minimumCount = uint32(c.MinCount)
+		} else {
+			return nil, fmt.Errorf("baton-sql: password constraint min_count must be greater than zero and less than 4294967295, got %d", c.MinCount)
+		}
+
+		constraints = append(constraints, &v2.PasswordConstraint{
+			CharSet:  c.CharSet,
+			MinCount: minimumCount,
+		})
+
+		pwdCharSet += c.CharSet
+		pwdCharCount += int64(minimumCount)
+	}
+
+	// To ensure we only use characters included on the constraints we create this last set with all the valid chars and the
+	// amount required is the amount missing to complete the password length.
+	var remainingCharCount int64
+	pwdLength := credentialOptions.GetRandomPassword().Length
+	if pwdLength > pwdCharCount {
+		remainingCharCount = pwdLength - pwdCharCount
+	}
+
+	constraints = append(constraints, &v2.PasswordConstraint{
+		CharSet:  pwdCharSet,
+		MinCount: uint32(remainingCharCount),
+	})
+
+	cloned := proto.Clone(credentialOptions).(*v2.LocalCredentialOptions)
+	cloned.GetRandomPassword().SetConstraints(constraints)
+	return cloned, nil
 }
 
 func generatePassword(ctx context.Context, credentialOptions *v2.LocalCredentialOptions) (*string, error) {

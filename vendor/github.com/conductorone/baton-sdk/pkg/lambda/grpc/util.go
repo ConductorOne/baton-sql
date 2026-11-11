@@ -2,10 +2,12 @@ package grpc
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -78,6 +80,44 @@ func decodeTimeout(s string) (time.Duration, error) {
 	return d * time.Duration(t), nil
 }
 
+const maxTimeoutValue int64 = 100000000 - 1
+
+// div does integer division and round-up the result. Note that this is
+// equivalent to (d+r-1)/r but has less chance to overflow.
+func div(d, r time.Duration) int64 {
+	if d%r > 0 {
+		return int64(d/r + 1)
+	}
+	return int64(d / r)
+}
+
+// encodeTimeout encodes the duration to the format the grpc-timeout header
+// accepts. Ported from grpc-go's internal/grpcutil.EncodeDuration.
+//
+// https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md#requests
+func encodeTimeout(t time.Duration) string {
+	if t <= 0 {
+		return "0n"
+	}
+	if d := div(t, time.Nanosecond); d <= maxTimeoutValue {
+		return strconv.FormatInt(d, 10) + "n"
+	}
+	if d := div(t, time.Microsecond); d <= maxTimeoutValue {
+		return strconv.FormatInt(d, 10) + "u"
+	}
+	if d := div(t, time.Millisecond); d <= maxTimeoutValue {
+		return strconv.FormatInt(d, 10) + "m"
+	}
+	if d := div(t, time.Second); d <= maxTimeoutValue {
+		return strconv.FormatInt(d, 10) + "S"
+	}
+	if d := div(t, time.Minute); d <= maxTimeoutValue {
+		return strconv.FormatInt(d, 10) + "M"
+	}
+	// Note that maxTimeoutValue * time.Hour > MaxInt64.
+	return strconv.FormatInt(div(t, time.Hour), 10) + "H"
+}
+
 func parseMethod(method string) (string, string, error) {
 	if method != "" && method[0] == '/' {
 		method = method[1:]
@@ -144,7 +184,11 @@ func isTransientNetworkError(err error) bool {
 	return strings.Contains(msg, "connection reset by peer") ||
 		strings.Contains(msg, "broken pipe") ||
 		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "http2: client connection lost") ||
 		strings.Contains(msg, "i/o timeout") ||
+		// Timeout strings: mapped to Unavailable as fallback for serialized errors that lost net.Error.
+		strings.Contains(msg, "connection timed out") ||
+		strings.Contains(msg, "TLS handshake timeout") ||
 		strings.Contains(msg, "no such host") ||
 		(strings.Contains(msg, "unexpected EOF") && !strings.Contains(msg, "unexpected EOF on client connection"))
 }
@@ -190,6 +234,11 @@ func statusForApplicationError(err error) *status.Status {
 		return status.Newf(codes.Unavailable, "connection reset: %s", err)
 	}
 
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return status.Newf(codes.FailedPrecondition, "tls certificate verification failed: %s", certErr)
+	}
+
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		if urlErr.Timeout() {
@@ -198,6 +247,13 @@ func statusForApplicationError(err error) *status.Status {
 		if urlErr.Temporary() {
 			return status.Newf(codes.Unavailable, "temporary error: %s", err)
 		}
+	}
+
+	// Catches net.Error timeout types not wrapped in url.Error
+	// (e.g. tls.handshakeTimeoutError at the RoundTrip level).
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return status.Newf(codes.DeadlineExceeded, "network timeout: %s", err)
 	}
 
 	if isTransientNetworkError(err) {

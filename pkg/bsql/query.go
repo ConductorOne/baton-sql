@@ -10,6 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
+	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
+	"github.com/conductorone/baton-sql/pkg/helpers"
 	"github.com/google/cel-go/common/types"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"go.uber.org/zap"
@@ -26,6 +30,8 @@ const (
 	cursorKey       = "cursor"
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
+	identifierKey   = "identifier"
+	keywordKey      = "keyword"
 	// sinceKey and resourceIdKey are reserved placeholders injected by the event feed path.
 	// Users must not define vars with these names.
 	sinceKey      = "since"
@@ -34,6 +40,15 @@ const (
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
 var ErrQueryAffectedMoreThanOneRow = errors.New("query affected more than one row, ending and rolling back")
+
+// ErrValidationNoRows means a validation query returned no rows on a DDL engine (see
+// validationNoRowsMeansIdempotent). It wraps ErrQueryAffectedZeroRows so idempotency
+// reporting still fires, but stays distinct so the revoke path can tell it apart from the
+// revoke queries themselves affecting zero rows: no revoke ran, so the principal-exists
+// probe must be skipped rather than reporting a spurious deletion.
+var ErrValidationNoRows = fmt.Errorf("validation query returned no rows: %w", ErrQueryAffectedZeroRows)
+
+const defaultGrantCancelledReason = "Grant cancelled by connector policy."
 
 type executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -55,8 +70,38 @@ type paginationContext struct {
 }
 
 type queryTokenOpts struct {
-	Key      string
+	Key string
+
+	// Unquoted strips non-alphanumeric chars and inlines as-is. Drops, never escapes —
+	// don't use with untrusted input.
 	Unquoted bool
+
+	// Identifier inlines as an engine-quoted SQL identifier (doubled embedded quotes).
+	// Use where parameter binding isn't allowed by the SQL grammar (GRANT, DDL).
+	Identifier bool
+
+	// Keyword inlines a fixed multiword SQL keyword clause (e.g. "CREATE SESSION") as-is,
+	// after collapsing internal whitespace. For system-privilege GRANT/REVOKE where the value
+	// is a keyword rather than an identifier: quoting would break it and Unquoted would strip
+	// the space. Rejects anything outside letters, digits, and single spaces, so it is not an
+	// injection vector.
+	Keyword bool
+}
+
+var keywordClauseRegex = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9 ]*$`)
+
+var whitespaceRunRegex = regexp.MustCompile(`\s+`)
+
+// renderKeyword validates a fixed multiword SQL keyword clause (e.g. "CREATE SESSION") and
+// returns it with internal whitespace collapsed to single spaces. It reports false for anything
+// outside letters, digits, and single spaces (must start with a letter), so an injected value
+// like "SESSION; DROP TABLE x" is rejected rather than inlined.
+func renderKeyword(val string) (string, bool) {
+	collapsed := strings.TrimSpace(whitespaceRunRegex.ReplaceAllString(val, " "))
+	if !keywordClauseRegex.MatchString(collapsed) {
+		return "", false
+	}
+	return collapsed, true
 }
 
 var queryOptRegex = regexp.MustCompile(`\?\<([a-zA-Z0-9_]+)(?:\|([a-zA-Z0-9_]+))?\>`)
@@ -74,6 +119,8 @@ func (s *SQLSyncer) getNextPlaceholder(qArgs []interface{}) string {
 	case database.Oracle:
 		return fmt.Sprintf(":%d", len(qArgs))
 	case database.Vertica:
+		return "?"
+	case database.DB2:
 		return "?"
 	default:
 		return "?"
@@ -105,12 +152,33 @@ func parseToken(token string) (*queryTokenOpts, error) {
 		switch opt {
 		case unquotedKey:
 			opts.Unquoted = true
+		case identifierKey:
+			opts.Identifier = true
+		case keywordKey:
+			opts.Keyword = true
 		default:
 			return nil, fmt.Errorf("unknown option %s", opt)
 		}
 	}
 
+	set := 0
+	for _, on := range []bool{opts.Unquoted, opts.Identifier, opts.Keyword} {
+		if on {
+			set++
+		}
+	}
+	if set > 1 {
+		return nil, fmt.Errorf("token options unquoted, identifier and keyword are mutually exclusive")
+	}
+
 	return opts, nil
+}
+
+func (s *SQLSyncer) quoteIdentifier(name string) string {
+	if s.dbEngine == database.MySQL {
+		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+	}
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func (s *SQLSyncer) queryVars(query string) ([]string, error) {
@@ -176,6 +244,20 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 		// If the value is unquoted, directly insert the value as a string
 		if opts.Unquoted {
 			return SanitizeIdentifier(fmt.Sprintf("%v", val))
+		}
+
+		if opts.Identifier {
+			return s.quoteIdentifier(fmt.Sprintf("%v", val))
+		}
+
+		if opts.Keyword {
+			strVal := fmt.Sprintf("%v", val)
+			rendered, ok := renderKeyword(strVal)
+			if !ok {
+				parseErr = errors.Join(parseErr, fmt.Errorf("token %s: value %q is not a valid SQL keyword clause", token, strVal))
+				return token
+			}
+			return rendered
 		}
 
 		qArgs = append(qArgs, val)
@@ -327,6 +409,20 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 			return SanitizeIdentifier(fmt.Sprintf("%v", v))
 		}
 
+		if opts.Identifier {
+			return s.quoteIdentifier(fmt.Sprintf("%v", v))
+		}
+
+		if opts.Keyword {
+			strVal := fmt.Sprintf("%v", v)
+			rendered, ok := renderKeyword(strVal)
+			if !ok {
+				parseErr = errors.Join(parseErr, fmt.Errorf("token %s: value %q is not a valid SQL keyword clause", token, strVal))
+				return token
+			}
+			return rendered
+		}
+
 		qArgs = append(qArgs, v)
 		return s.getNextPlaceholder(qArgs)
 	})
@@ -336,14 +432,56 @@ func (s *SQLSyncer) prepareProvisioningQuery(query string, vars map[string]any) 
 	return updatedQuery, qArgs, nil
 }
 
-func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validationQueries []string, vars map[string]any, useTx bool) error {
-	l := ctxzap.Extract(ctx)
+// resolveProvisioningDB routes via vars["database"]. Unset → primary handle (NOT the
+// last-iterated handle, which would couple provisioning to sync state). Unknown name
+// → loud error, never silent fallthrough to a wrong-cluster GRANT.
+func (s *SQLSyncer) resolveProvisioningDB(vars map[string]any) (*sql.DB, error) {
+	if raw, ok := vars[rowColDatabase]; ok {
+		if name, ok := raw.(string); ok && name != "" {
+			db, found := s.dbs[name]
+			if !found {
+				return nil, fmt.Errorf("provisioning: unknown database %q in vars (configured: %v)", name, s.dbNames)
+			}
+			return db, nil
+		}
+	}
+	if db, ok := s.dbs[s.primaryDBName]; ok {
+		return db, nil
+	}
+	return nil, fmt.Errorf("provisioning: primary database %q not found in handles (configured: %v)", s.primaryDBName, s.dbNames)
+}
+
+// ProvisioningOptions carries the boolean knobs shared by the exported provisioning entrypoints so
+// new options can be added without breaking out-of-repo callers.
+type ProvisioningOptions struct {
+	SignalIdempotency bool
+	UseTransaction    bool
+}
+
+func (s *SQLSyncer) RunProvisioningQueries(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	opts ProvisioningOptions,
+) error {
+	useTx := opts.UseTransaction
+	l := ctxzap.Extract(ctx).With(
+		zap.Bool("use_tx", useTx),
+	)
+
+	ctx = ctxzap.ToContext(ctx, l)
+
+	target, err := s.resolveProvisioningDB(vars)
+	if err != nil {
+		return err
+	}
 
 	var committed bool
-	var executor executor = s.db
+	var executor executor = target
 
 	if useTx {
-		tx, err := s.db.BeginTx(ctx, nil)
+		tx, err := target.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -358,11 +496,257 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		}()
 	}
 
+	err = s.RunProvisioningQueriesWithExecutor(
+		ctx,
+		queries,
+		validationQueries,
+		"provisioning",
+		vars,
+		executor,
+		ProvisioningOptions{SignalIdempotency: opts.SignalIdempotency},
+	)
+	if err != nil {
+		return err
+	}
+
+	if useTx {
+		tx, ok := executor.(*sql.Tx)
+		if !ok {
+			return errors.New("transactional executor required")
+		}
+		err := tx.Commit()
+		if err != nil {
+			return err
+		}
+		committed = true
+	}
+
+	return nil
+}
+
+// RunRevokeProvisioning runs revoke queries like RunProvisioningQueries, and
+// additionally runs an optional principal-exists probe once the revoke has
+// committed. The probe detects the case where the revoke deleted the principal
+// itself downstream (e.g. removing a user's last role deletes the user row):
+// when the exists-check returns no rows, principalDeleted is true.
+//
+// The probe only decides whether the caller reports the deletion, so it runs
+// outside the revoke transaction: a probe failure must not roll back a revoke
+// that already succeeded. Probe failures are logged and reported as "not
+// deleted", leaving the next sync to pick up the deletion.
+//
+// When every revoke query affects zero rows the function still commits and
+// probes, then returns ErrQueryAffectedZeroRows so the caller can report
+// GrantAlreadyRevoked, combined with ResourceDeleted when the principal is also
+// gone. Exception: when the zero-rows came from a DDL validation query no revoke
+// ran, so the probe is skipped and the deletion is not reported.
+func (s *SQLSyncer) RunRevokeProvisioning(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	existsCheck *PrincipalExistsCheck,
+	vars map[string]any,
+	opts ProvisioningOptions,
+) (bool, error) {
+	l := ctxzap.Extract(ctx).With(
+		zap.Bool("use_tx", opts.UseTransaction),
+	)
+
+	ctx = ctxzap.ToContext(ctx, l)
+
+	target, err := s.resolveProvisioningDB(vars)
+	if err != nil {
+		return false, err
+	}
+
+	allZero, fromValidation, err := s.runRevokeQueries(ctx, queries, validationQueries, opts.SignalIdempotency, vars, opts.UseTransaction, target)
+	if err != nil {
+		return false, err
+	}
+
+	var principalDeleted bool
+	// Skip the probe when the zero-rows came from a validation query (DDL engines): no
+	// revoke ran, so a no-rows exists-check would falsely report the principal deleted
+	// "as a side effect of the revoke" when it may still be present.
+	if existsCheck != nil && !fromValidation {
+		exists, err := s.runPrincipalExistsCheck(ctx, target, existsCheck, vars)
+		if err != nil {
+			l.Warn(
+				"revoke succeeded but the principal exists check failed; not reporting a principal deletion",
+				zap.Error(err),
+			)
+			// failed to probe the principal: don't report a deletion, and also don't return an error
+			principalDeleted = false
+		} else {
+			// No rows from the exists-check => the principal was deleted by the revoke.
+			principalDeleted = !exists
+		}
+	}
+
+	if allZero {
+		return principalDeleted, ErrQueryAffectedZeroRows
+	}
+	return principalDeleted, nil
+}
+
+// runRevokeQueries executes the revoke queries against target, committing when
+// useTx is set. It reports whether every query affected zero rows (allZero, the
+// already-revoked case) and whether that zero-rows result came from a validation query
+// rather than the revoke queries executing (fromValidation): on a DDL engine a no-rows
+// validation short-circuits before any revoke runs, so the caller must skip the
+// principal-exists probe. The already-revoked case commits rather than failing so the
+// caller can still annotate the response.
+func (s *SQLSyncer) runRevokeQueries(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	signalIdempotency bool,
+	vars map[string]any,
+	useTx bool,
+	target *sql.DB,
+) (bool, bool, error) {
+	l := ctxzap.Extract(ctx)
+
+	var committed bool
+	var executor executor = target
+
+	if useTx {
+		tx, err := target.BeginTx(ctx, nil)
+		if err != nil {
+			return false, false, err
+		}
+		executor = tx
+
+		defer func() {
+			if !committed {
+				if err := tx.Rollback(); err != nil {
+					l.Error("failed to rollback revoke provisioning queries", zap.Error(err))
+				}
+			}
+		}()
+	}
+
+	var allZero, fromValidation bool
+	err := s.RunProvisioningQueriesWithExecutor(ctx, queries, validationQueries, "revoke provisioning", vars, executor, ProvisioningOptions{SignalIdempotency: signalIdempotency})
+	if err != nil {
+		if !errors.Is(err, ErrQueryAffectedZeroRows) {
+			return false, false, err
+		}
+		allZero = true
+		fromValidation = errors.Is(err, ErrValidationNoRows)
+	}
+
+	if useTx {
+		tx, ok := executor.(*sql.Tx)
+		if !ok {
+			return false, false, errors.New("transactional executor required")
+		}
+		if err := tx.Commit(); err != nil {
+			return false, false, err
+		}
+		committed = true
+	}
+
+	return allZero, fromValidation, nil
+}
+
+// runPrincipalExistsCheck executes the exists-check probe on the given
+// executor. It returns true when the probe returns at least one row (the
+// principal still exists); no rows means the principal is gone.
+func (s *SQLSyncer) runPrincipalExistsCheck(
+	ctx context.Context,
+	executor executor,
+	existsCheck *PrincipalExistsCheck,
+	vars map[string]any,
+) (bool, error) {
+	l := ctxzap.Extract(ctx)
+
+	q, qArgs, err := s.prepareProvisioningQuery(existsCheck.Query, vars)
+	if err != nil {
+		return false, fmt.Errorf("failed to prepare principal exists check query: %w", err)
+	}
+
+	l.Debug(
+		"running principal exists check query",
+		zap.String("query", q),
+		zap.Any("args", qArgs),
+	)
+
+	rows, err := executor.QueryContext(ctx, q, qArgs...)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute principal exists check query: %w", err)
+	}
+
+	exists := rows.Next()
+
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, fmt.Errorf("failed to read principal exists check result: %w", err)
+	}
+
+	if err := rows.Close(); err != nil {
+		return false, fmt.Errorf("failed to close principal exists check result: %w", err)
+	}
+
+	// >=1 row => the principal still exists.
+	return exists, nil
+}
+
+// isDDLEngine reports whether the engine applies GRANT/REVOKE as DDL that raises an error on
+// re-run instead of reporting rows-affected (Db2, Oracle).
+func isDDLEngine(e database.DbEngine) bool {
+	switch e {
+	case database.DB2, database.Oracle:
+		return true
+	default:
+		return false
+	}
+}
+
+// validationNoRowsMeansIdempotent reports whether a validation query returning no rows means
+// "already in the desired state" (an idempotent success) rather than a failed precondition. It
+// is true only on DDL engines whose GRANT/REVOKE raise an error instead of reporting
+// rows-affected (Db2, Oracle). Db2 ships behind a build tag, so it stays on by engine (unchanged
+// from #151); Oracle ships in every binary, so it reinterprets no-rows only when the entitlement
+// opts in via validation_queries_signal_idempotency. Everywhere else a no-rows result keeps
+// failing loudly: swallowing it where it could mean a missing or mistyped principal is a
+// silent-access bug.
+func (s *SQLSyncer) validationNoRowsMeansIdempotent(signalIdempotency bool) bool {
+	switch s.dbEngine {
+	case database.DB2:
+		// Db2 ships behind a build tag; no-rows-means-idempotent stays on by engine
+		// (unchanged from #151), no per-config opt-in required.
+		return true
+	case database.Oracle:
+		// Oracle ships in every binary, so the reinterpretation is opt-in only.
+		return signalIdempotency
+	default:
+		return false
+	}
+}
+
+func (s *SQLSyncer) runValidationQueries(
+	ctx context.Context,
+	validationQueries []string,
+	operation string,
+	signalIdempotency bool,
+	vars map[string]any,
+	executor executor,
+) error {
+	l := ctxzap.Extract(ctx)
+
 	for _, q := range validationQueries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
 			return fmt.Errorf("failed to prepare validation query: %w", err)
 		}
+
+		l.Debug(
+			"running validation query",
+			zap.String("query", q),
+			zap.Any("args", qArgs),
+			zap.Any("vars", vars),
+		)
 
 		result, err := executor.QueryContext(ctx, q, qArgs...)
 		if err != nil {
@@ -372,22 +756,44 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		valid := result.Next()
 
 		if err := result.Err(); err != nil {
+			_ = result.Close()
 			return fmt.Errorf("failed to read validation query result: %w", err)
 		}
 
-		err = result.Close()
-		if err != nil {
+		if err := result.Close(); err != nil {
 			return fmt.Errorf("failed to close validation query result: %w", err)
 		}
 
 		if !valid {
-			return fmt.Errorf("validation query returned no rows")
+			if s.validationNoRowsMeansIdempotent(signalIdempotency) {
+				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q), zap.String("operation", operation))
+				return fmt.Errorf("%s: validation query %q returned no rows: %w", operation, q, ErrValidationNoRows)
+			}
+			return fmt.Errorf("%s: validation query %q returned no rows", operation, q)
 		}
+	}
+
+	return nil
+}
+
+func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
+	ctx context.Context,
+	queries,
+	validationQueries []string,
+	operation string,
+	vars map[string]any,
+	executor executor,
+	opts ProvisioningOptions,
+) error {
+	l := ctxzap.Extract(ctx)
+
+	if err := s.runValidationQueries(ctx, validationQueries, operation, opts.SignalIdempotency, vars, executor); err != nil {
+		return err
 	}
 
 	zeroRowCount := 0
 
-	for _, q := range queries {
+	for idx, q := range queries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
 			return fmt.Errorf("failed to prepare query: %w", err)
@@ -404,30 +810,18 @@ func (s *SQLSyncer) RunProvisioningQueries(ctx context.Context, queries, validat
 		}
 
 		if rowsAffected > 1 {
-			return ErrQueryAffectedMoreThanOneRow
+			return fmt.Errorf("provisioning query at index %d affected %d rows: %w", idx, rowsAffected, ErrQueryAffectedMoreThanOneRow)
 		}
 
 		if rowsAffected == 0 {
 			zeroRowCount++
 		}
 
-		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
+		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected))
 	}
 
 	if len(queries) > 0 && zeroRowCount == len(queries) {
 		return ErrQueryAffectedZeroRows
-	}
-
-	if useTx {
-		tx, ok := executor.(*sql.Tx)
-		if !ok {
-			return errors.New("transactional executor required")
-		}
-		err := tx.Commit()
-		if err != nil {
-			return err
-		}
-		committed = true
 	}
 
 	return nil
@@ -510,6 +904,7 @@ func (s *SQLSyncer) normalizeValue(val any) any {
 
 func (s *SQLSyncer) runQuery(
 	ctx context.Context,
+	db executor,
 	pToken *pagination.Token,
 	query string,
 	pOpts *Pagination,
@@ -525,7 +920,7 @@ func (s *SQLSyncer) runQuery(
 
 	l.Debug("running query", zap.String("query", q), zap.Any("args", qArgs))
 
-	rows, err := s.db.QueryContext(ctx, q, qArgs...)
+	rows, err := db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
 		l.Error("failed to run query", zap.String("query", q), zap.Any("args", qArgs), zap.Error(err))
 		return "", err
@@ -566,6 +961,11 @@ func (s *SQLSyncer) runQuery(
 			}
 		}
 
+		// Real result columns named "database" win over the synthetic injection.
+		if _, exists := rowMap[rowColDatabase]; !exists && s.currentDBName != "" {
+			rowMap[rowColDatabase] = s.currentDBName
+		}
+
 		if pCtx != nil && !foundPaginationKey {
 			return "", errors.New("primary key not found in query results")
 		}
@@ -592,4 +992,262 @@ func (s *SQLSyncer) runQuery(
 	}
 
 	return nextPageToken, nil
+}
+
+func (s *SQLSyncer) runGrantRejectIf(
+	ctx context.Context,
+	executor executor,
+	rejectIf *GrantRejectIfProvisioningQuery,
+	vars map[string]any,
+) (bool, string, error) {
+	if rejectIf == nil || rejectIf.Query == "" {
+		return false, "", nil
+	}
+
+	var cancelled bool
+	reason := defaultGrantCancelledReason
+
+	_, err := s.runQuery(ctx, executor, nil, rejectIf.Query, nil, vars, func(ctx context.Context, rowMap map[string]interface{}) (bool, error) {
+		cancelled = true
+
+		if rejectIf.Reason != "" {
+			out, err := s.env.EvaluateString(ctx, rejectIf.Reason, s.env.SyncInputs(rowMap))
+			if err != nil {
+				return false, fmt.Errorf("failed to evaluate grant cancellation reason: %w", err)
+			}
+			reason = out
+		}
+
+		return false, nil
+	})
+	if err != nil {
+		return false, "", err
+	}
+
+	return cancelled, reason, nil
+}
+
+func (s *SQLSyncer) RunGrantProvisioning(
+	ctx context.Context,
+	resource *v2.Resource,
+	queries,
+	validationQueries []string,
+	vars map[string]any,
+	opts ProvisioningOptions,
+	replace *GrantReplaceProvisioningQueries,
+	rejectIf *GrantRejectIfProvisioningQuery,
+) (annotations.Annotations, error) {
+	useTx := opts.UseTransaction
+	l := ctxzap.Extract(ctx)
+
+	anno := annotations.New()
+
+	target, err := s.resolveProvisioningDB(vars)
+	if err != nil {
+		return nil, err
+	}
+
+	var committed bool
+	var executor executor = target
+
+	if useTx {
+		tx, err := target.BeginTx(ctx, nil)
+		if err != nil {
+			return anno, err
+		}
+		executor = tx
+
+		defer func() {
+			if !committed {
+				if err := tx.Rollback(); err != nil {
+					l.Error("failed to rollback provisioning queries", zap.Error(err))
+				}
+			}
+		}()
+	}
+
+	cancelled, reason, err := s.runGrantRejectIf(ctx, executor, rejectIf, vars)
+	if err != nil {
+		return anno, err
+	}
+	if cancelled {
+		l.Info("grant cancelled by connector policy", zap.String("reason", reason))
+		return anno, sdkGrant.NewErrGrantCancelled(reason)
+	}
+
+	if replace != nil && replace.Query != "" {
+		l.Info("running grant replace provisioning query", zap.String("query", replace.Query))
+
+		var ret []*v2.Grant
+
+		_, err := s.runQuery(ctx, executor, nil, replace.Query, nil, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
+			for _, mapping := range replace.Map {
+				if mapping.EntitlementResourceId == "" {
+					continue
+				}
+
+				if mapping.SkipIf != "" {
+					skip, err := s.env.EvaluateBool(ctx, mapping.SkipIf, rowMap)
+					if err != nil {
+						return false, fmt.Errorf("failed to evaluate skip_if: %w", err)
+					}
+
+					if skip {
+						continue
+					}
+				}
+
+				entitlementResourceId, err := s.env.EvaluateString(ctx, mapping.EntitlementResourceId, s.env.SyncInputs(rowMap))
+				if err != nil {
+					l.Debug(
+						"failed to evaluate entitlement resource ID for grant replace provisioning query",
+						zap.String("expression", mapping.EntitlementResourceId),
+						zap.Any("row", s.env.SyncInputs(rowMap)),
+						zap.Error(err),
+					)
+					return false, err
+				}
+
+				entitlementResource := &v2.Resource{
+					Id: &v2.ResourceId{
+						ResourceType: s.resourceType.GetId(),
+						Resource:     entitlementResourceId,
+					},
+				}
+
+				// Resource Should be entitlement.Resource
+				g, ok, err := s.mapGrant(ctx, entitlementResource, mapping, rowMap)
+				if err != nil {
+					return false, err
+				}
+
+				if ok {
+					ret = append(ret, g)
+				}
+			}
+			return true, nil
+		})
+		if err != nil {
+			return anno, err
+		}
+
+		switch {
+		case len(ret) > 1:
+			return nil, fmt.Errorf("grant provisioning query returned %d rows, expected at most 1: %w", len(ret), ErrQueryAffectedMoreThanOneRow)
+		case len(ret) == 1:
+			// Revoke grant
+			grantToRevoke := ret[0]
+
+			l.Info(
+				"grant provisioning query returned a grant to replace",
+				zap.String("grant_id", grantToRevoke.GetId()),
+				zap.String("principal_id", grantToRevoke.GetPrincipal().GetId().GetResource()),
+				zap.String("entitlement_id", grantToRevoke.GetEntitlement().GetId()),
+			)
+
+			_, _, entitlementID, err := helpers.SplitEntitlementID(grantToRevoke.GetEntitlement())
+			if err != nil {
+				return anno, err
+			}
+
+			provisioningConfig, ok := s.getProvisioningConfig(ctx, entitlementID)
+			if !ok {
+				return anno, errors.New("provisioning is not enabled for this connector")
+			}
+
+			if provisioningConfig.Revoke == nil {
+				return anno, errors.New("no revoke config found for entitlement")
+			}
+
+			if len(provisioningConfig.Revoke.Queries) == 0 {
+				return anno, errors.New("no revoke config found for entitlement")
+			}
+
+			provisioningVars, err := s.prepareProvisioningVars(
+				ctx,
+				provisioningConfig.Vars,
+				grantToRevoke.GetPrincipal(),
+				grantToRevoke.GetEntitlement(),
+			)
+			if err != nil {
+				return anno, err
+			}
+
+			err = s.RunProvisioningQueriesWithExecutor(
+				ctx,
+				provisioningConfig.Revoke.Queries,
+				provisioningConfig.Revoke.ValidationQueries,
+				"grant_replace revoke",
+				provisioningVars,
+				executor,
+				ProvisioningOptions{SignalIdempotency: provisioningConfig.Revoke.ValidationQueriesSignalIdempotency},
+			)
+			if err != nil {
+				// A zero-rows sentinel means the replace revoke had nothing to remove: the revoke
+				// queries matched nothing, or a no-rows validation was reinterpreted as idempotent
+				// on a DDL engine (Db2 by default, Oracle on validation_queries_signal_idempotency).
+				// Reporting the latter as GrantReplaced leans on that meaning "already gone".
+				if !errors.Is(err, ErrQueryAffectedZeroRows) {
+					return anno, err
+				}
+			}
+
+			anno.Update(&v2.GrantReplaced{
+				ReplacedGrantId: grantToRevoke.GetId(),
+			})
+
+		case len(ret) == 0:
+		}
+	}
+
+	if err := s.runValidationQueries(ctx, validationQueries, "grant provisioning", opts.SignalIdempotency, vars, executor); err != nil {
+		return anno, err
+	}
+
+	zeroRowCount := 0
+
+	for idx, q := range queries {
+		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
+		if err != nil {
+			return anno, fmt.Errorf("failed to prepare query: %w", err)
+		}
+
+		result, err := executor.ExecContext(ctx, q, qArgs...)
+		if err != nil {
+			return anno, fmt.Errorf("failed to execute query: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			l.Error("failed to get rows affected", zap.Error(err))
+		}
+
+		if rowsAffected > 1 {
+			return anno, fmt.Errorf("provisioning query at index %d affected %d rows: %w", idx, rowsAffected, ErrQueryAffectedMoreThanOneRow)
+		}
+
+		if rowsAffected == 0 {
+			zeroRowCount++
+		}
+
+		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
+	}
+
+	if len(queries) > 0 && zeroRowCount == len(queries) {
+		return anno, ErrQueryAffectedZeroRows
+	}
+
+	if useTx {
+		tx, ok := executor.(*sql.Tx)
+		if !ok {
+			return anno, errors.New("transactional executor required")
+		}
+		err := tx.Commit()
+		if err != nil {
+			return anno, err
+		}
+		committed = true
+	}
+
+	return anno, nil
 }

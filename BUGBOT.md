@@ -58,6 +58,12 @@ entitlement.Resource.ParentResourceId  // WRONG for context
 principal.ParentResourceId  // Context comes from principal
 ```
 
+**Exception - target-owned scope:** if the target resource itself belongs to one fixed
+scope (e.g. a GitHub team's org), reading the parent of the entitlement's resource is
+correct when it is nil-checked, parsed, and passed to an API call scoped to both scope
+and target (org+team). Do not flag that. Do flag routing such an operation through
+`principal.ParentResourceId` (the mirror bug).
+
 ### 2. Pagination Termination (High Severity)
 
 Two failure modes - both cause data loss or infinite loops:
@@ -112,9 +118,12 @@ value, ok := data["key"].(string)
 if !ok { ... }
 ```
 
-### 5. Error Swallowing (Medium Severity)
+### 5. Error Swallowing (Blocking)
 
-Logging errors but continuing execution causes silent data loss.
+Logging errors but continuing execution causes silent data loss. Inside a
+resource-producing method it deletes customer data: C1 buckets whatever a sync does
+not emit as deleted, for grants as well as resources, so an empty `Grants()` revokes
+every principal's access to that resource.
 
 **Flag this pattern:**
 ```go
@@ -123,6 +132,18 @@ if err != nil {
     // No return - continues with bad state
 }
 ```
+
+**And this one, which is the same defect with a return statement:**
+```go
+if err != nil {
+    l.Debug("failed, skipping", zap.Error(err))
+    return nil, "", nil, nil   // empty result + nil error = deletions
+}
+```
+
+The one skippable case inside `List`/`Entitlements`/`Grants` is a `NotFound` on the
+item being fetched, and only on an API that uses 404 for absence rather than for
+permission denial. See `patterns-error-handling.md` Rule 4.
 
 ### 6. Error Wrapping (Low Severity)
 
@@ -343,7 +364,7 @@ id := strconv.FormatUint(uint64(numericID), 10)
 ### Search for potential issues:
 
 ```
-# Entity confusion
+# Entity confusion (read each hit: OK only for checked target-owned scope)
 entitlement\.Resource\.ParentResourceId
 
 # Always-empty pagination
@@ -381,7 +402,7 @@ Before approving:
 - [ ] No changes to resource ID derivation
 
 ### Entity Sources (CRITICAL)
-- [ ] Context (workspace/org) comes from **principal**, not entitlement
+- [ ] Context (workspace/org) comes from **principal**, not entitlement (unless checked target-owned scope)
 - [ ] In Grant: principal = WHO, entitlement = WHAT
 - [ ] API arguments in correct order (check API docs for multi-string params)
 

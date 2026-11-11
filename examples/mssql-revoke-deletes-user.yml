@@ -1,0 +1,167 @@
+---
+# Example: reporting a side-effect user deletion from a revoke.
+#
+# Some applications delete the user record when their last role is revoked.
+# When that happens C1 would otherwise not learn the account is gone
+# until the next full sync, which blocks an immediate re-grant. Configuring
+# `revoke_options.principal_exists_check` under an entitlement's `revoke`
+# makes the connector probe for the principal once the revoke queries have
+# committed. If the probe returns no rows the connector attaches a
+# ResourceDeleted annotation to the revoke response so C1 marks the
+# account deleted right away.
+app_name: SQL Server Revoke-Deletes-User Example
+app_description: Demonstrates revoke_options.principal_exists_check for apps that delete a user when their last role is revoked
+
+connect:
+  dsn: "sqlserver://${DB_HOST}:${DB_PORT}?database=${DB_DATABASE}"
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+
+resource_types:
+  user:
+    name: "User"
+    description: "A user within the SQL Server system"
+    list:
+      query: |
+        SELECT
+          u.UserID AS id,
+          u.Username AS username,
+          u.Email AS email
+        FROM Users u
+        ORDER BY u.UserID
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      map:
+        id: ".username"
+        display_name: ".username"
+        description: ".username"
+        traits:
+          user:
+            emails:
+              - ".email"
+            status: "enabled"
+            login: ".username"
+
+    # Account provisioning so that a re-grant immediately after deletion
+    # recreates the user before the new role is assigned.
+    account_provisioning:
+      schema:
+        - name: "username"
+          description: "The username for the new user"
+          type: "string"
+          placeholder: "new_user"
+          required: true
+        - name: "email"
+          description: "Email address for the new user"
+          type: "string"
+          placeholder: "user@example.com"
+          required: true
+      credentials:
+        no_password:
+          preferred: true
+      validate:
+        vars:
+          username: "username"
+        query: |
+          SELECT u.UserID AS id, u.Username AS username, u.Email AS email
+          FROM Users u
+          WHERE u.Username = ?<username>
+      create:
+        vars:
+          username: "input.username"
+          email: "input.email"
+        queries:
+          - |
+            IF NOT EXISTS (SELECT 1 FROM Users WHERE Username = ?<username>)
+            INSERT INTO Users (Username, Email, IsActive, CreatedAt)
+            VALUES (?<username>, ?<email>, 1, GETDATE())
+
+  role:
+    name: "Role"
+    description: "A role within the SQL Server system"
+    list:
+      query: |
+        SELECT
+          RoleID AS id,
+          RoleName AS role_name,
+          Description AS description
+        FROM Roles
+        ORDER BY RoleID
+        OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+      pagination:
+        strategy: "offset"
+        primary_key: "id"
+      map:
+        id: ".role_name"
+        display_name: ".role_name"
+        description: ".description"
+        traits:
+          role:
+            profile:
+              role_name: ".role_name"
+
+    static_entitlements:
+      - id: "member"
+        display_name: "resource.DisplayName + ' Membership'"
+        description: "'Member of the ' + resource.DisplayName + ' role'"
+        purpose: "assignment"
+        grantable_to:
+          - "user"
+        provisioning:
+          vars:
+            username: "principal.ID"
+            role_name: "resource.ID"
+          grant:
+            queries:
+              - |
+                INSERT INTO UserRoles (UserID, RoleID)
+                SELECT u.UserID, r.RoleID
+                FROM Users u, Roles r
+                WHERE u.Username = ?<username>
+                AND r.RoleName = ?<role_name>
+          revoke:
+            # Revoke removes the membership row, then deletes the user if this
+            # was their last role. The queries run in a single transaction.
+            queries:
+              - |
+                DELETE ur FROM UserRoles ur
+                INNER JOIN Users u ON ur.UserID = u.UserID
+                INNER JOIN Roles r ON ur.RoleID = r.RoleID
+                WHERE u.Username = ?<username>
+                AND r.RoleName = ?<role_name>
+              - |
+                DELETE FROM Users
+                WHERE Username = ?<username>
+                AND NOT EXISTS (
+                  SELECT 1 FROM UserRoles ur
+                  INNER JOIN Users u2 ON ur.UserID = u2.UserID
+                  WHERE u2.Username = ?<username>
+                )
+            # Once the revoke queries commit, probe whether the principal still
+            # exists. No rows means the app deleted the user, so the connector
+            # reports a ResourceDeleted annotation on the revoke response.
+            revoke_options:
+              principal_exists_check:
+                query: |
+                  SELECT 1 FROM Users WHERE Username = ?<username>
+
+    grants:
+      - query: |
+          SELECT
+            u.Username AS username,
+            r.RoleName AS role_name
+          FROM UserRoles ur
+          INNER JOIN Users u ON ur.UserID = u.UserID
+          INNER JOIN Roles r ON ur.RoleID = r.RoleID
+          ORDER BY r.RoleID
+          OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
+        map:
+          - skip_if: ".role_name != resource.ID"
+            principal_id: ".username"
+            principal_type: "user"
+            entitlement_id: "member"
+        pagination:
+          strategy: "offset"
+          primary_key: "role_name"

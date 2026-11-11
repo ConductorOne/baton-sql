@@ -48,6 +48,8 @@ func Is(task *v1.Task, target taskTypes.TaskType) bool {
 		return actualType == v1.Task_DeleteResource_case
 	case taskTypes.RotateCredentialsType:
 		return actualType == v1.Task_RotateCredentials_case
+	case taskTypes.IssueCredentialType:
+		return actualType == v1.Task_IssueCredential_case
 	case taskTypes.CreateTicketType:
 		return actualType == v1.Task_CreateTicketTask_case
 	case taskTypes.ListTicketSchemasType:
@@ -66,8 +68,6 @@ func Is(task *v1.Task, target taskTypes.TaskType) bool {
 		return actualType == v1.Task_ActionInvoke_case
 	case taskTypes.ActionStatusType:
 		return actualType == v1.Task_ActionStatus_case
-	case taskTypes.CreateSyncDiff:
-		return actualType == v1.Task_CreateSyncDiff_case
 	case taskTypes.ListEventFeedsType:
 		return actualType == v1.Task_ListEventFeeds_case
 	case taskTypes.ListEventsType:
@@ -103,6 +103,8 @@ func GetType(task *v1.Task) taskTypes.TaskType {
 		return taskTypes.DeleteResourceType
 	case v1.Task_RotateCredentials_case:
 		return taskTypes.RotateCredentialsType
+	case v1.Task_IssueCredential_case:
+		return taskTypes.IssueCredentialType
 	case v1.Task_CreateTicketTask_case:
 		return taskTypes.CreateTicketType
 	case v1.Task_ListTicketSchemas_case:
@@ -121,8 +123,6 @@ func GetType(task *v1.Task) taskTypes.TaskType {
 		return taskTypes.ActionInvokeType
 	case v1.Task_ActionStatus_case:
 		return taskTypes.ActionStatusType
-	case v1.Task_CreateSyncDiff_case:
-		return taskTypes.CreateSyncDiff
 	case v1.Task_ListEventFeeds_case:
 		return taskTypes.ListEventFeedsType
 	case v1.Task_ListEvents_case:

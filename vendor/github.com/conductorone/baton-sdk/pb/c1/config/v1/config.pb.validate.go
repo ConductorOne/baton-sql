@@ -500,6 +500,85 @@ func (m *Field) validate(all bool) error {
 
 	// no validation rules for IsSecret
 
+	if m.GetContentType() != "" {
+
+		if l := utf8.RuneCountInString(m.GetContentType()); l < 1 || l > 128 {
+			err := FieldValidationError{
+				field:  "ContentType",
+				reason: "value length must be between 1 and 128 runes, inclusive",
+			}
+			if !all {
+				return err
+			}
+			errors = append(errors, err)
+		}
+
+		if !_Field_ContentType_Pattern.MatchString(m.GetContentType()) {
+			err := FieldValidationError{
+				field:  "ContentType",
+				reason: "value does not match regex pattern \"^[^/]+/[^/]+$\"",
+			}
+			if !all {
+				return err
+			}
+			errors = append(errors, err)
+		}
+
+	}
+
+	if len(m.GetTags()) > 16 {
+		err := FieldValidationError{
+			field:  "Tags",
+			reason: "value must contain no more than 16 item(s)",
+		}
+		if !all {
+			return err
+		}
+		errors = append(errors, err)
+	}
+
+	_Field_Tags_Unique := make(map[string]struct{}, len(m.GetTags()))
+
+	for idx, item := range m.GetTags() {
+		_, _ = idx, item
+
+		if _, exists := _Field_Tags_Unique[item]; exists {
+			err := FieldValidationError{
+				field:  fmt.Sprintf("Tags[%v]", idx),
+				reason: "repeated value must contain unique items",
+			}
+			if !all {
+				return err
+			}
+			errors = append(errors, err)
+		} else {
+			_Field_Tags_Unique[item] = struct{}{}
+		}
+
+		if l := utf8.RuneCountInString(item); l < 1 || l > 128 {
+			err := FieldValidationError{
+				field:  fmt.Sprintf("Tags[%v]", idx),
+				reason: "value length must be between 1 and 128 runes, inclusive",
+			}
+			if !all {
+				return err
+			}
+			errors = append(errors, err)
+		}
+
+		if !_Field_Tags_Pattern.MatchString(item) {
+			err := FieldValidationError{
+				field:  fmt.Sprintf("Tags[%v]", idx),
+				reason: "value does not match regex pattern \"^[a-zA-Z0-9_.-]+$\"",
+			}
+			if !all {
+				return err
+			}
+			errors = append(errors, err)
+		}
+
+	}
+
 	switch v := m.Field.(type) {
 	case *Field_StringField:
 		if v == nil {
@@ -1032,6 +1111,10 @@ var _ interface {
 	Cause() error
 	ErrorName() string
 } = FieldValidationError{}
+
+var _Field_ContentType_Pattern = regexp.MustCompile("^[^/]+/[^/]+$")
+
+var _Field_Tags_Pattern = regexp.MustCompile("^[a-zA-Z0-9_.-]+$")
 
 // Validate checks the field values on Resource with the rules defined in the
 // proto definition for this message. If any rules are violated, the first
@@ -2594,6 +2677,8 @@ func (m *IntField) validate(all bool) error {
 
 	// no validation rules for DefaultValue
 
+	// no validation rules for SuggestedValue
+
 	if m.Rules != nil {
 
 		if all {
@@ -2727,6 +2812,8 @@ func (m *BoolField) validate(all bool) error {
 	var errors []error
 
 	// no validation rules for DefaultValue
+
+	// no validation rules for SuggestedValue
 
 	if m.Rules != nil {
 
@@ -3039,6 +3126,52 @@ func (m *StringMapField) validate(all bool) error {
 		}
 	}
 
+	{
+		sorted_keys := make([]string, len(m.GetSuggestedValue()))
+		i := 0
+		for key := range m.GetSuggestedValue() {
+			sorted_keys[i] = key
+			i++
+		}
+		sort.Slice(sorted_keys, func(i, j int) bool { return sorted_keys[i] < sorted_keys[j] })
+		for _, key := range sorted_keys {
+			val := m.GetSuggestedValue()[key]
+			_ = val
+
+			// no validation rules for SuggestedValue[key]
+
+			if all {
+				switch v := interface{}(val).(type) {
+				case interface{ ValidateAll() error }:
+					if err := v.ValidateAll(); err != nil {
+						errors = append(errors, StringMapFieldValidationError{
+							field:  fmt.Sprintf("SuggestedValue[%v]", key),
+							reason: "embedded message failed validation",
+							cause:  err,
+						})
+					}
+				case interface{ Validate() error }:
+					if err := v.Validate(); err != nil {
+						errors = append(errors, StringMapFieldValidationError{
+							field:  fmt.Sprintf("SuggestedValue[%v]", key),
+							reason: "embedded message failed validation",
+							cause:  err,
+						})
+					}
+				}
+			} else if v, ok := interface{}(val).(interface{ Validate() error }); ok {
+				if err := v.Validate(); err != nil {
+					return StringMapFieldValidationError{
+						field:  fmt.Sprintf("SuggestedValue[%v]", key),
+						reason: "embedded message failed validation",
+						cause:  err,
+					}
+				}
+			}
+
+		}
+	}
+
 	if m.Rules != nil {
 
 		if all {
@@ -3317,6 +3450,8 @@ func (m *StringField) validate(all bool) error {
 		}
 
 	}
+
+	// no validation rules for SuggestedValue
 
 	if m.Rules != nil {
 
