@@ -292,6 +292,15 @@ func (l *EventFeedConfig) staticValidate(_ context.Context, _ *SQLSyncer) error 
 			return fmt.Errorf("invalid event_feed.default_lookback %q: %w", l.DefaultLookback, err)
 		}
 	}
+	if l.Overlap != "" {
+		d, err := time.ParseDuration(l.Overlap)
+		if err != nil {
+			return fmt.Errorf("invalid event_feed.overlap %q: %w", l.Overlap, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("invalid event_feed.overlap %q: must not be negative", l.Overlap)
+		}
+	}
 	return nil
 }
 

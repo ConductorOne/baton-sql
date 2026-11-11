@@ -104,8 +104,8 @@
           LEFT JOIN "USER_PARAMETERS"
             ON "SYS"."USERS".USER_NAME = "USER_PARAMETERS".USER_NAME
             AND "USER_PARAMETERS".PARAMETER = 'EMAIL ADDRESS'
-          WHERE CREATE_TIME > ?<since>
-          ORDER BY CREATE_TIME ASC
+          WHERE CREATE_TIME >= ?<since>
+          ORDER BY CREATE_TIME ASC, USER_ID ASC
           LIMIT ?<Limit> OFFSET ?<Offset>
         cursor_column: CREATE_TIME
         pagination:

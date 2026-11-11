@@ -245,8 +245,8 @@ resource_types:
           attr_employment_type as "attr_employment_type",
           updated_at as "updated_at"
         FROM users
-        WHERE updated_at > ?<since>
-        ORDER BY updated_at
+        WHERE updated_at >= ?<since>
+        ORDER BY updated_at, id
         OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
       cursor_column: updated_at
       pagination:

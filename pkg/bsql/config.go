@@ -470,6 +470,9 @@ type EventFeedConfig struct {
 	// DefaultLookback is the maximum time window to look back when initializing a cursor for the
 	// first time. Accepts any Go time.Duration string (e.g., "3h", "30m", "24h"). Defaults to 3h.
 	DefaultLookback string `yaml:"default_lookback" json:"default_lookback"`
+	// Overlap is how far before the committed cursor each poll starts reading, so rows with tied or
+	// late-committed timestamps are not missed. Accepts a Go time.Duration string. Defaults to 60s.
+	Overlap string `yaml:"overlap,omitempty" json:"overlap,omitempty"`
 }
 
 // GetQuery defines how to fetch a single resource by its ID.

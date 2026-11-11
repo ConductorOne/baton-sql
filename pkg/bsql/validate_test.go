@@ -130,3 +130,10 @@ func TestParseQueryOptsPaginationVarsWithoutPagination(t *testing.T) {
 		require.ErrorContains(t, err, "no pagination is configured", q)
 	}
 }
+
+func TestValidateEventFeedConfig(t *testing.T) {
+	require.NoError(t, (&EventFeedConfig{DefaultLookback: "3h", Overlap: "30s"}).staticValidate(t.Context(), nil))
+	require.NoError(t, (&EventFeedConfig{Overlap: "0s"}).staticValidate(t.Context(), nil))
+	require.ErrorContains(t, (&EventFeedConfig{Overlap: "soon"}).staticValidate(t.Context(), nil), "invalid event_feed.overlap")
+	require.ErrorContains(t, (&EventFeedConfig{Overlap: "-1m"}).staticValidate(t.Context(), nil), "must not be negative")
+}

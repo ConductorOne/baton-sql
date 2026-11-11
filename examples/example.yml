@@ -37,8 +37,14 @@ connect:
 # Global settings for the event feed (incremental change detection).
 # When any resource type or grants query has event_feed configured, the connector
 # automatically exposes an EventFeed to ConductorOne for efficient change detection.
+#
+# Each poll re-reads rows from `overlap` before the last committed timestamp, so rows that share
+# a timestamp or commit late are not missed. Re-read rows produce the same event IDs and are
+# de-duplicated by ConductorOne. Event feed queries should filter with `>= ?<since>` and order by
+# the cursor column plus the pagination primary key, so offset paging is stable.
 event_feed:
   default_lookback: 3h   # How far back to look on first run; any Go duration string
+  overlap: 60s           # How far before the committed cursor each poll starts; defaults to 60s
 
 # Resource Types
 # -------------
@@ -106,8 +112,8 @@ resource_types:
       query: |
         SELECT id, username, email, created_at, status, department, updated_at
         FROM users
-        WHERE updated_at > ?<since>
-        ORDER BY updated_at ASC
+        WHERE updated_at >= ?<since>
+        ORDER BY updated_at ASC, id ASC
         LIMIT ?<Limit> OFFSET ?<Offset>
       cursor_column: updated_at   # Column whose max value advances this source's cursor
       pagination:
@@ -174,8 +180,8 @@ resource_types:
             SELECT id AS grant_id, user_id, access_level, updated_at
             FROM user_access
             WHERE deleted_at IS NULL
-              AND updated_at > ?<since>
-            ORDER BY updated_at ASC
+              AND updated_at >= ?<since>
+            ORDER BY updated_at ASC, id ASC
             LIMIT ?<Limit> OFFSET ?<Offset>
           changes_cursor_column: updated_at
 
@@ -183,8 +189,8 @@ resource_types:
           revokes_query: |
             SELECT id AS grant_id, user_id, access_level, deleted_at
             FROM user_access
-            WHERE deleted_at > ?<since>
-            ORDER BY deleted_at ASC
+            WHERE deleted_at >= ?<since>
+            ORDER BY deleted_at ASC, id ASC
             LIMIT ?<Limit> OFFSET ?<Offset>
           revokes_cursor_column: deleted_at
 

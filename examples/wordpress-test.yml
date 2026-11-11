@@ -68,8 +68,8 @@ resource_types:
           u.user_email AS email,
           u.user_registered AS created_at
         FROM wp_users u
-        WHERE u.user_registered > ?<since>
-        ORDER BY u.user_registered ASC
+        WHERE u.user_registered >= ?<since>
+        ORDER BY u.user_registered ASC, u.ID ASC
         LIMIT ?<Limit> OFFSET ?<Offset>
       cursor_column: created_at
       pagination:

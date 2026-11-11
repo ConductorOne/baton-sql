@@ -252,8 +252,8 @@ resource_types:
         FROM Users u
         LEFT JOIN Users m ON u.ManagerID = m.UserID
         LEFT JOIN EmployeeData ed ON u.UserID = ed.UserID
-        WHERE u.UpdatedAt > ?<since>
-        ORDER BY u.UpdatedAt
+        WHERE u.UpdatedAt >= ?<since>
+        ORDER BY u.UpdatedAt, u.UserID
         OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
       cursor_column: updated_at
       pagination:
@@ -377,8 +377,8 @@ resource_types:
       query: |
         SELECT RoleID as id, RoleName as role_name, Description as description, UpdatedAt as updated_at
         FROM Roles
-        WHERE UpdatedAt > ?<since>
-        ORDER BY UpdatedAt
+        WHERE UpdatedAt >= ?<since>
+        ORDER BY UpdatedAt, RoleID
         OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
       cursor_column: updated_at
       pagination:
@@ -453,8 +453,8 @@ resource_types:
             INNER JOIN Users u ON ur.UserID = u.UserID
             INNER JOIN Roles r ON ur.RoleID = r.RoleID
             WHERE ur.IsDeleted = 0
-              AND ur.UpdatedAt > ?<since>
-            ORDER BY ur.UpdatedAt
+              AND ur.UpdatedAt >= ?<since>
+            ORDER BY ur.UpdatedAt, ur.UserRoleID
             OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
           changes_cursor_column: updated_at
           revokes_query: |
@@ -467,8 +467,8 @@ resource_types:
             INNER JOIN Users u ON ur.UserID = u.UserID
             INNER JOIN Roles r ON ur.RoleID = r.RoleID
             WHERE ur.IsDeleted = 1
-              AND ur.DeletedAt > ?<since>
-            ORDER BY ur.DeletedAt
+              AND ur.DeletedAt >= ?<since>
+            ORDER BY ur.DeletedAt, ur.UserRoleID
             OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
           revokes_cursor_column: deleted_at
           pagination:

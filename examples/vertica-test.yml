@@ -89,8 +89,8 @@ resource_types:
           u.updated_at
         FROM users u
         LEFT JOIN users m ON u.manager_id = m.id
-        WHERE u.updated_at > ?<since>
-        ORDER BY u.updated_at ASC
+        WHERE u.updated_at >= ?<since>
+        ORDER BY u.updated_at ASC, u.id ASC
         LIMIT ?<Limit> OFFSET ?<Offset>
       cursor_column: updated_at
       pagination:
@@ -131,8 +131,8 @@ resource_types:
       query: |
         SELECT id, role_name, updated_at
         FROM roles
-        WHERE updated_at > ?<since>
-        ORDER BY updated_at ASC
+        WHERE updated_at >= ?<since>
+        ORDER BY updated_at ASC, id ASC
         LIMIT ?<Limit> OFFSET ?<Offset>
       cursor_column: updated_at
       pagination:
@@ -180,8 +180,8 @@ resource_types:
             JOIN users u ON u.id = ur.user_id
             JOIN roles r ON r.id = ur.role_id
             WHERE ur.deleted_at IS NULL
-              AND ur.updated_at > ?<since>
-            ORDER BY ur.updated_at ASC
+              AND ur.updated_at >= ?<since>
+            ORDER BY ur.updated_at ASC, ur.id ASC
             LIMIT ?<Limit> OFFSET ?<Offset>
           changes_cursor_column: updated_at
           revokes_query: |
@@ -193,8 +193,8 @@ resource_types:
             FROM user_roles ur
             JOIN users u ON u.id = ur.user_id
             JOIN roles r ON r.id = ur.role_id
-            WHERE ur.deleted_at > ?<since>
-            ORDER BY ur.deleted_at ASC
+            WHERE ur.deleted_at >= ?<since>
+            ORDER BY ur.deleted_at ASC, ur.id ASC
             LIMIT ?<Limit> OFFSET ?<Offset>
           revokes_cursor_column: deleted_at
           pagination:

@@ -157,7 +157,8 @@ func (f *SQLEventFeed) commitAndAdvance(
 		cursor.CurrentPageToken = nextPageToken
 	} else {
 		// Source exhausted: commit accumulated max seen, then advance to next source.
-		if cursor.CurrentMaxSeen != "" {
+		// The overlap window re-reads rows older than the committed cursor, so never move it backward.
+		if cursor.CurrentMaxSeen != "" && laterTimestamp(cursor.CurrentMaxSeen, cursor.SourceCursors[source.Key]) {
 			cursor.SourceCursors[source.Key] = cursor.CurrentMaxSeen
 		}
 		cursor.CurrentSince = ""
@@ -177,13 +178,13 @@ func (f *SQLEventFeed) commitAndAdvance(
 	return &pagination.StreamState{Cursor: cursorStr, HasMore: hasMore}, nil
 }
 
-// sinceForSource returns the starting timestamp for the given source key.
-// Each source independently tracks its own committed cursor; callers must not override this
-// with cross-source values (e.g. earliestEvent) as that would skip unprocessed events.
+// sinceForSource returns the committed cursor for the source minus the overlap window.
+// Rows re-read inside the overlap keep the same event IDs, so ConductorOne de-duplicates them.
+// Callers must not override this with cross-source values (e.g. earliestEvent).
 func (f *SQLEventFeed) sinceForSource(cursor *eventFeedCursor, key string) time.Time {
 	if ts, ok := cursor.SourceCursors[key]; ok {
 		if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-			return t
+			return t.Add(-overlap(f.config.EventFeed))
 		}
 	}
 	return time.Now().UTC().Add(-defaultLookback(f.config.EventFeed))
@@ -425,6 +426,19 @@ func grantRowKey(rowMap map[string]any, p *Pagination) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// laterTimestamp reports whether candidate is after current. An unparseable current value is replaced.
+func laterTimestamp(candidate, current string) bool {
+	c, err := time.Parse(time.RFC3339Nano, candidate)
+	if err != nil {
+		return false
+	}
+	cur, err := time.Parse(time.RFC3339Nano, current)
+	if err != nil {
+		return true
+	}
+	return c.After(cur)
 }
 
 // toTime converts a database column value to time.Time.

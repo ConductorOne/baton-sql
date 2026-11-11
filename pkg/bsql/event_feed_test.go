@@ -133,7 +133,7 @@ func TestGetSources(t *testing.T) {
 		sources := getSources(Config{ResourceTypes: map[string]ResourceType{
 			"group": {
 				EventFeed: resSync,
-				Grants:          []*GrantsQuery{{EventFeed: grantSyncWithRevokes}},
+				Grants:    []*GrantsQuery{{EventFeed: grantSyncWithRevokes}},
 			},
 		}})
 		require.Len(t, sources, 3)
@@ -196,6 +196,17 @@ func TestCommitAndAdvance(t *testing.T) {
 		require.Empty(t, cursor.SourceCursors["src-a"])
 	})
 
+	t.Run("older maxSeen does not move the committed cursor backward", func(t *testing.T) {
+		f := &SQLEventFeed{}
+		committed := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+		cursor := &eventFeedCursor{SourceCursors: map[string]string{"src-a": committed}}
+		sources := []incSyncSource{src("src-a")}
+
+		_, err := f.commitAndAdvance(cursor, sources, "", time.Date(2025, 1, 1, 11, 59, 30, 0, time.UTC))
+		require.NoError(t, err)
+		require.Equal(t, committed, cursor.SourceCursors["src-a"])
+	})
+
 	t.Run("maxSeen accumulates across pages and only advances when newer", func(t *testing.T) {
 		f := &SQLEventFeed{}
 		cursor := &eventFeedCursor{SourceCursors: make(map[string]string)}
@@ -220,14 +231,27 @@ func TestCommitAndAdvance(t *testing.T) {
 
 // TestSinceForSource verifies committed-cursor lookup and default-lookback fallback.
 func TestSinceForSource(t *testing.T) {
-	t.Run("returns committed cursor when present", func(t *testing.T) {
+	t.Run("returns committed cursor minus default overlap", func(t *testing.T) {
 		ts := time.Date(2025, 3, 1, 8, 0, 0, 0, time.UTC)
 		f := &SQLEventFeed{config: Config{}}
 		cursor := &eventFeedCursor{
 			SourceCursors: map[string]string{"user:resource": ts.UTC().Format(time.RFC3339Nano)},
 		}
 		got := f.sinceForSource(cursor, "user:resource")
-		require.True(t, got.Equal(ts))
+		require.True(t, got.Equal(ts.Add(-defaultOverlapDuration)))
+	})
+
+	t.Run("uses configured overlap", func(t *testing.T) {
+		ts := time.Date(2025, 3, 1, 8, 0, 0, 0, time.UTC)
+		cursor := &eventFeedCursor{
+			SourceCursors: map[string]string{"user:resource": ts.UTC().Format(time.RFC3339Nano)},
+		}
+
+		f := &SQLEventFeed{config: Config{EventFeed: &EventFeedConfig{Overlap: "5m"}}}
+		require.True(t, f.sinceForSource(cursor, "user:resource").Equal(ts.Add(-5*time.Minute)))
+
+		f = &SQLEventFeed{config: Config{EventFeed: &EventFeedConfig{Overlap: "0s"}}}
+		require.True(t, f.sinceForSource(cursor, "user:resource").Equal(ts))
 	})
 
 	t.Run("falls back to default lookback when no committed cursor", func(t *testing.T) {
@@ -273,9 +297,9 @@ func TestProcessResourceChangePage(t *testing.T) {
 
 	t.Run("emits ResourceChangeEvent per matching row", func(t *testing.T) {
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),schema)
+		_, err := db.ExecContext(t.Context(), schema)
 		require.NoError(t, err)
-		_, err = db.ExecContext(t.Context(),`INSERT INTO resources VALUES (?,?),(?,?)`, "user-1", tsStr(1), "user-2", tsStr(2))
+		_, err = db.ExecContext(t.Context(), `INSERT INTO resources VALUES (?,?),(?,?)`, "user-1", tsStr(1), "user-2", tsStr(2))
 		require.NoError(t, err)
 
 		s := newEventTestSyncer(t, db, "cols.id")
@@ -303,9 +327,9 @@ func TestProcessResourceChangePage(t *testing.T) {
 
 	t.Run("event ID includes rowKey when PrimaryKey is configured", func(t *testing.T) {
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),schema)
+		_, err := db.ExecContext(t.Context(), schema)
 		require.NoError(t, err)
-		_, err = db.ExecContext(t.Context(),`INSERT INTO resources VALUES (?,?)`, "user-42", tsStr(1))
+		_, err = db.ExecContext(t.Context(), `INSERT INTO resources VALUES (?,?)`, "user-42", tsStr(1))
 		require.NoError(t, err)
 
 		s := newEventTestSyncer(t, db, "cols.id")
@@ -329,9 +353,9 @@ func TestProcessResourceChangePage(t *testing.T) {
 
 	t.Run("custom ResourceId expression overrides List.Map.Id", func(t *testing.T) {
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),`CREATE TABLE things (ext_id TEXT, row_id TEXT, updated_at TEXT)`)
+		_, err := db.ExecContext(t.Context(), `CREATE TABLE things (ext_id TEXT, row_id TEXT, updated_at TEXT)`)
 		require.NoError(t, err)
-		_, err = db.ExecContext(t.Context(),`INSERT INTO things VALUES (?,?,?)`, "ext-99", "row-1", tsStr(1))
+		_, err = db.ExecContext(t.Context(), `INSERT INTO things VALUES (?,?,?)`, "ext-99", "row-1", tsStr(1))
 		require.NoError(t, err)
 
 		s := newEventTestSyncer(t, db, "cols.row_id") // default would pick row_id
@@ -355,7 +379,7 @@ func TestProcessResourceChangePage(t *testing.T) {
 
 	t.Run("no rows returns empty events and zero maxSeen", func(t *testing.T) {
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),schema)
+		_, err := db.ExecContext(t.Context(), schema)
 		require.NoError(t, err)
 
 		s := newEventTestSyncer(t, db, "cols.id")
@@ -378,10 +402,10 @@ func TestProcessResourceChangePage(t *testing.T) {
 
 	t.Run("unparseable cursor column value returns error", func(t *testing.T) {
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),schema)
+		_, err := db.ExecContext(t.Context(), schema)
 		require.NoError(t, err)
 		// "not-a-timestamp" lexicographically > "2025-..." so the WHERE clause passes it through.
-		_, err = db.ExecContext(t.Context(),`INSERT INTO resources VALUES (?,?)`, "user-bad", "not-a-timestamp")
+		_, err = db.ExecContext(t.Context(), `INSERT INTO resources VALUES (?,?)`, "user-bad", "not-a-timestamp")
 		require.NoError(t, err)
 
 		s := newEventTestSyncer(t, db, "cols.id")
@@ -415,7 +439,7 @@ CREATE TABLE memberships (
 	setupDB := func(t *testing.T) *sql.DB {
 		t.Helper()
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),schema)
+		_, err := db.ExecContext(t.Context(), schema)
 		require.NoError(t, err)
 		return db
 	}
@@ -519,7 +543,7 @@ CREATE TABLE memberships (
 		require.Equal(t, "group", parts[1])
 		require.Equal(t, "grp-1", parts[2])
 		require.Equal(t, "usr-1", parts[3])
-		require.NotEmpty(t, parts[4]) // timestamp
+		require.NotEmpty(t, parts[4])              // timestamp
 		require.Equal(t, "7", parts[len(parts)-1]) // rowKey = primary key value
 	})
 
@@ -620,9 +644,9 @@ func TestListEvents(t *testing.T) {
 
 	t.Run("returns resource change events from database", func(t *testing.T) {
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),`CREATE TABLE res (id TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+		_, err := db.ExecContext(t.Context(), `CREATE TABLE res (id TEXT NOT NULL, updated_at TEXT NOT NULL)`)
 		require.NoError(t, err)
-		_, err = db.ExecContext(t.Context(),`INSERT INTO res VALUES (?,?),(?,?)`, "r1", tsStr(1), "r2", tsStr(2))
+		_, err = db.ExecContext(t.Context(), `INSERT INTO res VALUES (?,?),(?,?)`, "r1", tsStr(1), "r2", tsStr(2))
 		require.NoError(t, err)
 
 		rt := ResourceType{
@@ -653,10 +677,10 @@ func TestListEvents(t *testing.T) {
 
 	t.Run("CurrentSince is pinned across pages of the same scan cycle", func(t *testing.T) {
 		db := newEventTestDB(t)
-		_, err := db.ExecContext(t.Context(),`CREATE TABLE items (id TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+		_, err := db.ExecContext(t.Context(), `CREATE TABLE items (id TEXT NOT NULL, updated_at TEXT NOT NULL)`)
 		require.NoError(t, err)
 		for i := 1; i <= 3; i++ {
-			_, err = db.ExecContext(t.Context(),`INSERT INTO items VALUES (?,?)`, fmt.Sprintf("i%d", i), tsStr(i))
+			_, err = db.ExecContext(t.Context(), `INSERT INTO items VALUES (?,?)`, fmt.Sprintf("i%d", i), tsStr(i))
 			require.NoError(t, err)
 		}
 
@@ -693,6 +717,124 @@ func TestListEvents(t *testing.T) {
 		cursor2, err := unmarshalCursor(state2.Cursor)
 		require.NoError(t, err)
 		require.Equal(t, cursor1.CurrentSince, cursor2.CurrentSince)
+	})
+
+	t.Run("overlap window", func(t *testing.T) {
+		base := time.Date(2025, 1, 2, 12, 0, 0, 0, time.UTC)
+		fmtTS := func(t time.Time) string { return t.UTC().Format("2006-01-02 15:04:05") }
+
+		setup := func(t *testing.T) (*sql.DB, *SQLEventFeed, string) {
+			t.Helper()
+			db := newEventTestDB(t)
+			_, err := db.ExecContext(t.Context(), `CREATE TABLE items (id TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+			require.NoError(t, err)
+
+			rt := ResourceType{
+				List: &ListQuery{Map: &ResourceMapping{Id: "cols.id"}},
+				EventFeed: &ResourceEventFeed{
+					Query:        "SELECT id, updated_at FROM items WHERE updated_at >= ?<since> ORDER BY updated_at, id LIMIT ?<Limit> OFFSET ?<Offset>",
+					CursorColumn: "updated_at",
+					Pagination:   &Pagination{Strategy: "offset", PrimaryKey: "id", PageSize: 2},
+				},
+			}
+			config := Config{ResourceTypes: map[string]ResourceType{"item": rt}}
+			f := &SQLEventFeed{config: config, syncers: map[string]*SQLSyncer{"item": newListEventsSyncer(t, db, rt)}}
+
+			initCursor, err := marshalCursor(&eventFeedCursor{
+				SourceCursors: map[string]string{"item:resource": base.Add(-time.Hour).Format(time.RFC3339Nano)},
+			})
+			require.NoError(t, err)
+			return db, f, initCursor
+		}
+
+		insert := func(t *testing.T, db *sql.DB, id string, at time.Time) {
+			t.Helper()
+			_, err := db.ExecContext(t.Context(), `INSERT INTO items VALUES (?,?)`, id, fmtTS(at))
+			require.NoError(t, err)
+		}
+
+		// runCycle pages through one full scan cycle and returns event IDs and the final cursor.
+		runCycle := func(t *testing.T, f *SQLEventFeed, cursor string) ([]string, string) {
+			t.Helper()
+			var ids []string
+			for i := 0; i < 20; i++ {
+				events, state, _, err := f.ListEvents(t.Context(), nil, &pagination.StreamToken{Cursor: cursor})
+				require.NoError(t, err)
+				for _, ev := range events {
+					ids = append(ids, ev.GetId())
+				}
+				cursor = state.Cursor
+				if !state.HasMore {
+					return ids, cursor
+				}
+			}
+			t.Fatal("scan cycle did not finish")
+			return nil, ""
+		}
+
+		committedAt := func(t *testing.T, cursor string) string {
+			t.Helper()
+			c, err := unmarshalCursor(cursor)
+			require.NoError(t, err)
+			return c.SourceCursors["item:resource"]
+		}
+
+		t.Run("tied timestamps across a page boundary are all emitted", func(t *testing.T) {
+			db, f, cursor := setup(t)
+			for _, id := range []string{"a", "b", "c"} {
+				insert(t, db, id, base)
+			}
+
+			ids, _ := runCycle(t, f, cursor)
+			require.Len(t, ids, 3)
+		})
+
+		t.Run("tied row committed after the cycle is emitted with stable IDs for re-sent rows", func(t *testing.T) {
+			db, f, cursor := setup(t)
+			insert(t, db, "a", base)
+			insert(t, db, "b", base)
+
+			first, cursor := runCycle(t, f, cursor)
+			require.Len(t, first, 2)
+
+			insert(t, db, "c", base)
+			second, _ := runCycle(t, f, cursor)
+			require.Len(t, second, 3)
+			require.Subset(t, second, first)
+		})
+
+		t.Run("late-committed row inside the overlap is emitted", func(t *testing.T) {
+			db, f, cursor := setup(t)
+			insert(t, db, "a", base)
+
+			_, cursor = runCycle(t, f, cursor)
+			require.Equal(t, base.Format(time.RFC3339Nano), committedAt(t, cursor))
+
+			insert(t, db, "late", base.Add(-30*time.Second))
+			insert(t, db, "too-late", base.Add(-2*time.Minute))
+			ids, _ := runCycle(t, f, cursor)
+			require.Len(t, ids, 2)
+			require.True(t, strings.HasPrefix(ids[0], "resource:item:late:"))
+			require.True(t, strings.HasPrefix(ids[1], "resource:item:a:"))
+		})
+
+		t.Run("committed cursor never moves backward and stays put when nothing is newer", func(t *testing.T) {
+			db, f, cursor := setup(t)
+			insert(t, db, "a", base)
+			insert(t, db, "b", base.Add(-30*time.Second))
+
+			_, cursor = runCycle(t, f, cursor)
+			committed := committedAt(t, cursor)
+			require.Equal(t, base.Format(time.RFC3339Nano), committed)
+
+			_, err := db.ExecContext(t.Context(), `DELETE FROM items WHERE id = 'a'`)
+			require.NoError(t, err)
+
+			ids, next := runCycle(t, f, cursor)
+			require.Len(t, ids, 1)
+			require.Equal(t, committed, committedAt(t, next))
+			require.Equal(t, cursor, next)
+		})
 	})
 
 	t.Run("out-of-bounds CurrentSourceIdx is clamped to 0", func(t *testing.T) {

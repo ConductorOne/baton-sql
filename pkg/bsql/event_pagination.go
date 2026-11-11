@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-const defaultLookbackDuration = 3 * time.Hour
+const (
+	defaultLookbackDuration = 3 * time.Hour
+	defaultOverlapDuration  = 60 * time.Second
+)
 
 // eventFeedCursor tracks pagination state across multiple ListEvents() calls.
 //
@@ -124,4 +127,15 @@ func defaultLookback(config *EventFeedConfig) time.Duration {
 		}
 	}
 	return defaultLookbackDuration
+}
+
+// overlap returns the configured overlap window, defaulting to 60 seconds.
+func overlap(config *EventFeedConfig) time.Duration {
+	if config != nil && config.Overlap != "" {
+		d, err := time.ParseDuration(config.Overlap)
+		if err == nil && d >= 0 {
+			return d
+		}
+	}
+	return defaultOverlapDuration
 }
