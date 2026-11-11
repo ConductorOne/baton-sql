@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"sync"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
@@ -22,6 +23,11 @@ type Connector struct {
 	db       *sql.DB
 	dbEngine database.DbEngine
 	celEnv   *bcel.Env
+
+	syncersMu  sync.Mutex
+	syncers    []connectorbuilder.ResourceSyncer
+	syncersErr error
+	syncersSet bool
 }
 
 func (c *Connector) Close() error {
@@ -35,10 +41,22 @@ func (c *Connector) Close() error {
 	return errs
 }
 
+// getOrSetSQLSyncers builds the resource syncers once and caches the result, including any error.
+func (c *Connector) getOrSetSQLSyncers(ctx context.Context) ([]connectorbuilder.ResourceSyncer, error) {
+	c.syncersMu.Lock()
+	defer c.syncersMu.Unlock()
+	if !c.syncersSet {
+		c.syncers, c.syncersErr = c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
+		c.syncersSet = true
+	}
+	return c.syncers, c.syncersErr
+}
+
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
+	syncers, err := c.getOrSetSQLSyncers(ctx)
 	if err != nil {
+		ctxzap.Extract(ctx).Error("baton-sql: failed to create resource syncers", zap.Error(err))
 		return nil
 	}
 
@@ -46,17 +64,13 @@ func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 }
 
 // EventFeeds implements EventProviderV2. Returns the SQL event feed when an event feed is configured.
-// GetSQLSyncers is called here separately from ResourceSyncers, producing distinct syncer instances.
-// This is safe because syncers are stateless — they hold pointers to the shared *sql.DB and *bcel.Env.
-// The SDK calls EventFeeds exactly once at initialization, so there is no ongoing allocation overhead.
 func (c *Connector) EventFeeds(ctx context.Context) []connectorbuilder.EventFeed {
 	if !c.config.HasEventFeed() {
 		return nil
 	}
-	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
+	syncers, err := c.getOrSetSQLSyncers(ctx)
 	if err != nil {
-		l := ctxzap.Extract(ctx)
-		l.Debug("baton-sql: failed to create syncers; event feed will be unavailable", zap.Error(err))
+		ctxzap.Extract(ctx).Error("baton-sql: failed to create syncers; event feed will be unavailable", zap.Error(err))
 		return nil
 	}
 	return []connectorbuilder.EventFeed{bsql.NewSQLEventFeed(*c.config, syncers)}
