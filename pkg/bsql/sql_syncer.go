@@ -48,7 +48,7 @@ func (s *SQLSyncer) ResourceTypeID() string {
 // Get implements ResourceTargetedSyncer, fetching a single resource by its ID.
 func (s *SQLSyncer) Get(ctx context.Context, resourceId *v2.ResourceId, parentResourceId *v2.ResourceId) (*v2.Resource, annotations.Annotations, error) {
 	if s.config.Get == nil {
-		return nil, nil, fmt.Errorf("baton-sql: get not configured for resource type %s", resourceId.GetResourceType())
+		return nil, nil, status.Errorf(codes.Unimplemented, "baton-sql: get not configured for resource type %s", resourceId.GetResourceType())
 	}
 
 	vars, err := s.PrepareQueryVars(ctx, nil, s.config.Get.Vars)
