@@ -10,7 +10,10 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 	"github.com/stretchr/testify/require"
 
+	"google.golang.org/protobuf/proto"
+
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
@@ -572,6 +575,87 @@ CREATE TABLE memberships (
 		require.NotEqual(t, events[0].Id, events[1].Id)
 		require.Contains(t, events[0].Id, ":group:grp-1:member:usr-1:")
 		require.Contains(t, events[1].Id, ":group:grp-1:admin:usr-1:")
+	})
+
+	t.Run("grant events match the full-sync grant, including expandable annotations", func(t *testing.T) {
+		db := setupDB(t)
+		_, err := db.ExecContext(t.Context(),
+			`INSERT INTO memberships(id, group_id, user_id, role, updated_at) VALUES (?,?,?,?,?)`,
+			int64(3), "grp-1", "grp-2", "member", tsStr(1),
+		)
+		require.NoError(t, err)
+
+		expandableMap := []*GrantMapping{{
+			PrincipalId:   "cols.user_id",
+			PrincipalType: "group",
+			Entitlement:   "cols.role",
+			Expandable: &ExpandableGrant{
+				Entitlements: []string{"'group:' + cols.user_id + ':member'"},
+				Shallow:      true,
+			},
+		}}
+
+		s := newEventTestSyncer(t, db, "cols.id")
+		f := &SQLEventFeed{}
+		for _, isRevoke := range []bool{false, true} {
+			source := incSyncSource{
+				ResourceType: "group",
+				GrantConfig: &GrantsEventFeed{
+					ResourceId:          "cols.group_id",
+					ChangesQuery:        "SELECT id, group_id, user_id, role, updated_at FROM memberships WHERE updated_at > ?<since>",
+					ChangesCursorColumn: "updated_at",
+					RevokesQuery:        "SELECT id, group_id, user_id, role, updated_at FROM memberships WHERE updated_at > ?<since>",
+					RevokesCursorColumn: "updated_at",
+				},
+				GrantMap: expandableMap,
+			}
+			events, _, _, err := f.processGrantPage(t.Context(), s, source, testSince, 0, "", isRevoke)
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+
+			fullResource := &v2.Resource{
+				Id:          &v2.ResourceId{ResourceType: "group", Resource: "grp-1"},
+				DisplayName: "Group 1",
+			}
+			fullGrants, _, err := s.listGrants(t.Context(), fullResource, &pagination.Token{}, &GrantsQuery{
+				Query: "SELECT id, group_id, user_id, role, updated_at FROM memberships WHERE group_id = 'grp-1'",
+				Map:   expandableMap,
+			})
+			require.NoError(t, err)
+			require.Len(t, fullGrants, 1)
+			want := fullGrants[0]
+
+			var gotEntitlement *v2.Entitlement
+			var gotPrincipal *v2.Resource
+			var gotAnnos annotations.Annotations
+			if isRevoke {
+				gotEntitlement = events[0].GetCreateRevokeEvent().GetEntitlement()
+				gotPrincipal = events[0].GetCreateRevokeEvent().GetPrincipal()
+				gotAnnos = events[0].GetCreateRevokeEvent().GetAnnotations()
+			} else {
+				gotEntitlement = events[0].GetCreateGrantEvent().GetEntitlement()
+				gotPrincipal = events[0].GetCreateGrantEvent().GetPrincipal()
+				gotAnnos = events[0].GetCreateGrantEvent().GetAnnotations()
+			}
+
+			require.Equal(t, want.GetEntitlement().GetId(), gotEntitlement.GetId())
+			require.Equal(t, "group:grp-1:member", gotEntitlement.GetId())
+			require.True(t, proto.Equal(want.GetPrincipal().GetId(), gotPrincipal.GetId()))
+
+			expandable := &v2.GrantExpandable{}
+			ok, err := gotAnnos.Pick(expandable)
+			require.NoError(t, err)
+			require.True(t, ok, "event is missing the GrantExpandable annotation")
+			require.Equal(t, []string{"group:grp-2:member"}, expandable.GetEntitlementIds())
+			require.True(t, expandable.GetShallow())
+
+			wantAnnos := annotations.Annotations(want.GetAnnotations())
+			wantExpandable := &v2.GrantExpandable{}
+			ok, err = wantAnnos.Pick(wantExpandable)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.True(t, proto.Equal(wantExpandable, expandable))
+		}
 	})
 
 	t.Run("SkipIf expression skips matching rows", func(t *testing.T) {

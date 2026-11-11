@@ -338,6 +338,7 @@ func (f *SQLEventFeed) processGrantPage(
 					CreateRevokeEvent: v2.CreateRevokeEvent_builder{
 						Entitlement: grant.GetEntitlement(),
 						Principal:   grant.GetPrincipal(),
+						Annotations: grant.GetAnnotations(),
 					}.Build(),
 				}.Build()
 			} else {
@@ -347,6 +348,7 @@ func (f *SQLEventFeed) processGrantPage(
 					CreateGrantEvent: v2.CreateGrantEvent_builder{
 						Entitlement: grant.GetEntitlement(),
 						Principal:   grant.GetPrincipal(),
+						Annotations: grant.GetAnnotations(),
 					}.Build(),
 				}.Build()
 			}
@@ -404,7 +406,12 @@ func (f *SQLEventFeed) mapGrantFromRow(
 		Resource:     principalID,
 	}
 
-	return sdkGrant.NewGrant(minimalResource, entitlementID, principal), true, nil
+	grantOptions, err := s.grantOptions(ctx, mapping, inputs)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return sdkGrant.NewGrant(minimalResource, entitlementID, principal, grantOptions...), true, nil
 }
 
 // grantRowKey returns the string representation of the pagination primary key value for a row.
