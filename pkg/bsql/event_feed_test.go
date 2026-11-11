@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	_ "modernc.org/sqlite"
 
 	"google.golang.org/protobuf/proto"
@@ -975,6 +977,75 @@ func TestListEvents(t *testing.T) {
 		require.NoError(t, err)
 		// Clamped to 0 → single source with no syncer → skip → wrap → hasMore=false.
 		require.False(t, state.HasMore)
+	})
+
+	missingCursorCursor := func(t *testing.T, key string) string {
+		t.Helper()
+		c, err := marshalCursor(&eventFeedCursor{
+			SourceCursors: map[string]string{key: testSince.UTC().Format(time.RFC3339Nano)},
+		})
+		require.NoError(t, err)
+		return c
+	}
+
+	t.Run("resource feed without cursor column fails with FailedPrecondition", func(t *testing.T) {
+		db := newEventTestDB(t)
+		_, err := db.ExecContext(t.Context(), `CREATE TABLE res (id TEXT NOT NULL, updated_at TEXT NOT NULL)`)
+		require.NoError(t, err)
+		_, err = db.ExecContext(t.Context(), `INSERT INTO res VALUES (?,?)`, "r1", tsStr(1))
+		require.NoError(t, err)
+
+		rt := ResourceType{
+			List: &ListQuery{Map: &ResourceMapping{Id: "cols.id"}},
+			EventFeed: &ResourceEventFeed{
+				Query:        "SELECT id, updated_at AS modified FROM res WHERE updated_at > ?<since>",
+				CursorColumn: "updated_at",
+			},
+		}
+		syncer := newListEventsSyncer(t, db, rt)
+		f := &SQLEventFeed{
+			config:  Config{ResourceTypes: map[string]ResourceType{"res": rt}},
+			syncers: map[string]*SQLSyncer{"res": syncer},
+		}
+
+		_, _, _, err = f.ListEvents(t.Context(), nil, &pagination.StreamToken{Cursor: missingCursorCursor(t, "res:resource")})
+		require.Error(t, err)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Contains(t, err.Error(), `cursor column "updated_at" not found`)
+		require.Contains(t, err.Error(), `resource type "res"`)
+		// The SDK wraps ListEvents errors with %w; the code must survive it.
+		require.Equal(t, codes.FailedPrecondition, status.Code(fmt.Errorf("error: listing events failed: %w", err)))
+	})
+
+	t.Run("grant changes feed without cursor column fails with FailedPrecondition", func(t *testing.T) {
+		db := newEventTestDB(t)
+		_, err := db.ExecContext(t.Context(), `CREATE TABLE memberships (id INTEGER PRIMARY KEY, group_id TEXT, user_id TEXT, updated_at TEXT)`)
+		require.NoError(t, err)
+		_, err = db.ExecContext(t.Context(), `INSERT INTO memberships(group_id, user_id, updated_at) VALUES (?,?,?)`, "g1", "u1", tsStr(1))
+		require.NoError(t, err)
+
+		rt := ResourceType{
+			List: &ListQuery{Map: &ResourceMapping{Id: "cols.id"}},
+			Grants: []*GrantsQuery{{
+				Map: []*GrantMapping{{PrincipalId: "cols.user_id", PrincipalType: "user", Entitlement: "'member'"}},
+				EventFeed: &GrantsEventFeed{
+					ResourceId:          "cols.group_id",
+					ChangesQuery:        "SELECT id, group_id, user_id FROM memberships WHERE updated_at > ?<since>",
+					ChangesCursorColumn: "updated_at",
+				},
+			}},
+		}
+		syncer := newListEventsSyncer(t, db, rt)
+		f := &SQLEventFeed{
+			config:  Config{ResourceTypes: map[string]ResourceType{"group": rt}},
+			syncers: map[string]*SQLSyncer{"group": syncer},
+		}
+
+		_, _, _, err = f.ListEvents(t.Context(), nil, &pagination.StreamToken{Cursor: missingCursorCursor(t, "group:grants:0:changes")})
+		require.Error(t, err)
+		require.Equal(t, codes.FailedPrecondition, status.Code(err))
+		require.Contains(t, err.Error(), `cursor column "updated_at" not found`)
+		require.Contains(t, err.Error(), `grant changes of resource type "group"`)
 	})
 }
 

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -229,16 +231,12 @@ func (f *SQLEventFeed) processResourceChangePage(
 				return false, fmt.Errorf("baton-sql: failed to evaluate resource ID in resource event feed: %w", evalErr)
 			}
 
-			rowTimestamp := since
-			if ts, ok := rowMap[rc.CursorColumn]; ok {
-				t, parseErr := toTime(ts)
-				if parseErr != nil {
-					return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in resource event feed: %w", rc.CursorColumn, ts, parseErr)
-				}
-				rowTimestamp = t
-				if t.After(maxSeen) {
-					maxSeen = t
-				}
+			rowTimestamp, tsErr := cursorTimestamp(rowMap, rc.CursorColumn, fmt.Sprintf("resource type %q", source.ResourceType))
+			if tsErr != nil {
+				return false, tsErr
+			}
+			if rowTimestamp.After(maxSeen) {
+				maxSeen = rowTimestamp
 			}
 
 			rowKey := grantRowKey(rowMap, rc.Pagination)
@@ -277,9 +275,11 @@ func (f *SQLEventFeed) processGrantPage(
 
 	query := gc.ChangesQuery
 	cursorCol := gc.ChangesCursorColumn
+	sourceDesc := fmt.Sprintf("grant changes of resource type %q", source.ResourceType)
 	if isRevoke {
 		query = gc.RevokesQuery
 		cursorCol = gc.RevokesCursorColumn
+		sourceDesc = fmt.Sprintf("grant revokes of resource type %q", source.ResourceType)
 	}
 
 	vars, err := s.PrepareQueryVars(ctx, nil, gc.Vars)
@@ -299,16 +299,12 @@ func (f *SQLEventFeed) processGrantPage(
 	// Event feed queries run against the primary database only, even when multiple databases are configured.
 	npt, err := s.iterateDBs(ctx, scopeCluster, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
 		return s.runQuery(ctx, s.db, innerToken, query, gc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-			rowTimestamp := since
-			if ts, ok := rowMap[cursorCol]; ok {
-				t, parseErr := toTime(ts)
-				if parseErr != nil {
-					return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in grant event feed: %w", cursorCol, ts, parseErr)
-				}
-				rowTimestamp = t
-				if t.After(maxSeen) {
-					maxSeen = t
-				}
+			rowTimestamp, tsErr := cursorTimestamp(rowMap, cursorCol, sourceDesc)
+			if tsErr != nil {
+				return false, tsErr
+			}
+			if rowTimestamp.After(maxSeen) {
+				maxSeen = rowTimestamp
 			}
 
 			inputs := s.env.SyncInputs(rowMap)
@@ -453,6 +449,25 @@ func laterTimestamp(candidate, current string) bool {
 		return true
 	}
 	return c.After(cur)
+}
+
+// cursorTimestamp reads the cursor column from a row. A missing or NULL column is a configuration
+// problem, so it returns FailedPrecondition, which C1 does not retry until the next poll interval.
+func cursorTimestamp(rowMap map[string]any, col string, sourceDesc string) (time.Time, error) {
+	v, ok := rowMap[col]
+	if !ok {
+		return time.Time{}, status.Errorf(codes.FailedPrecondition,
+			"baton-sql: cursor column %q not found in event feed query results for %s; check the query's SELECT list and aliases", col, sourceDesc)
+	}
+	if v == nil {
+		return time.Time{}, status.Errorf(codes.FailedPrecondition,
+			"baton-sql: cursor column %q is NULL in event feed query results for %s; filter out NULL values in the query", col, sourceDesc)
+	}
+	t, err := toTime(v)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in event feed for %s: %w", col, v, sourceDesc, err)
+	}
+	return t, nil
 }
 
 // toTime converts a database column value to time.Time.
