@@ -26,7 +26,7 @@ const (
 	cursorKey       = "cursor"
 	limitKey        = "limit"
 	unquotedKey     = "unquoted"
-	// sinceKey and idKey are reserved placeholders injected by the incremental sync path.
+	// sinceKey and idKey are reserved placeholders injected by the event feed path.
 	// Users must not define vars with these names.
 	sinceKey = "since"
 	idKey    = "id"

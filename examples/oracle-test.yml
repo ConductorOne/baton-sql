@@ -10,7 +10,7 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
-incremental_sync:
+event_feed:
   default_lookback: 3h
 
 actions:
@@ -191,7 +191,7 @@ resource_types:
               attr_company: ".attr_company"
               attr_employee_number: ".attr_employee_number"
               attr_employment_type: ".attr_employment_type"
-    # Fetches a single user by ID (required when incremental_sync is configured).
+    # Fetches a single user by ID (required when event_feed is configured).
     get:
       query: |
         SELECT
@@ -219,9 +219,9 @@ resource_types:
 
     # Detects new and modified users via updated_at.
     # Note: Oracle role and privilege types are sourced from system views (DBA_ROLES,
-    # DBA_SYS_PRIVS) which have no modification timestamps; incremental sync is not
+    # DBA_SYS_PRIVS) which have no modification timestamps; the event feed is not
     # applicable to those resource types.
-    incremental_sync:
+    event_feed:
       query: |
         SELECT
           id as "id",

@@ -6,7 +6,7 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
-incremental_sync:
+event_feed:
   default_lookback: 3h
 
 resource_types:
@@ -54,7 +54,7 @@ resource_types:
               manager_id: ".manager_id"
               manager_username: ".manager_username"
 
-    # Fetches a single user by ID (required when incremental_sync is configured).
+    # Fetches a single user by ID (required when event_feed is configured).
     get:
       query: |
         SELECT
@@ -73,7 +73,7 @@ resource_types:
         WHERE u.username = ?<id>
 
     # Detects new and modified users via updated_at.
-    incremental_sync:
+    event_feed:
       query: |
         SELECT
           u.id,
@@ -119,7 +119,7 @@ resource_types:
             profile:
               role_id: ".id"
 
-    # Fetches a single role by ID (required when incremental_sync is configured).
+    # Fetches a single role by ID (required when event_feed is configured).
     get:
       query: |
         SELECT id, role_name
@@ -127,7 +127,7 @@ resource_types:
         WHERE role_name = ?<id>
 
     # Detects new and modified roles via updated_at.
-    incremental_sync:
+    event_feed:
       query: |
         SELECT id, role_name, updated_at
         FROM roles
@@ -168,7 +168,7 @@ resource_types:
             entitlement_id: "member"
 
         # Detects new role assignments and soft-deleted revokes.
-        incremental_sync:
+        event_feed:
           resource_id: ".role_name"
           changes_query: |
             SELECT

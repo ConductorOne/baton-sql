@@ -105,8 +105,8 @@ func (l *GrantsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if err := validateVarsInQuery(s, l.Query, l.Vars); err != nil {
 		return err
 	}
-	if l.IncrementalSync != nil {
-		if err := l.IncrementalSync.staticValidate(ctx, s); err != nil {
+	if l.EventFeed != nil {
+		if err := l.EventFeed.staticValidate(ctx, s); err != nil {
 			return err
 		}
 	}
@@ -193,9 +193,9 @@ func (l *GetQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	return nil
 }
 
-func (l *ResourceIncrementalSync) staticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *ResourceEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if l.CursorColumn == "" {
-		return errors.New("incremental_sync.cursor_column is required")
+		return errors.New("event_feed.cursor_column is required")
 	}
 	if err := validateVarsInQuery(s, l.Query, l.Vars); err != nil {
 		return err
@@ -205,7 +205,7 @@ func (l *ResourceIncrementalSync) staticValidate(ctx context.Context, s *SQLSync
 		return err
 	}
 	if !queryUsesVar(usedVars, sinceKey) {
-		return fmt.Errorf("incremental_sync.query must contain ?<%s> placeholder", sinceKey)
+		return fmt.Errorf("event_feed.query must contain ?<%s> placeholder", sinceKey)
 	}
 	for k := range l.Vars {
 		if k == sinceKey || k == idKey {
@@ -214,42 +214,42 @@ func (l *ResourceIncrementalSync) staticValidate(ctx context.Context, s *SQLSync
 	}
 	if l.ResourceId != "" {
 		if err := s.env.Compile(l.ResourceId); err != nil {
-			return fmt.Errorf("incremental_sync.resource_id: invalid CEL expression: %w", err)
+			return fmt.Errorf("event_feed.resource_id: invalid CEL expression: %w", err)
 		}
 	}
 	return nil
 }
 
-func (l *GrantsIncrementalSync) staticValidate(ctx context.Context, s *SQLSyncer) error {
+func (l *GrantsEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if l.ResourceId == "" {
-		return errors.New("incremental_sync.resource_id is required")
+		return errors.New("event_feed.resource_id is required")
 	}
 	if l.ChangesCursorColumn == "" {
-		return errors.New("incremental_sync.changes_cursor_column is required")
+		return errors.New("event_feed.changes_cursor_column is required")
 	}
 	if err := validateVarsInQuery(s, l.ChangesQuery, l.Vars); err != nil {
-		return fmt.Errorf("incremental_sync.changes_query: %w", err)
+		return fmt.Errorf("event_feed.changes_query: %w", err)
 	}
 	usedVars, err := s.queryVars(l.ChangesQuery)
 	if err != nil {
 		return err
 	}
 	if !queryUsesVar(usedVars, sinceKey) {
-		return fmt.Errorf("incremental_sync.changes_query must contain ?<%s> placeholder", sinceKey)
+		return fmt.Errorf("event_feed.changes_query must contain ?<%s> placeholder", sinceKey)
 	}
 	if l.RevokesQuery != "" {
 		if l.RevokesCursorColumn == "" {
-			return errors.New("incremental_sync.revokes_cursor_column is required when revokes_query is set")
+			return errors.New("event_feed.revokes_cursor_column is required when revokes_query is set")
 		}
 		if err := validateVarsInQuery(s, l.RevokesQuery, l.Vars); err != nil {
-			return fmt.Errorf("incremental_sync.revokes_query: %w", err)
+			return fmt.Errorf("event_feed.revokes_query: %w", err)
 		}
 		usedVars, err = s.queryVars(l.RevokesQuery)
 		if err != nil {
 			return err
 		}
 		if !queryUsesVar(usedVars, sinceKey) {
-			return fmt.Errorf("incremental_sync.revokes_query must contain ?<%s> placeholder", sinceKey)
+			return fmt.Errorf("event_feed.revokes_query must contain ?<%s> placeholder", sinceKey)
 		}
 	}
 	for k := range l.Vars {
@@ -260,10 +260,10 @@ func (l *GrantsIncrementalSync) staticValidate(ctx context.Context, s *SQLSyncer
 	return nil
 }
 
-func (l *IncrementalSyncConfig) staticValidate(_ context.Context, _ *SQLSyncer) error {
+func (l *EventFeedConfig) staticValidate(_ context.Context, _ *SQLSyncer) error {
 	if l.DefaultLookback != "" {
 		if _, err := time.ParseDuration(l.DefaultLookback); err != nil {
-			return fmt.Errorf("invalid incremental_sync.default_lookback %q: %w", l.DefaultLookback, err)
+			return fmt.Errorf("invalid event_feed.default_lookback %q: %w", l.DefaultLookback, err)
 		}
 	}
 	return nil

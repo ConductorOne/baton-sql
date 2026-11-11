@@ -115,7 +115,7 @@ func (f *SQLEventFeed) ListEvents(
 	case incSyncSourceKindGrantRevokes:
 		events, nextPageToken, maxSeen, err = f.processGrantPage(ctx, syncer, source, since, pToken.Size, cursor.CurrentPageToken, true)
 	default:
-		err = fmt.Errorf("baton-sql: unknown incremental sync source kind: %s", source.Kind)
+		err = fmt.Errorf("baton-sql: unknown event feed source kind: %s", source.Kind)
 	}
 	if err != nil {
 		return nil, nil, nil, err
@@ -186,7 +186,7 @@ func (f *SQLEventFeed) sinceForSource(cursor *eventFeedCursor, key string) time.
 			return t
 		}
 	}
-	return time.Now().UTC().Add(-defaultLookback(f.config.IncrementalSync))
+	return time.Now().UTC().Add(-defaultLookback(f.config.EventFeed))
 }
 
 // processResourceChangePage runs one page of the resource incremental query and returns ResourceChangeEvents.
@@ -202,7 +202,7 @@ func (f *SQLEventFeed) processResourceChangePage(
 
 	vars, err := s.PrepareQueryVars(ctx, nil, rc.Vars)
 	if err != nil {
-		return nil, "", time.Time{}, fmt.Errorf("baton-sql: failed to prepare vars for resource incremental sync: %w", err)
+		return nil, "", time.Time{}, fmt.Errorf("baton-sql: failed to prepare vars for resource event feed: %w", err)
 	}
 	vars[sinceKey] = since
 
@@ -223,14 +223,14 @@ func (f *SQLEventFeed) processResourceChangePage(
 		inputs := s.env.SyncInputs(rowMap)
 		resourceID, evalErr := s.env.EvaluateString(ctx, resourceIDExpr, inputs)
 		if evalErr != nil {
-			return false, fmt.Errorf("baton-sql: failed to evaluate resource ID in resource incremental sync: %w", evalErr)
+			return false, fmt.Errorf("baton-sql: failed to evaluate resource ID in resource event feed: %w", evalErr)
 		}
 
 		rowTimestamp := since
 		if ts, ok := rowMap[rc.CursorColumn]; ok {
 			t, parseErr := toTime(ts)
 			if parseErr != nil {
-				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in resource incremental sync: %w", rc.CursorColumn, ts, parseErr)
+				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in resource event feed: %w", rc.CursorColumn, ts, parseErr)
 			}
 			rowTimestamp = t
 			if t.After(maxSeen) {
@@ -280,7 +280,7 @@ func (f *SQLEventFeed) processGrantPage(
 
 	vars, err := s.PrepareQueryVars(ctx, nil, gc.Vars)
 	if err != nil {
-		return nil, "", time.Time{}, fmt.Errorf("baton-sql: failed to prepare vars for grant incremental sync: %w", err)
+		return nil, "", time.Time{}, fmt.Errorf("baton-sql: failed to prepare vars for grant event feed: %w", err)
 	}
 	vars[sinceKey] = since
 
@@ -297,7 +297,7 @@ func (f *SQLEventFeed) processGrantPage(
 		if ts, ok := rowMap[cursorCol]; ok {
 			t, parseErr := toTime(ts)
 			if parseErr != nil {
-				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in grant incremental sync: %w", cursorCol, ts, parseErr)
+				return false, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in grant event feed: %w", cursorCol, ts, parseErr)
 			}
 			rowTimestamp = t
 			if t.After(maxSeen) {
@@ -308,7 +308,7 @@ func (f *SQLEventFeed) processGrantPage(
 		inputs := s.env.SyncInputs(rowMap)
 		resourceID, evalErr := s.env.EvaluateString(ctx, gc.ResourceId, inputs)
 		if evalErr != nil {
-			return false, fmt.Errorf("baton-sql: failed to evaluate resource_id in grant incremental sync: %w", evalErr)
+			return false, fmt.Errorf("baton-sql: failed to evaluate resource_id in grant event feed: %w", evalErr)
 		}
 
 		minimalResource := &v2.Resource{

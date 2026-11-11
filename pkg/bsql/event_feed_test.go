@@ -67,13 +67,13 @@ func TestGrantRowKey(t *testing.T) {
 
 // TestGetSources verifies deterministic source enumeration.
 func TestGetSources(t *testing.T) {
-	resSync := &ResourceIncrementalSync{Query: "SELECT 1", CursorColumn: "updated_at"}
-	grantSync := &GrantsIncrementalSync{
+	resSync := &ResourceEventFeed{Query: "SELECT 1", CursorColumn: "updated_at"}
+	grantSync := &GrantsEventFeed{
 		ResourceId:          "cols.id",
 		ChangesQuery:        "SELECT 1",
 		ChangesCursorColumn: "updated_at",
 	}
-	grantSyncWithRevokes := &GrantsIncrementalSync{
+	grantSyncWithRevokes := &GrantsEventFeed{
 		ResourceId:          "cols.id",
 		ChangesQuery:        "SELECT 1",
 		ChangesCursorColumn: "updated_at",
@@ -90,7 +90,7 @@ func TestGetSources(t *testing.T) {
 
 	t.Run("resource-only incremental sync", func(t *testing.T) {
 		sources := getSources(Config{ResourceTypes: map[string]ResourceType{
-			"user": {IncrementalSync: resSync},
+			"user": {EventFeed: resSync},
 		}})
 		require.Len(t, sources, 1)
 		require.Equal(t, "user:resource", sources[0].Key)
@@ -100,7 +100,7 @@ func TestGetSources(t *testing.T) {
 
 	t.Run("grant changes without revokes produces one source", func(t *testing.T) {
 		sources := getSources(Config{ResourceTypes: map[string]ResourceType{
-			"role": {Grants: []*GrantsQuery{{IncrementalSync: grantSync}}},
+			"role": {Grants: []*GrantsQuery{{EventFeed: grantSync}}},
 		}})
 		require.Len(t, sources, 1)
 		require.Equal(t, "role:grants:0:changes", sources[0].Key)
@@ -109,7 +109,7 @@ func TestGetSources(t *testing.T) {
 
 	t.Run("grant changes with revokes produces two sources", func(t *testing.T) {
 		sources := getSources(Config{ResourceTypes: map[string]ResourceType{
-			"role": {Grants: []*GrantsQuery{{IncrementalSync: grantSyncWithRevokes}}},
+			"role": {Grants: []*GrantsQuery{{EventFeed: grantSyncWithRevokes}}},
 		}})
 		require.Len(t, sources, 2)
 		require.Equal(t, incSyncSourceKindGrantChanges, sources[0].Kind)
@@ -119,9 +119,9 @@ func TestGetSources(t *testing.T) {
 
 	t.Run("multiple resource types sorted lexicographically", func(t *testing.T) {
 		sources := getSources(Config{ResourceTypes: map[string]ResourceType{
-			"role":  {IncrementalSync: resSync},
-			"group": {IncrementalSync: resSync},
-			"user":  {IncrementalSync: resSync},
+			"role":  {EventFeed: resSync},
+			"group": {EventFeed: resSync},
+			"user":  {EventFeed: resSync},
 		}})
 		require.Len(t, sources, 3)
 		require.Equal(t, "group", sources[0].ResourceType)
@@ -132,8 +132,8 @@ func TestGetSources(t *testing.T) {
 	t.Run("resource and grants both present", func(t *testing.T) {
 		sources := getSources(Config{ResourceTypes: map[string]ResourceType{
 			"group": {
-				IncrementalSync: resSync,
-				Grants:          []*GrantsQuery{{IncrementalSync: grantSyncWithRevokes}},
+				EventFeed: resSync,
+				Grants:          []*GrantsQuery{{EventFeed: grantSyncWithRevokes}},
 			},
 		}})
 		require.Len(t, sources, 3)
@@ -241,7 +241,7 @@ func TestSinceForSource(t *testing.T) {
 
 	t.Run("uses configured DefaultLookback duration", func(t *testing.T) {
 		f := &SQLEventFeed{config: Config{
-			IncrementalSync: &IncrementalSyncConfig{DefaultLookback: "30m"},
+			EventFeed: &EventFeedConfig{DefaultLookback: "30m"},
 		}}
 		cursor := &eventFeedCursor{SourceCursors: map[string]string{}}
 		before := time.Now().UTC().Add(-30 * time.Minute)
@@ -283,7 +283,7 @@ func TestProcessResourceChangePage(t *testing.T) {
 		source := incSyncSource{
 			Kind:         incSyncSourceKindResource,
 			ResourceType: "user",
-			ResConfig: &ResourceIncrementalSync{
+			ResConfig: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM resources WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 			},
@@ -313,7 +313,7 @@ func TestProcessResourceChangePage(t *testing.T) {
 		source := incSyncSource{
 			Kind:         incSyncSourceKindResource,
 			ResourceType: "user",
-			ResConfig: &ResourceIncrementalSync{
+			ResConfig: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM resources WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 				Pagination:   &Pagination{Strategy: "offset", PrimaryKey: "id"},
@@ -339,7 +339,7 @@ func TestProcessResourceChangePage(t *testing.T) {
 		source := incSyncSource{
 			Kind:         incSyncSourceKindResource,
 			ResourceType: "thing",
-			ResConfig: &ResourceIncrementalSync{
+			ResConfig: &ResourceEventFeed{
 				Query:        "SELECT ext_id, row_id, updated_at FROM things WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 				ResourceId:   "cols.ext_id", // override: use ext_id instead
@@ -363,7 +363,7 @@ func TestProcessResourceChangePage(t *testing.T) {
 		source := incSyncSource{
 			Kind:         incSyncSourceKindResource,
 			ResourceType: "user",
-			ResConfig: &ResourceIncrementalSync{
+			ResConfig: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM resources WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 			},
@@ -389,7 +389,7 @@ func TestProcessResourceChangePage(t *testing.T) {
 		source := incSyncSource{
 			Kind:         incSyncSourceKindResource,
 			ResourceType: "user",
-			ResConfig: &ResourceIncrementalSync{
+			ResConfig: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM resources WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 			},
@@ -423,7 +423,7 @@ CREATE TABLE memberships (
 	grantMap := []*GrantMapping{
 		{PrincipalId: "cols.user_id", PrincipalType: "user", Entitlement: "cols.role"},
 	}
-	changesConfig := &GrantsIncrementalSync{
+	changesConfig := &GrantsEventFeed{
 		ResourceId:          "cols.group_id",
 		ChangesQuery:        "SELECT id, group_id, user_id, role, updated_at FROM memberships WHERE updated_at > ?<since>",
 		ChangesCursorColumn: "updated_at",
@@ -472,7 +472,7 @@ CREATE TABLE memberships (
 		source := incSyncSource{
 			Kind:         incSyncSourceKindGrantRevokes,
 			ResourceType: "group",
-			GrantConfig: &GrantsIncrementalSync{
+			GrantConfig: &GrantsEventFeed{
 				ResourceId:          "cols.group_id",
 				RevokesQuery:        "SELECT id, group_id, user_id, role, deleted_at, updated_at FROM memberships WHERE deleted_at > ?<since>",
 				RevokesCursorColumn: "deleted_at",
@@ -500,7 +500,7 @@ CREATE TABLE memberships (
 		source := incSyncSource{
 			Kind:         incSyncSourceKindGrantChanges,
 			ResourceType: "group",
-			GrantConfig: &GrantsIncrementalSync{
+			GrantConfig: &GrantsEventFeed{
 				ResourceId:          "cols.group_id",
 				ChangesQuery:        "SELECT id, group_id, user_id, role, updated_at FROM memberships WHERE updated_at > ?<since>",
 				ChangesCursorColumn: "updated_at",
@@ -605,7 +605,7 @@ func TestListEvents(t *testing.T) {
 
 	t.Run("missing syncer skips source and returns hasMore=false", func(t *testing.T) {
 		config := Config{ResourceTypes: map[string]ResourceType{
-			"user": {IncrementalSync: &ResourceIncrementalSync{
+			"user": {EventFeed: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM t WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 			}},
@@ -627,7 +627,7 @@ func TestListEvents(t *testing.T) {
 
 		rt := ResourceType{
 			List: &ListQuery{Map: &ResourceMapping{Id: "cols.id"}},
-			IncrementalSync: &ResourceIncrementalSync{
+			EventFeed: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM res WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 			},
@@ -662,7 +662,7 @@ func TestListEvents(t *testing.T) {
 
 		rt := ResourceType{
 			List: &ListQuery{Map: &ResourceMapping{Id: "cols.id"}},
-			IncrementalSync: &ResourceIncrementalSync{
+			EventFeed: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM items WHERE updated_at > ?<since> ORDER BY id LIMIT ?<limit> OFFSET ?<offset>",
 				CursorColumn: "updated_at",
 				Pagination:   &Pagination{Strategy: "offset", PrimaryKey: "id", PageSize: 1},
@@ -697,7 +697,7 @@ func TestListEvents(t *testing.T) {
 
 	t.Run("out-of-bounds CurrentSourceIdx is clamped to 0", func(t *testing.T) {
 		config := Config{ResourceTypes: map[string]ResourceType{
-			"user": {IncrementalSync: &ResourceIncrementalSync{
+			"user": {EventFeed: &ResourceEventFeed{
 				Query:        "SELECT id, updated_at FROM t WHERE updated_at > ?<since>",
 				CursorColumn: "updated_at",
 			}},
@@ -802,15 +802,15 @@ func TestDefaultLookback(t *testing.T) {
 	})
 
 	t.Run("empty DefaultLookback returns default duration", func(t *testing.T) {
-		require.Equal(t, defaultLookbackDuration, defaultLookback(&IncrementalSyncConfig{}))
+		require.Equal(t, defaultLookbackDuration, defaultLookback(&EventFeedConfig{}))
 	})
 
 	t.Run("invalid duration string returns default duration", func(t *testing.T) {
-		require.Equal(t, defaultLookbackDuration, defaultLookback(&IncrementalSyncConfig{DefaultLookback: "not-a-duration"}))
+		require.Equal(t, defaultLookbackDuration, defaultLookback(&EventFeedConfig{DefaultLookback: "not-a-duration"}))
 	})
 
 	t.Run("valid duration string is parsed", func(t *testing.T) {
-		require.Equal(t, 30*time.Minute, defaultLookback(&IncrementalSyncConfig{DefaultLookback: "30m"}))
+		require.Equal(t, 30*time.Minute, defaultLookback(&EventFeedConfig{DefaultLookback: "30m"}))
 	})
 }
 

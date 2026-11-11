@@ -11,7 +11,7 @@ connect:
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
 
-incremental_sync:
+event_feed:
   default_lookback: 3h
 
 actions:
@@ -189,7 +189,7 @@ resource_types:
               attr_department: ".attr_department"
               attr_employee_number: ".attr_employee_number != null ? string(.attr_employee_number) : ''"
 
-    # Fetches a single user by ID (required when incremental_sync is configured).
+    # Fetches a single user by ID (required when event_feed is configured).
     get:
       query: |
         SELECT
@@ -222,7 +222,7 @@ resource_types:
         WHERE u.Username = ?<id>
 
     # Detects new and modified users via UpdatedAt.
-    incremental_sync:
+    event_feed:
       query: |
         SELECT
           u.UserID as id,
@@ -365,7 +365,7 @@ resource_types:
             profile:
               role_name: ".role_name"
 
-    # Fetches a single role by ID (required when incremental_sync is configured).
+    # Fetches a single role by ID (required when event_feed is configured).
     get:
       query: |
         SELECT RoleID as id, RoleName as role_name, Description as description
@@ -373,7 +373,7 @@ resource_types:
         WHERE RoleName = ?<id>
 
     # Detects new and modified roles via UpdatedAt.
-    incremental_sync:
+    event_feed:
       query: |
         SELECT RoleID as id, RoleName as role_name, Description as description, UpdatedAt as updated_at
         FROM Roles
@@ -441,7 +441,7 @@ resource_types:
           primary_key: "role_name"
 
         # Detects new role assignments and soft-deleted revokes.
-        incremental_sync:
+        event_feed:
           resource_id: ".role_name"
           changes_query: |
             SELECT

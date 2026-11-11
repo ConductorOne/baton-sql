@@ -34,22 +34,22 @@ type Config struct {
 	// Actions defines the set of actions configured in the connector.
 	Actions map[string]ActionConfig `yaml:"actions" json:"actions"`
 
-	// IncrementalSync holds global settings for incremental sync behavior.
-	IncrementalSync *IncrementalSyncConfig `yaml:"incremental_sync,omitempty" json:"incremental_sync,omitempty"`
+	// EventFeed holds global settings for the event feed.
+	EventFeed *EventFeedConfig `yaml:"event_feed,omitempty" json:"event_feed,omitempty"`
 }
 
 func (c Config) HasActions() bool {
 	return len(c.Actions) > 0
 }
 
-// HasIncrementalSync returns true if any resource type or grants query has incremental sync configured.
-func (c Config) HasIncrementalSync() bool {
+// HasEventFeed returns true if any resource type or grants query has an event feed configured.
+func (c Config) HasEventFeed() bool {
 	for _, rt := range c.ResourceTypes {
-		if rt.IncrementalSync != nil {
+		if rt.EventFeed != nil {
 			return true
 		}
 		for _, gq := range rt.Grants {
-			if gq.IncrementalSync != nil {
+			if gq.EventFeed != nil {
 				return true
 			}
 		}
@@ -119,11 +119,11 @@ type ResourceType struct {
 	// CredentialRotation defines the configuration for credential rotation
 	CredentialRotation *CredentialRotation `yaml:"credential_rotation,omitempty" json:"credential_rotation,omitempty"`
 
-	// Get defines how to fetch a single resource by ID. Required when IncrementalSync is set.
+	// Get defines how to fetch a single resource by ID. Required when EventFeed is set.
 	Get *GetQuery `yaml:"get,omitempty" json:"get,omitempty"`
 
-	// IncrementalSync defines settings for detecting changed resources via the event feed.
-	IncrementalSync *ResourceIncrementalSync `yaml:"incremental_sync,omitempty" json:"incremental_sync,omitempty"`
+	// EventFeed defines settings for detecting changed resources via the event feed.
+	EventFeed *ResourceEventFeed `yaml:"event_feed,omitempty" json:"event_feed,omitempty"`
 }
 
 // ListQuery defines the structure for configuring resource list queries.
@@ -352,8 +352,8 @@ type GrantsQuery struct {
 	// Map contains mappings to interpret each row of the query result as a grant.
 	Map []*GrantMapping `yaml:"map" json:"map"`
 
-	// IncrementalSync defines settings for detecting changed grants via the event feed.
-	IncrementalSync *GrantsIncrementalSync `yaml:"incremental_sync,omitempty" json:"incremental_sync,omitempty"`
+	// EventFeed defines settings for detecting changed grants via the event feed.
+	EventFeed *GrantsEventFeed `yaml:"event_feed,omitempty" json:"event_feed,omitempty"`
 }
 
 // GrantMapping defines how query results are mapped to an entitlement grant.
@@ -465,15 +465,15 @@ type CredentialRotation struct {
 	Update *AccountCreationConfig `yaml:"update" json:"update"`
 }
 
-// IncrementalSyncConfig holds global settings for incremental sync behavior.
-type IncrementalSyncConfig struct {
+// EventFeedConfig holds global settings for the event feed.
+type EventFeedConfig struct {
 	// DefaultLookback is the maximum time window to look back when initializing a cursor for the
 	// first time. Accepts any Go time.Duration string (e.g., "3h", "30m", "24h"). Defaults to 3h.
 	DefaultLookback string `yaml:"default_lookback" json:"default_lookback"`
 }
 
 // GetQuery defines how to fetch a single resource by its ID.
-// Required for resource types that configure incremental_sync.
+// Required for resource types that configure event_feed.
 type GetQuery struct {
 	// Query is the SQL statement to fetch one resource. Must contain ?<id>.
 	Query string `yaml:"query" json:"query"`
@@ -481,9 +481,9 @@ type GetQuery struct {
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
 }
 
-// ResourceIncrementalSync defines incremental sync configuration for a resource type.
+// ResourceEventFeed defines event feed configuration for a resource type.
 // When set, the resource type supports emitting ResourceChangeEvents from the event feed.
-type ResourceIncrementalSync struct {
+type ResourceEventFeed struct {
 	// Query is the SQL statement to detect changed resources. Must contain ?<since>.
 	Query string `yaml:"query" json:"query"`
 	// CursorColumn is the column whose max value is used to advance the cursor for this source.
@@ -499,9 +499,9 @@ type ResourceIncrementalSync struct {
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
 }
 
-// GrantsIncrementalSync defines incremental sync configuration for a grants query.
+// GrantsEventFeed defines event feed configuration for a grants query.
 // When set, the grants query supports emitting CreateGrantEvent and optionally CreateRevokeEvent.
-type GrantsIncrementalSync struct {
+type GrantsEventFeed struct {
 	// ResourceId is a CEL expression that extracts the resource ID from each row.
 	// Required because incremental queries span all resources, unlike full sync which is per-resource.
 	ResourceId string `yaml:"resource_id" json:"resource_id"`

@@ -32,12 +32,12 @@ connect:
 # connect:
 #   dsn: "mysql://${DB_USER}:${DB_PASS}@${DB_HOST}:3306/${DB_NAME}?parseTime=true"
 
-# Incremental Sync Settings (Optional)
-# ------------------------------------
-# Global settings for event-feed-based incremental sync.
-# When any resource type or grants query has incremental_sync configured, the connector
+# Event Feed Settings (Optional)
+# ------------------------------
+# Global settings for the event feed (incremental change detection).
+# When any resource type or grants query has event_feed configured, the connector
 # automatically exposes an EventFeed to ConductorOne for efficient change detection.
-incremental_sync:
+event_feed:
   default_lookback: 3h   # How far back to look on first run; any Go duration string
 
 # Resource Types
@@ -54,7 +54,7 @@ resource_types:
 
     # Targeted Sync — Get Query
     # -------------------------
-    # Fetches a single resource by ID. Required when incremental_sync is configured
+    # Fetches a single resource by ID. Required when event_feed is configured
     # on this resource type. Uses the same list.map for column mapping.
     get:
       query: |
@@ -97,12 +97,12 @@ resource_types:
         strategy: "cursor"
         primary_key: "id"
 
-    # Resource Incremental Sync
-    # -------------------------
+    # Resource Event Feed
+    # -------------------
     # Detects new/modified resources via timestamp filtering. Emits a ResourceChangeEvent
     # per row; C1 then calls the get query above to re-fetch the full resource.
     # ?<since> is automatically injected with the cursor timestamp for this source.
-    incremental_sync:
+    event_feed:
       query: |
         SELECT id, username, email, created_at, status, department, updated_at
         FROM users
@@ -161,15 +161,15 @@ resource_types:
           strategy: "offset"
           primary_key: "grant_id"
 
-        # Grants Incremental Sync
-        # -----------------------
+        # Grants Event Feed
+        # -----------------
         # Detects new and revoked grants without a full re-sync.
         # The parent map is reused for row-to-grant mapping.
         # NOTE: CEL expressions in map must not reference resource trait fields
         # (display_name, description, etc.) in this context — only row columns are available.
-        incremental_sync:
+        event_feed:
           resource_id: ".user_id"   # CEL expr: extracts resource ID from each row
-                                    # (required — incremental queries span ALL resources)
+                                    # (required — event feed queries span ALL resources)
           changes_query: |
             SELECT id AS grant_id, user_id, access_level, updated_at
             FROM user_access

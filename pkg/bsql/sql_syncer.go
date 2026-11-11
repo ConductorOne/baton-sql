@@ -145,9 +145,9 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 		}
 	}
 
-	if s.fullConfig.IncrementalSync != nil {
-		if err := s.validateInternal(ctx, s.fullConfig.IncrementalSync); err != nil {
-			return fmt.Errorf("validation error for incremental_sync: %w", err)
+	if s.fullConfig.EventFeed != nil {
+		if err := s.validateInternal(ctx, s.fullConfig.EventFeed); err != nil {
+			return fmt.Errorf("validation error for event_feed: %w", err)
 		}
 	}
 
@@ -183,12 +183,12 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 		}
 	}
 
-	if s.config.IncrementalSync != nil {
+	if s.config.EventFeed != nil {
 		if s.config.Get == nil {
-			return s.validateFormatErr("incremental_sync", fmt.Errorf("get query is required when incremental_sync is configured"))
+			return s.validateFormatErr("event_feed", fmt.Errorf("get query is required when event_feed is configured"))
 		}
-		if err := s.validateInternal(ctx, s.config.IncrementalSync); err != nil {
-			return s.validateFormatErr("incremental_sync", err)
+		if err := s.validateInternal(ctx, s.config.EventFeed); err != nil {
+			return s.validateFormatErr("event_feed", err)
 		}
 	}
 

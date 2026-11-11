@@ -45,18 +45,18 @@ func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.Reso
 	return syncers
 }
 
-// EventFeeds implements EventProviderV2. Returns the SQL event feed when incremental sync is configured.
+// EventFeeds implements EventProviderV2. Returns the SQL event feed when an event feed is configured.
 // GetSQLSyncers is called here separately from ResourceSyncers, producing distinct syncer instances.
 // This is safe because syncers are stateless — they hold pointers to the shared *sql.DB and *bcel.Env.
 // The SDK calls EventFeeds exactly once at initialization, so there is no ongoing allocation overhead.
 func (c *Connector) EventFeeds(ctx context.Context) []connectorbuilder.EventFeed {
-	if !c.config.HasIncrementalSync() {
+	if !c.config.HasEventFeed() {
 		return nil
 	}
 	syncers, err := c.config.GetSQLSyncers(ctx, c.db, c.dbEngine, c.celEnv)
 	if err != nil {
 		l := ctxzap.Extract(ctx)
-		l.Debug("baton-sql: failed to create syncers for event feed; incremental sync will be unavailable", zap.Error(err))
+		l.Debug("baton-sql: failed to create syncers; event feed will be unavailable", zap.Error(err))
 		return nil
 	}
 	return []connectorbuilder.EventFeed{bsql.NewSQLEventFeed(*c.config, syncers)}

@@ -62,8 +62,8 @@ type incSyncSource struct {
 	Kind         incSyncSourceKind
 	ResourceType string // resource type ID
 	GrantIdx     int    // index into rt.Grants (grant event sources only)
-	ResConfig    *ResourceIncrementalSync
-	GrantConfig  *GrantsIncrementalSync
+	ResConfig    *ResourceEventFeed
+	GrantConfig  *GrantsEventFeed
 	GrantMap     []*GrantMapping
 }
 
@@ -79,19 +79,19 @@ func getSources(config Config) []incSyncSource {
 	var sources []incSyncSource
 	for _, rtID := range rtIDs {
 		rt := config.ResourceTypes[rtID]
-		if rt.IncrementalSync != nil {
+		if rt.EventFeed != nil {
 			sources = append(sources, incSyncSource{
 				Key:          fmt.Sprintf("%s:resource", rtID),
 				Kind:         incSyncSourceKindResource,
 				ResourceType: rtID,
-				ResConfig:    rt.IncrementalSync,
+				ResConfig:    rt.EventFeed,
 			})
 		}
 		for i, gq := range rt.Grants {
-			if gq.IncrementalSync == nil {
+			if gq.EventFeed == nil {
 				continue
 			}
-			gs := gq.IncrementalSync
+			gs := gq.EventFeed
 			sources = append(sources, incSyncSource{
 				Key:          fmt.Sprintf("%s:grants:%d:changes", rtID, i),
 				Kind:         incSyncSourceKindGrantChanges,
@@ -116,7 +116,7 @@ func getSources(config Config) []incSyncSource {
 }
 
 // defaultLookback returns the configured lookback duration, defaulting to 3 hours.
-func defaultLookback(config *IncrementalSyncConfig) time.Duration {
+func defaultLookback(config *EventFeedConfig) time.Duration {
 	if config != nil && config.DefaultLookback != "" {
 		d, err := time.ParseDuration(config.DefaultLookback)
 		if err == nil {
