@@ -193,13 +193,14 @@ func (l *GetQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	return nil
 }
 
-// validateEventFeedPagination requires pagination on event feed queries so each page stays bounded.
+// validateEventFeedPagination requires offset pagination on event feed queries so each page stays bounded.
+// Cursor paging resumes from the last primary key, which skips rows when results are ordered by timestamp.
 func validateEventFeedPagination(field string, p *Pagination, usedVars []string) error {
 	if p == nil {
 		return fmt.Errorf("%s.pagination is required", field)
 	}
-	if p.Strategy != offsetKey && p.Strategy != cursorKey {
-		return fmt.Errorf("%s.pagination.strategy must be %q or %q", field, offsetKey, cursorKey)
+	if p.Strategy != offsetKey {
+		return fmt.Errorf("%s.pagination.strategy must be %q for event feed queries; %q cannot resume a timestamp-ordered query", field, offsetKey, cursorKey)
 	}
 	if p.PrimaryKey == "" {
 		return fmt.Errorf("%s.pagination.primary_key is required", field)

@@ -496,7 +496,8 @@ type ResourceEventFeed struct {
 	// When not set, falls back to the list mapping's id expression (list.map.id), which requires
 	// the incremental query to return all columns that expression references.
 	ResourceId string `yaml:"resource_id,omitempty" json:"resource_id,omitempty"`
-	// Pagination defines the pagination strategy. Required; primary_key must be set and the query must use ?<Limit>.
+	// Pagination defines the pagination strategy. Required; strategy must be "offset", primary_key must be set,
+	// the query must use ?<Limit>, and it must ORDER BY the cursor column, then the primary key.
 	Pagination *Pagination `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	// Vars provides optional variables for the query.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`
@@ -517,7 +518,8 @@ type GrantsEventFeed struct {
 	RevokesQuery string `yaml:"revokes_query,omitempty" json:"revokes_query,omitempty"`
 	// RevokesCursorColumn is the column whose max value advances the revokes cursor.
 	RevokesCursorColumn string `yaml:"revokes_cursor_column,omitempty" json:"revokes_cursor_column,omitempty"`
-	// Pagination defines the pagination strategy. Required; primary_key must be set and the query must use ?<Limit>.
+	// Pagination defines the pagination strategy. Required; strategy must be "offset", primary_key must be set,
+	// the query must use ?<Limit>, and it must ORDER BY the cursor column, then the primary key.
 	Pagination *Pagination `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	// Vars provides optional variables for the queries.
 	Vars map[string]string `yaml:"vars,omitempty" json:"vars,omitempty"`

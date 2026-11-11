@@ -80,6 +80,11 @@ func TestValidateEventFeedPagination(t *testing.T) {
 			errSubstr: "strategy must be",
 		},
 		{
+			name:      "resource feed with cursor strategy",
+			validator: &ResourceEventFeed{Query: resourceQuery, CursorColumn: "updated_at", Pagination: &Pagination{Strategy: "cursor", PrimaryKey: "id"}},
+			errSubstr: `event_feed.query.pagination.strategy must be "offset" for event feed queries; "cursor" cannot resume a timestamp-ordered query`,
+		},
+		{
 			name:      "resource feed without limit placeholder",
 			validator: &ResourceEventFeed{Query: "SELECT id, updated_at FROM t WHERE updated_at >= ?<since>", CursorColumn: "updated_at", Pagination: offset},
 			errSubstr: "must contain ?<Limit>",
@@ -89,6 +94,21 @@ func TestValidateEventFeedPagination(t *testing.T) {
 			validator: &GrantsEventFeed{
 				ResourceId: ".user_id", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at",
 				RevokesQuery: grantQuery, RevokesCursorColumn: "updated_at", Pagination: offset,
+			},
+		},
+		{
+			name: "grant feed with cursor strategy",
+			validator: &GrantsEventFeed{
+				ResourceId: ".user_id", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at",
+				RevokesQuery: grantQuery, RevokesCursorColumn: "updated_at", Pagination: &Pagination{Strategy: "cursor", PrimaryKey: "id"},
+			},
+			errSubstr: `event_feed.changes_query.pagination.strategy must be "offset" for event feed queries`,
+		},
+		{
+			name: "list query with cursor strategy",
+			validator: &ListQuery{
+				Query:      "SELECT id FROM users WHERE id > ?<Cursor> ORDER BY id LIMIT ?<Limit>",
+				Pagination: &Pagination{Strategy: "cursor", PrimaryKey: "id"},
 			},
 		},
 		{

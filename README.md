@@ -43,7 +43,7 @@ Resource types and grants queries can define an `event_feed` section so Conducto
 
 - Must use `?<since>`, which the connector fills with the last processed timestamp minus the `event_feed.overlap` window (default `60s`).
 - Should filter with `>= ?<since>` and order by the cursor column plus the pagination primary key (for example `ORDER BY updated_at, id`), so rows that share a timestamp are paged in a stable order.
-- Must configure `pagination` with a `primary_key` and use `?<Limit>`.
+- Must configure `pagination` with `strategy: "offset"` and a `primary_key`, and use `?<Limit>` and `?<Offset>`. The `cursor` strategy is not allowed, because a primary-key cursor cannot resume a query ordered by timestamp.
 
 The overlap window re-reads recent rows so rows with tied or late-committed timestamps are not missed. Re-read rows produce the same event IDs, and ConductorOne ignores the duplicates. Resource types with an `event_feed` also need a `get` query that uses `?<resource_id>`. See [`examples/example.yml`](examples/example.yml) for a complete configuration.
 
