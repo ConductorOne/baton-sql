@@ -326,13 +326,14 @@ func (f *SQLEventFeed) processGrantPage(
 			}
 
 			principalID := grant.GetPrincipal().GetId().GetResource()
+			entitlementID := grant.GetEntitlement().GetId()
 			tsStr := rowTimestamp.UTC().Format(time.RFC3339Nano)
 			rowKey := grantRowKey(rowMap, gc.Pagination)
 
 			var event *v2.Event
 			if isRevoke {
 				event = v2.Event_builder{
-					Id:         fmt.Sprintf("revoke:%s:%s:%s:%s:%s", source.ResourceType, resourceID, principalID, tsStr, rowKey),
+					Id:         fmt.Sprintf("revoke:%s:%s:%s:%s:%s:%s", source.ResourceType, resourceID, entitlementID, principalID, tsStr, rowKey),
 					OccurredAt: timestamppb.New(rowTimestamp),
 					CreateRevokeEvent: v2.CreateRevokeEvent_builder{
 						Entitlement: grant.GetEntitlement(),
@@ -341,7 +342,7 @@ func (f *SQLEventFeed) processGrantPage(
 				}.Build()
 			} else {
 				event = v2.Event_builder{
-					Id:         fmt.Sprintf("grant:%s:%s:%s:%s:%s", source.ResourceType, resourceID, principalID, tsStr, rowKey),
+					Id:         fmt.Sprintf("grant:%s:%s:%s:%s:%s:%s", source.ResourceType, resourceID, entitlementID, principalID, tsStr, rowKey),
 					OccurredAt: timestamppb.New(rowTimestamp),
 					CreateGrantEvent: v2.CreateGrantEvent_builder{
 						Entitlement: grant.GetEntitlement(),

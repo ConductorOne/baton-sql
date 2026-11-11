@@ -511,7 +511,7 @@ CREATE TABLE memberships (
 		require.True(t, strings.HasPrefix(events[0].Id, "revoke:group:"), "unexpected event ID: %s", events[0].Id)
 	})
 
-	t.Run("event ID format is grant:rtType:resourceID:principalID:timestamp:rowKey", func(t *testing.T) {
+	t.Run("event ID format is grant:rtType:resourceID:entitlementID:principalID:timestamp:rowKey", func(t *testing.T) {
 		db := setupDB(t)
 		_, err := db.ExecContext(t.Context(),
 			`INSERT INTO memberships(id, group_id, user_id, role, updated_at) VALUES (?,?,?,?,?)`,
@@ -537,14 +537,41 @@ CREATE TABLE memberships (
 		require.NoError(t, err)
 		require.Len(t, events, 1)
 
-		parts := strings.Split(events[0].Id, ":")
-		// Format: grant:group:grp-1:usr-1:<timestamp>:<rowKey>
-		require.Equal(t, "grant", parts[0])
-		require.Equal(t, "group", parts[1])
-		require.Equal(t, "grp-1", parts[2])
-		require.Equal(t, "usr-1", parts[3])
-		require.NotEmpty(t, parts[4])              // timestamp
-		require.Equal(t, "7", parts[len(parts)-1]) // rowKey = primary key value
+		tsPart := ts(166).UTC().Format(time.RFC3339Nano)
+		require.Equal(t, "grant:group:grp-1:group:grp-1:admin:usr-1:"+tsPart+":7", events[0].Id)
+	})
+
+	t.Run("event IDs differ per entitlement for the same row and principal", func(t *testing.T) {
+		db := setupDB(t)
+		_, err := db.ExecContext(t.Context(),
+			`INSERT INTO memberships(id, group_id, user_id, role, updated_at) VALUES (?,?,?,?,?)`,
+			int64(1), "grp-1", "usr-1", "admin", tsStr(1),
+		)
+		require.NoError(t, err)
+
+		s := newEventTestSyncer(t, db, "cols.id")
+		f := &SQLEventFeed{}
+		source := incSyncSource{
+			Kind:         incSyncSourceKindGrantRevokes,
+			ResourceType: "group",
+			GrantConfig: &GrantsEventFeed{
+				ResourceId:          "cols.group_id",
+				RevokesQuery:        "SELECT id, group_id, user_id, role, updated_at FROM memberships WHERE updated_at > ?<since>",
+				RevokesCursorColumn: "updated_at",
+				Pagination:          &Pagination{Strategy: "offset", PrimaryKey: "id"},
+			},
+			GrantMap: []*GrantMapping{
+				{PrincipalId: "cols.user_id", PrincipalType: "user", Entitlement: "'member'"},
+				{PrincipalId: "cols.user_id", PrincipalType: "user", Entitlement: "'admin'"},
+			},
+		}
+
+		events, _, _, err := f.processGrantPage(t.Context(), s, source, testSince, 0, "", true)
+		require.NoError(t, err)
+		require.Len(t, events, 2)
+		require.NotEqual(t, events[0].Id, events[1].Id)
+		require.Contains(t, events[0].Id, ":group:grp-1:member:usr-1:")
+		require.Contains(t, events[1].Id, ":group:grp-1:admin:usr-1:")
 	})
 
 	t.Run("SkipIf expression skips matching rows", func(t *testing.T) {
