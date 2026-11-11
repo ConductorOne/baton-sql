@@ -3,6 +3,7 @@ package bsql
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -1104,26 +1105,70 @@ func TestToTime(t *testing.T) {
 	ref := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
 
 	t.Run("time.Time passthrough", func(t *testing.T) {
-		got, err := toTime(ref)
+		got, err := toTime(ref, database.SQLite)
 		require.NoError(t, err)
 		require.True(t, got.Equal(ref))
 	})
 
 	t.Run("string in MySQL format", func(t *testing.T) {
-		got, err := toTime(ref.UTC().Format("2006-01-02 15:04:05"))
+		got, err := toTime(ref.UTC().Format("2006-01-02 15:04:05"), database.MySQL)
 		require.NoError(t, err)
 		require.True(t, got.Equal(ref))
 	})
 
 	t.Run("[]byte in MySQL format", func(t *testing.T) {
-		got, err := toTime([]byte(ref.UTC().Format("2006-01-02 15:04:05")))
+		got, err := toTime([]byte(ref.UTC().Format("2006-01-02 15:04:05")), database.MySQL)
 		require.NoError(t, err)
 		require.True(t, got.Equal(ref))
 	})
 
-	t.Run("unsupported type returns error", func(t *testing.T) {
-		_, err := toTime(12345)
+	t.Run("string in Vertica format with numeric offset", func(t *testing.T) {
+		value := "2025-03-01 09:00:00.000000-03"
+		_, err := parseTime(value)
 		require.Error(t, err)
+
+		got, err := toTime(value, database.Vertica)
+		require.NoError(t, err)
+		require.True(t, got.Equal(ref))
+	})
+
+	t.Run("int64 epoch seconds", func(t *testing.T) {
+		got, err := toTime(ref.Unix(), database.SQLite)
+		require.NoError(t, err)
+		require.True(t, got.Equal(ref))
+	})
+
+	t.Run("int64 epoch milliseconds", func(t *testing.T) {
+		got, err := toTime(ref.UnixMilli()+250, database.SQLite)
+		require.NoError(t, err)
+		require.True(t, got.Equal(ref.Add(250*time.Millisecond)))
+	})
+
+	t.Run("int32, int and uint64 epoch seconds", func(t *testing.T) {
+		const epoch = 1740830400 // 2025-03-01T12:00:00Z
+		for _, v := range []any{int32(epoch), int(epoch), uint64(epoch)} {
+			got, err := toTime(v, database.SQLite)
+			require.NoError(t, err)
+			require.True(t, got.Equal(ref), "type %T", v)
+		}
+	})
+
+	t.Run("float64 epoch seconds keeps the fraction", func(t *testing.T) {
+		got, err := toTime(float64(ref.Unix())+0.5, database.SQLite)
+		require.NoError(t, err)
+		require.True(t, got.Equal(ref.Add(500*time.Millisecond)))
+	})
+
+	t.Run("numeric value outside the epoch range returns error", func(t *testing.T) {
+		_, err := toTime(int64(-1), database.SQLite)
+		require.Error(t, err)
+		_, err = toTime(uint64(math.MaxUint64), database.SQLite)
+		require.Error(t, err)
+	})
+
+	t.Run("unsupported type returns error", func(t *testing.T) {
+		_, err := toTime(true, database.SQLite)
+		require.ErrorContains(t, err, "unsupported time type bool")
 	})
 }
 

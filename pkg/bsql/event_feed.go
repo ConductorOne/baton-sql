@@ -3,6 +3,7 @@ package bsql
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	sdkGrant "github.com/conductorone/baton-sdk/pkg/types/grant"
+	"github.com/conductorone/baton-sql/pkg/database"
 )
 
 // SQLEventFeed implements connectorbuilder.EventFeed for the baton-sql connector.
@@ -231,7 +233,7 @@ func (f *SQLEventFeed) processResourceChangePage(
 				return false, fmt.Errorf("baton-sql: failed to evaluate resource ID in resource event feed: %w", evalErr)
 			}
 
-			rowTimestamp, tsErr := cursorTimestamp(rowMap, rc.CursorColumn, fmt.Sprintf("resource type %q", source.ResourceType))
+			rowTimestamp, tsErr := cursorTimestamp(rowMap, rc.CursorColumn, s.dbEngine, fmt.Sprintf("resource type %q", source.ResourceType))
 			if tsErr != nil {
 				return false, tsErr
 			}
@@ -299,7 +301,7 @@ func (f *SQLEventFeed) processGrantPage(
 	// Event feed queries run against the primary database only, even when multiple databases are configured.
 	npt, err := s.iterateDBs(ctx, scopeCluster, pToken, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
 		return s.runQuery(ctx, s.db, innerToken, query, gc.Pagination, vars, func(ctx context.Context, rowMap map[string]any) (bool, error) {
-			rowTimestamp, tsErr := cursorTimestamp(rowMap, cursorCol, sourceDesc)
+			rowTimestamp, tsErr := cursorTimestamp(rowMap, cursorCol, s.dbEngine, sourceDesc)
 			if tsErr != nil {
 				return false, tsErr
 			}
@@ -453,7 +455,7 @@ func laterTimestamp(candidate, current string) bool {
 
 // cursorTimestamp reads the cursor column from a row. A missing or NULL column is a configuration
 // problem, so it returns FailedPrecondition, which C1 does not retry until the next poll interval.
-func cursorTimestamp(rowMap map[string]any, col string, sourceDesc string) (time.Time, error) {
+func cursorTimestamp(rowMap map[string]any, col string, engine database.DbEngine, sourceDesc string) (time.Time, error) {
 	v, ok := rowMap[col]
 	if !ok {
 		return time.Time{}, status.Errorf(codes.FailedPrecondition,
@@ -463,31 +465,48 @@ func cursorTimestamp(rowMap map[string]any, col string, sourceDesc string) (time
 		return time.Time{}, status.Errorf(codes.FailedPrecondition,
 			"baton-sql: cursor column %q is NULL in event feed query results for %s; filter out NULL values in the query", col, sourceDesc)
 	}
-	t, err := toTime(v)
+	t, err := toTime(v, engine)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("baton-sql: failed to parse cursor column %q value %v in event feed for %s: %w", col, v, sourceDesc, err)
 	}
 	return t, nil
 }
 
-// toTime converts a database column value to time.Time.
-func toTime(v any) (time.Time, error) {
+// toTime converts a database column value to time.Time. Numeric values are Unix epochs, read the same way parseTime reads numeric strings.
+func toTime(v any, engine database.DbEngine) (time.Time, error) {
+	var (
+		pt  *time.Time
+		err error
+	)
 	switch t := v.(type) {
 	case time.Time:
 		return t, nil
 	case []byte:
-		pt, err := parseTime(string(t))
-		if err != nil {
-			return time.Time{}, err
-		}
-		return *pt, nil
+		pt, err = parseTimeWithEngine(string(t), engine)
 	case string:
-		pt, err := parseTime(t)
-		if err != nil {
-			return time.Time{}, err
+		pt, err = parseTimeWithEngine(t, engine)
+	case int64:
+		pt, _ = unixEpochToTime(t)
+	case int32:
+		pt, _ = unixEpochToTime(int64(t))
+	case int:
+		pt, _ = unixEpochToTime(int64(t))
+	case uint64:
+		if t <= math.MaxInt64 {
+			pt, _ = unixEpochToTime(int64(t))
 		}
-		return *pt, nil
+	case float64:
+		pt, _ = unixEpochFloatToTime(t)
+	case float32:
+		pt, _ = unixEpochFloatToTime(float64(t))
 	default:
 		return time.Time{}, fmt.Errorf("unsupported time type %T", v)
 	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if pt == nil {
+		return time.Time{}, fmt.Errorf("numeric value %v is not a Unix timestamp in seconds or milliseconds between 1970 and 2100", v)
+	}
+	return *pt, nil
 }
