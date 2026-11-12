@@ -32,6 +32,10 @@ const (
 	unquotedKey     = "unquoted"
 	identifierKey   = "identifier"
 	keywordKey      = "keyword"
+	// sinceKey and resourceIdKey are reserved placeholders injected by the event feed path.
+	// Users must not define vars with these names.
+	sinceKey      = "since"
+	resourceIdKey = "resource_id"
 )
 
 var ErrQueryAffectedZeroRows = errors.New("query affected 0 rows, ending and rolling back")
@@ -208,6 +212,14 @@ func (s *SQLSyncer) parseQueryOpts(pCtx *paginationContext, query string, vars m
 		}
 
 		var val interface{}
+		switch opts.Key {
+		case limitKey, offsetKey, cursorKey:
+			if pCtx == nil {
+				parseErr = errors.Join(parseErr, fmt.Errorf("query uses %s but no pagination is configured", token))
+				return token
+			}
+		}
+
 		switch opts.Key {
 		case limitKey:
 			// Always request 1 more than the specified limit, so we can see if there are additional results.

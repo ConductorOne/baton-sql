@@ -2,6 +2,7 @@ package bsql
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -64,25 +65,53 @@ func parseTime(value string) (*time.Time, error) {
 		}
 	}
 
-	// Try Unix timestamp (seconds since epoch)
 	if i, err := strconv.ParseInt(value, 10, 64); err == nil {
-		// Check if it's likely a Unix timestamp (Jan 1, 1970 to Jan 1, 2100)
-		if i > 0 && i < 4102444800 {
-			t := time.Unix(i, 0)
-			return &t, nil
-		}
-	}
-
-	// Try millisecond precision Unix timestamp
-	if i, err := strconv.ParseInt(value, 10, 64); err == nil {
-		// Check if it's likely a millisecond timestamp
-		if i > 1000000000000 && i < 4102444800000 {
-			t := time.Unix(i/1000, (i%1000)*1000000)
-			return &t, nil
+		if t, ok := unixEpochToTime(i); ok {
+			return t, nil
 		}
 	}
 
 	return nil, errors.New("unable to parse time string with any known format")
+}
+
+// unixEpochUnit infers the unit of a Unix timestamp: seconds when it falls between 1970 and 2100,
+// otherwise milliseconds when it falls in that same range.
+func unixEpochUnit(i int64) (time.Duration, bool) {
+	switch {
+	case i > 0 && i < 4102444800:
+		return time.Second, true
+	case i > 1000000000000 && i < 4102444800000:
+		return time.Millisecond, true
+	default:
+		return 0, false
+	}
+}
+
+func unixEpochToTime(i int64) (*time.Time, bool) {
+	unit, ok := unixEpochUnit(i)
+	if !ok {
+		return nil, false
+	}
+	var t time.Time
+	if unit == time.Second {
+		t = time.Unix(i, 0)
+	} else {
+		t = time.Unix(i/1000, (i%1000)*1000000)
+	}
+	return &t, true
+}
+
+// unixEpochFloatToTime applies the unixEpochUnit heuristic to the whole part and keeps the fraction.
+func unixEpochFloatToTime(f float64) (*time.Time, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return nil, false
+	}
+	unit, ok := unixEpochUnit(int64(f))
+	if !ok {
+		return nil, false
+	}
+	t := time.Unix(0, int64(f*float64(unit)))
+	return &t, true
 }
 
 // parseTimeWithEngine attempts to parse a time string using database-specific formats based on engine type.

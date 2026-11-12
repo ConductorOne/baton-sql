@@ -42,6 +42,16 @@ func NewEnv(ctx context.Context) (*Env, error) {
 	}, nil
 }
 
+// Compile verifies that expr is a valid CEL expression. Returns an error if the expression
+// cannot be parsed or type-checked against the environment's declared variables.
+func (t *Env) Compile(expr string) error {
+	_, issues := t.celEnv.Compile(preprocessExpressions(expr))
+	if issues != nil && issues.Err() != nil {
+		return issues.Err()
+	}
+	return nil
+}
+
 func (t *Env) Evaluate(ctx context.Context, expr string, inputs map[string]any) (any, error) {
 	expr = preprocessExpressions(expr)
 

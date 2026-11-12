@@ -153,34 +153,47 @@ func (s *SQLSyncer) mapGrant(ctx context.Context, resource *v2.Resource, mapping
 		return nil, false, err
 	}
 
-	grantOptions := []sdkGrant.GrantOption{}
-	if mapping.Expandable != nil {
-		skip := false
-		if mapping.Expandable.SkipIf != "" {
-			skip, err = s.env.EvaluateBool(ctx, mapping.Expandable.SkipIf, inputs)
-			if err != nil {
-				return nil, false, err
-			}
-		}
-
-		if !skip {
-			entitlementIDs := []string{}
-			for _, entitlement := range mapping.Expandable.Entitlements {
-				entitlementID, err := s.env.EvaluateString(ctx, entitlement, inputs)
-				if err != nil {
-					return nil, false, err
-				}
-				entitlementIDs = append(entitlementIDs, entitlementID)
-			}
-
-			if len(entitlementIDs) > 0 {
-				grantOptions = append(grantOptions, sdkGrant.WithAnnotation(&v2.GrantExpandable{
-					EntitlementIds: entitlementIDs,
-					Shallow:        mapping.Expandable.Shallow,
-				}))
-			}
-		}
+	grantOptions, err := s.grantOptions(ctx, mapping, inputs)
+	if err != nil {
+		return nil, false, err
 	}
 
 	return sdkGrant.NewGrant(resource, entitlementID, principal, grantOptions...), true, nil
+}
+
+// grantOptions builds the grant options (e.g. the expandable annotation) shared by full sync and the event feed.
+func (s *SQLSyncer) grantOptions(ctx context.Context, mapping *GrantMapping, inputs map[string]any) ([]sdkGrant.GrantOption, error) {
+	if mapping.Expandable == nil {
+		return nil, nil
+	}
+
+	if mapping.Expandable.SkipIf != "" {
+		skip, err := s.env.EvaluateBool(ctx, mapping.Expandable.SkipIf, inputs)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			return nil, nil
+		}
+	}
+
+	entitlementIDs := []string{}
+	for _, entitlement := range mapping.Expandable.Entitlements {
+		entitlementID, err := s.env.EvaluateString(ctx, entitlement, inputs)
+		if err != nil {
+			return nil, err
+		}
+		entitlementIDs = append(entitlementIDs, entitlementID)
+	}
+
+	if len(entitlementIDs) == 0 {
+		return nil, nil
+	}
+
+	return []sdkGrant.GrantOption{
+		sdkGrant.WithAnnotation(&v2.GrantExpandable{
+			EntitlementIds: entitlementIDs,
+			Shallow:        mapping.Expandable.Shallow,
+		}),
+	}, nil
 }

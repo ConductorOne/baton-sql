@@ -3,6 +3,7 @@ package bsql
 import (
 	"testing"
 
+	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
 	"github.com/stretchr/testify/require"
 )
@@ -103,6 +104,124 @@ func TestValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateEventFeedPagination(t *testing.T) {
+	offset := &Pagination{Strategy: "offset", PrimaryKey: "id"}
+	resourceQuery := "SELECT id, updated_at FROM t WHERE updated_at >= ?<since> ORDER BY updated_at, id LIMIT ?<Limit> OFFSET ?<Offset>"
+	grantQuery := "SELECT id, user_id, updated_at FROM g WHERE updated_at >= ?<since> ORDER BY updated_at, id LIMIT ?<Limit> OFFSET ?<Offset>"
+
+	tcases := []struct {
+		name      string
+		validator staticValidator
+		errSubstr string
+	}{
+		{
+			name:      "resource feed with pagination",
+			validator: &ResourceEventFeed{Query: resourceQuery, CursorColumn: "updated_at", Pagination: offset},
+		},
+		{
+			name:      "resource feed without pagination",
+			validator: &ResourceEventFeed{Query: resourceQuery, CursorColumn: "updated_at"},
+			errSubstr: "event_feed.query.pagination is required",
+		},
+		{
+			name:      "resource feed without primary key",
+			validator: &ResourceEventFeed{Query: resourceQuery, CursorColumn: "updated_at", Pagination: &Pagination{Strategy: "offset"}},
+			errSubstr: "primary_key is required",
+		},
+		{
+			name:      "resource feed with unknown strategy",
+			validator: &ResourceEventFeed{Query: resourceQuery, CursorColumn: "updated_at", Pagination: &Pagination{Strategy: "page", PrimaryKey: "id"}},
+			errSubstr: "strategy must be",
+		},
+		{
+			name:      "resource feed with cursor strategy",
+			validator: &ResourceEventFeed{Query: resourceQuery, CursorColumn: "updated_at", Pagination: &Pagination{Strategy: "cursor", PrimaryKey: "id"}},
+			errSubstr: `event_feed.query.pagination.strategy must be "offset" for event feed queries; "cursor" cannot resume a timestamp-ordered query`,
+		},
+		{
+			name:      "resource feed without limit placeholder",
+			validator: &ResourceEventFeed{Query: "SELECT id, updated_at FROM t WHERE updated_at >= ?<since>", CursorColumn: "updated_at", Pagination: offset},
+			errSubstr: "must contain ?<Limit>",
+		},
+		{
+			name: "grant feed with pagination",
+			validator: &GrantsEventFeed{
+				ResourceId: ".user_id", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at",
+				RevokesQuery: grantQuery, RevokesCursorColumn: "updated_at", Pagination: offset,
+			},
+		},
+		{
+			name: "grant feed with cursor strategy",
+			validator: &GrantsEventFeed{
+				ResourceId: ".user_id", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at",
+				RevokesQuery: grantQuery, RevokesCursorColumn: "updated_at", Pagination: &Pagination{Strategy: "cursor", PrimaryKey: "id"},
+			},
+			errSubstr: `event_feed.changes_query.pagination.strategy must be "offset" for event feed queries`,
+		},
+		{
+			name: "list query with cursor strategy",
+			validator: &ListQuery{
+				Query:      "SELECT id FROM users WHERE id > ?<Cursor> ORDER BY id LIMIT ?<Limit>",
+				Pagination: &Pagination{Strategy: "cursor", PrimaryKey: "id"},
+			},
+		},
+		{
+			name:      "grant feed without pagination",
+			validator: &GrantsEventFeed{ResourceId: ".user_id", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at"},
+			errSubstr: "event_feed.changes_query.pagination is required",
+		},
+		{
+			name: "grant feed revokes query without limit placeholder",
+			validator: &GrantsEventFeed{
+				ResourceId: ".user_id", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at",
+				RevokesQuery:        "SELECT id, user_id, deleted_at FROM g WHERE deleted_at >= ?<since>",
+				RevokesCursorColumn: "deleted_at", Pagination: offset,
+			},
+			errSubstr: "event_feed.revokes_query must contain ?<Limit>",
+		},
+		{
+			name: "grant feed with invalid resource_id CEL expression",
+			validator: &GrantsEventFeed{
+				ResourceId: "cols.user_id +", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at", Pagination: offset,
+			},
+			errSubstr: "event_feed.resource_id: invalid CEL expression",
+		},
+	}
+
+	celEnv, err := bcel.NewEnv(t.Context())
+	require.NoError(t, err)
+
+	for _, tc := range tcases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.validator.staticValidate(t.Context(), &SQLSyncer{env: celEnv})
+			if tc.errSubstr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.errSubstr)
+		})
+	}
+}
+
+func TestParseQueryOptsPaginationVarsWithoutPagination(t *testing.T) {
+	s := &SQLSyncer{}
+	for _, q := range []string{
+		"SELECT * FROM t LIMIT ?<Limit>",
+		"SELECT * FROM t OFFSET ?<Offset>",
+		"SELECT * FROM t WHERE id > ?<Cursor>",
+	} {
+		_, _, _, err := s.parseQueryOpts(nil, q, nil)
+		require.ErrorContains(t, err, "no pagination is configured", q)
+	}
+}
+
+func TestValidateEventFeedConfig(t *testing.T) {
+	require.NoError(t, (&EventFeedConfig{DefaultLookback: "3h", Overlap: "30s"}).staticValidate(t.Context(), nil))
+	require.NoError(t, (&EventFeedConfig{Overlap: "0s"}).staticValidate(t.Context(), nil))
+	require.ErrorContains(t, (&EventFeedConfig{Overlap: "soon"}).staticValidate(t.Context(), nil), "invalid event_feed.overlap")
+	require.ErrorContains(t, (&EventFeedConfig{Overlap: "-1m"}).staticValidate(t.Context(), nil), "must not be negative")
 }
 
 // TestValidateProvisioningIdempotency covers the shared validation_queries_signal_idempotency

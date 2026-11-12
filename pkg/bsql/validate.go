@@ -4,7 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
+
+// queryUsesVar reports whether key appears in the vars slice returned by queryVars.
+func queryUsesVar(vars []string, key string) bool {
+	for _, v := range vars {
+		if v == key {
+			return true
+		}
+	}
+	return false
+}
 
 func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) error {
 	if query == "" {
@@ -22,7 +33,7 @@ func validateVarsInQuery(s *SQLSyncer, query string, vars map[string]string) err
 
 	for _, v := range usedVars {
 		if _, ok := vars[v]; !ok {
-			if v == limitKey || v == offsetKey || v == cursorKey {
+			if v == limitKey || v == offsetKey || v == cursorKey || v == sinceKey || v == resourceIdKey {
 				continue
 			}
 			return fmt.Errorf("query uses variable '%s' which is not defined in vars", v)
@@ -173,7 +184,15 @@ func (l *GrantsQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
 	if err := validateScope(l.Scope); err != nil {
 		return err
 	}
-	return validateVarsInQuery(s, l.Query, l.Vars)
+	if err := validateVarsInQuery(s, l.Query, l.Vars); err != nil {
+		return err
+	}
+	if l.EventFeed != nil {
+		if err := l.EventFeed.staticValidate(ctx, s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validatePasswordConstraints(constraints []PasswordConstraintConfig) error {
@@ -238,6 +257,140 @@ func (l *CredentialRotation) staticValidate(ctx context.Context, s *SQLSyncer) e
 		}
 	}
 
+	return nil
+}
+
+func (l *GetQuery) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if err := validateVarsInQuery(s, l.Query, l.Vars); err != nil {
+		return err
+	}
+	usedVars, err := s.queryVars(l.Query)
+	if err != nil {
+		return err
+	}
+	if !queryUsesVar(usedVars, resourceIdKey) {
+		return fmt.Errorf("get query must contain ?<%s> placeholder", resourceIdKey)
+	}
+	for k := range l.Vars {
+		if k == sinceKey || k == resourceIdKey {
+			return fmt.Errorf("vars must not use reserved key %q", k)
+		}
+	}
+	return nil
+}
+
+// validateEventFeedPagination requires offset pagination on event feed queries so each page stays bounded.
+// Cursor paging resumes from the last primary key, which skips rows when results are ordered by timestamp.
+func validateEventFeedPagination(field string, p *Pagination, usedVars []string) error {
+	if p == nil {
+		return fmt.Errorf("%s.pagination is required", field)
+	}
+	if p.Strategy != offsetKey {
+		return fmt.Errorf("%s.pagination.strategy must be %q for event feed queries; %q cannot resume a timestamp-ordered query", field, offsetKey, cursorKey)
+	}
+	if p.PrimaryKey == "" {
+		return fmt.Errorf("%s.pagination.primary_key is required", field)
+	}
+	if !queryUsesVar(usedVars, limitKey) {
+		return fmt.Errorf("%s must contain ?<Limit> placeholder", field)
+	}
+	return nil
+}
+
+func (l *ResourceEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if l.CursorColumn == "" {
+		return errors.New("event_feed.cursor_column is required")
+	}
+	if err := validateVarsInQuery(s, l.Query, l.Vars); err != nil {
+		return err
+	}
+	usedVars, err := s.queryVars(l.Query)
+	if err != nil {
+		return err
+	}
+	if !queryUsesVar(usedVars, sinceKey) {
+		return fmt.Errorf("event_feed.query must contain ?<%s> placeholder", sinceKey)
+	}
+	if err := validateEventFeedPagination("event_feed.query", l.Pagination, usedVars); err != nil {
+		return err
+	}
+	for k := range l.Vars {
+		if k == sinceKey || k == resourceIdKey {
+			return fmt.Errorf("vars must not use reserved key %q", k)
+		}
+	}
+	if l.ResourceId != "" {
+		if err := s.env.Compile(l.ResourceId); err != nil {
+			return fmt.Errorf("event_feed.resource_id: invalid CEL expression: %w", err)
+		}
+	}
+	return nil
+}
+
+func (l *GrantsEventFeed) staticValidate(ctx context.Context, s *SQLSyncer) error {
+	if l.ResourceId == "" {
+		return errors.New("event_feed.resource_id is required")
+	}
+	if err := s.env.Compile(l.ResourceId); err != nil {
+		return fmt.Errorf("event_feed.resource_id: invalid CEL expression: %w", err)
+	}
+	if l.ChangesCursorColumn == "" {
+		return errors.New("event_feed.changes_cursor_column is required")
+	}
+	if err := validateVarsInQuery(s, l.ChangesQuery, l.Vars); err != nil {
+		return fmt.Errorf("event_feed.changes_query: %w", err)
+	}
+	usedVars, err := s.queryVars(l.ChangesQuery)
+	if err != nil {
+		return err
+	}
+	if !queryUsesVar(usedVars, sinceKey) {
+		return fmt.Errorf("event_feed.changes_query must contain ?<%s> placeholder", sinceKey)
+	}
+	if err := validateEventFeedPagination("event_feed.changes_query", l.Pagination, usedVars); err != nil {
+		return err
+	}
+	if l.RevokesQuery != "" {
+		if l.RevokesCursorColumn == "" {
+			return errors.New("event_feed.revokes_cursor_column is required when revokes_query is set")
+		}
+		if err := validateVarsInQuery(s, l.RevokesQuery, l.Vars); err != nil {
+			return fmt.Errorf("event_feed.revokes_query: %w", err)
+		}
+		usedVars, err = s.queryVars(l.RevokesQuery)
+		if err != nil {
+			return err
+		}
+		if !queryUsesVar(usedVars, sinceKey) {
+			return fmt.Errorf("event_feed.revokes_query must contain ?<%s> placeholder", sinceKey)
+		}
+		if err := validateEventFeedPagination("event_feed.revokes_query", l.Pagination, usedVars); err != nil {
+			return err
+		}
+	}
+	for k := range l.Vars {
+		if k == sinceKey || k == resourceIdKey {
+			return fmt.Errorf("vars must not use reserved key %q", k)
+		}
+	}
+	return nil
+}
+
+func (l *EventFeedConfig) staticValidate(_ context.Context, _ *SQLSyncer) error {
+	if l.DefaultLookback != "" {
+		if _, err := time.ParseDuration(l.DefaultLookback); err != nil {
+			return fmt.Errorf("invalid event_feed.default_lookback %q: %w", l.DefaultLookback, err)
+		}
+	}
+	if l.Overlap != "" {
+		d, err := time.ParseDuration(l.Overlap)
+		if err != nil {
+			return fmt.Errorf("invalid event_feed.overlap %q: %w", l.Overlap, err)
+		}
+		if d < 0 {
+			return fmt.Errorf("invalid event_feed.overlap %q: must not be negative", l.Overlap)
+		}
+	}
 	return nil
 }
 
