@@ -6,13 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/bsql"
@@ -25,10 +22,11 @@ type Connector struct {
 	dbEngine database.DbEngine
 	celEnv   *bcel.Env
 
-	syncersMu  sync.Mutex
-	syncers    []connectorbuilder.ResourceSyncer
-	syncersErr error
-	syncersSet bool
+	syncers []connectorbuilder.ResourceSyncer
+	// eventFeedSyncers is a separate set because syncers keep the active database as mutable state,
+	// so sharing them with full sync could race.
+	eventFeedSyncers []connectorbuilder.ResourceSyncer
+	eventFeed        *bsql.SQLEventFeed
 }
 
 func (c *Connector) Close() error {
@@ -44,39 +42,17 @@ func (c *Connector) Close() error {
 	return errs
 }
 
-// getOrSetSQLSyncers builds the resource syncers once and caches the result, including any error.
-func (c *Connector) getOrSetSQLSyncers(ctx context.Context) ([]connectorbuilder.ResourceSyncer, error) {
-	c.syncersMu.Lock()
-	defer c.syncersMu.Unlock()
-	if !c.syncersSet {
-		c.syncers, c.syncersErr = c.config.GetSQLSyncers(ctx, c.dbs, c.dbEngine, c.celEnv)
-		c.syncersSet = true
-	}
-	return c.syncers, c.syncersErr
-}
-
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.getOrSetSQLSyncers(ctx)
-	if err != nil {
-		ctxzap.Extract(ctx).Error("baton-sql: failed to create resource syncers", zap.Error(err))
-		return nil
-	}
-
-	return syncers
+	return c.syncers
 }
 
 // EventFeeds implements EventProviderV2. Returns the SQL event feed when an event feed is configured.
 func (c *Connector) EventFeeds(ctx context.Context) []connectorbuilder.EventFeed {
-	if !c.config.HasEventFeed() {
+	if c.eventFeed == nil {
 		return nil
 	}
-	syncers, err := c.getOrSetSQLSyncers(ctx)
-	if err != nil {
-		ctxzap.Extract(ctx).Error("baton-sql: failed to create syncers; event feed will be unavailable", zap.Error(err))
-		return nil
-	}
-	return []connectorbuilder.EventFeed{bsql.NewSQLEventFeed(*c.config, syncers)}
+	return []connectorbuilder.EventFeed{c.eventFeed}
 }
 
 // Asset takes an input AssetRef and attempts to fetch it using the connector's authenticated http client
@@ -112,12 +88,7 @@ func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 // Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
 // to be sure that they are valid.
 func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, error) {
-	syncers, err := c.config.GetSQLSyncers(ctx, c.dbs, c.dbEngine, c.celEnv)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, syncer := range syncers {
+	for _, syncer := range c.syncers {
 		if v, ok := syncer.(interface {
 			Validate(ctx context.Context) error
 		}); ok {
@@ -196,19 +167,43 @@ func newConnector(ctx context.Context, c *bsql.Config, lookup LookupFunc) (*Conn
 		return nil, err
 	}
 
-	celEnv, err := bcel.NewEnv(ctx)
-	if err != nil {
+	closeDBs := func() {
 		for _, db := range dbs {
 			_ = db.Close()
 		}
+	}
+
+	celEnv, err := bcel.NewEnv(ctx)
+	if err != nil {
+		closeDBs()
 		return nil, err
 	}
 
+	syncers, err := c.GetSQLSyncers(ctx, dbs, dbEngine, celEnv)
+	if err != nil {
+		closeDBs()
+		return nil, fmt.Errorf("baton-sql: failed to create resource syncers: %w", err)
+	}
+
+	var feedSyncers []connectorbuilder.ResourceSyncer
+	var eventFeed *bsql.SQLEventFeed
+	if c.HasEventFeed() {
+		feedSyncers, err = c.GetSQLSyncers(ctx, dbs, dbEngine, celEnv)
+		if err != nil {
+			closeDBs()
+			return nil, fmt.Errorf("baton-sql: failed to create event feed syncers: %w", err)
+		}
+		eventFeed = bsql.NewSQLEventFeed(*c, feedSyncers)
+	}
+
 	return &Connector{
-		config:   c,
-		dbs:      dbs,
-		dbEngine: dbEngine,
-		celEnv:   celEnv,
+		config:           c,
+		dbs:              dbs,
+		dbEngine:         dbEngine,
+		celEnv:           celEnv,
+		syncers:          syncers,
+		eventFeedSyncers: feedSyncers,
+		eventFeed:        eventFeed,
 	}, nil
 }
 
