@@ -294,6 +294,10 @@ func validateEventFeedPagination(field string, p *Pagination, usedVars []string)
 	if !queryUsesVar(usedVars, limitKey) {
 		return fmt.Errorf("%s must contain ?<Limit> placeholder", field)
 	}
+	// Without ?<Offset> every page returns the same rows, so the source never finishes paging.
+	if !queryUsesVar(usedVars, offsetKey) {
+		return fmt.Errorf("%s must contain ?<Offset> placeholder", field)
+	}
 	return nil
 }
 

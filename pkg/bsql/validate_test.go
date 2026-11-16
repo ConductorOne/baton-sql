@@ -146,6 +146,19 @@ func TestValidateEventFeedPagination(t *testing.T) {
 			errSubstr: "must contain ?<Limit>",
 		},
 		{
+			name:      "resource feed without offset placeholder",
+			validator: &ResourceEventFeed{Query: "SELECT id, updated_at FROM t WHERE updated_at >= ?<since> ORDER BY updated_at, id LIMIT ?<Limit>", CursorColumn: "updated_at", Pagination: offset},
+			errSubstr: "event_feed.query must contain ?<Offset>",
+		},
+		{
+			name: "grant feed without offset placeholder",
+			validator: &GrantsEventFeed{
+				ResourceId: ".user_id", ChangesQuery: "SELECT id, user_id, updated_at FROM g WHERE updated_at >= ?<since> ORDER BY updated_at, id LIMIT ?<Limit>",
+				ChangesCursorColumn: "updated_at", Pagination: offset,
+			},
+			errSubstr: "event_feed.changes_query must contain ?<Offset>",
+		},
+		{
 			name: "grant feed with pagination",
 			validator: &GrantsEventFeed{
 				ResourceId: ".user_id", ChangesQuery: grantQuery, ChangesCursorColumn: "updated_at",
