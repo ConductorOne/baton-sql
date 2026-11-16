@@ -75,7 +75,7 @@ connect:
       SELECT datname FROM pg_database WHERE datistemplate = false
 ```
 
-When `databases` is set, each `list:` / `entitlements:` / `grants:` block runs once per database. Add `scope: cluster` to a query that should only run once (against the lexicographically first database), useful for catalogs that return the same data from any database, like `pg_user`. The active database name is injected into every row as the synthetic column `database`, so `map:` blocks and `skip_if` expressions can reference `.database`. Provisioning queries route to the database named by the `database` provisioning var, falling back to the primary handle when unset.
+When `databases` is set, each `list:` / `entitlements:` / `grants:` block runs once per database. Add `scope: cluster` to a query that should only run once (against the lexicographically first database), useful for catalogs that return the same data from any database, like `pg_user`. The active database name is injected into every row as the synthetic column `database`, so `map:` blocks and `skip_if` expressions can reference `.database`. Provisioning queries route to the database named by the `database` provisioning var, falling back to the primary handle when unset. Event feed and `get` queries run only against the primary database; see [Event Feed](#event-feed).
 
 Single-database configurations are unchanged. The `databases` block is opt-in and existing examples (`postgres-test.yml`, `mysql-test.yml`, etc.) continue to work identically.
 
@@ -88,6 +88,13 @@ Resource types and grants queries can define an `event_feed` section so Conducto
 - Must configure `pagination` with `strategy: "offset"` and a `primary_key`, and use `?<Limit>` and `?<Offset>`. The `cursor` strategy is not allowed, because a primary-key cursor cannot resume a query ordered by timestamp.
 
 The overlap window re-reads recent rows so rows with tied or late-committed timestamps are not missed. Re-read rows produce the same event IDs, and ConductorOne ignores the duplicates. Resource types with an `event_feed` also need a `get` query that uses `?<resource_id>`. See [`examples/example.yml`](examples/example.yml) for a complete configuration.
+
+**Multi-database limitation:** event feed queries and `get` queries run only against the primary database (the lexicographically first one), even when `connect.databases` is configured. Full syncs still cover every database, but between full syncs:
+
+- Changes in any other database produce no events.
+- `get` returns NotFound for resources that live only in another database.
+
+Changes in non-primary databases are picked up at the next full sync. Avoid `event_feed` with `connect.databases` unless all event-relevant data lives in the primary database.
 
 ## `baton-sql` Command Line Usage
 ```
