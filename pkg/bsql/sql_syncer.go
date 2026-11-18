@@ -7,9 +7,13 @@ import (
 	"sort"
 
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
+	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sql/pkg/bcel"
 	"github.com/conductorone/baton-sql/pkg/database"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -24,6 +28,8 @@ const (
 	dbIterPageStateType = "db-iter"
 	rowColDatabase      = "database"
 )
+
+var _ connectorbuilder.ResourceTargetedSyncer = (*SQLSyncer)(nil)
 
 // SQLSyncer mutates db / currentDBName between query passes during multi-database
 // iteration. Safe because the SDK calls List/Entitlements/Grants serially per syncer.
@@ -42,6 +48,47 @@ type SQLSyncer struct {
 
 func (s *SQLSyncer) ResourceType(ctx context.Context) *v2.ResourceType {
 	return s.resourceType
+}
+
+// ResourceTypeID returns the resource type ID for this syncer.
+func (s *SQLSyncer) ResourceTypeID() string {
+	if s.resourceType == nil {
+		return ""
+	}
+	return s.resourceType.Id
+}
+
+// Get implements ResourceTargetedSyncer, fetching a single resource by its ID.
+func (s *SQLSyncer) Get(ctx context.Context, resourceId *v2.ResourceId, parentResourceId *v2.ResourceId) (*v2.Resource, annotations.Annotations, error) {
+	if s.config.Get == nil {
+		return nil, nil, status.Errorf(codes.Unimplemented, "baton-sql: get not configured for resource type %s", resourceId.GetResourceType())
+	}
+
+	vars, err := s.PrepareQueryVars(ctx, nil, s.config.Get.Vars)
+	if err != nil {
+		return nil, nil, fmt.Errorf("baton-sql: failed to prepare vars for get query: %w", err)
+	}
+	vars[resourceIdKey] = resourceId.GetResource()
+
+	var result *v2.Resource
+	// Get runs against the primary database only, even when multiple databases are configured.
+	_, err = s.iterateDBs(ctx, scopeCluster, &pagination.Token{}, func(ctx context.Context, _ string, innerToken *pagination.Token) (string, error) {
+		return s.runQuery(ctx, s.db, innerToken, s.config.Get.Query, nil, vars, func(ctx context.Context, row map[string]interface{}) (bool, error) {
+			r, err := s.mapResource(ctx, row)
+			if err != nil {
+				return false, err
+			}
+			result = r
+			return false, nil // stop after first row
+		})
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("baton-sql: failed to execute get query for %s/%s: %w", resourceId.GetResourceType(), resourceId.GetResource(), err)
+	}
+	if result == nil {
+		return nil, nil, status.Errorf(codes.NotFound, "baton-sql: resource %s/%s not found", resourceId.GetResourceType(), resourceId.GetResource())
+	}
+	return result, nil, nil
 }
 
 // setCurrentDB errors on unknown names rather than silently falling back; the previous
@@ -156,6 +203,12 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 		}
 	}
 
+	if s.fullConfig.EventFeed != nil {
+		if err := s.validateInternal(ctx, s.fullConfig.EventFeed); err != nil {
+			return fmt.Errorf("validation error for event_feed: %w", err)
+		}
+	}
+
 	if err := s.validateInternal(ctx, s.config.List); err != nil {
 		return s.validateFormatErr("list", err)
 	}
@@ -179,6 +232,21 @@ func (s *SQLSyncer) Validate(ctx context.Context) error {
 			if err := s.validateInternal(ctx, grant); err != nil {
 				return s.validateFormatErr("grants", err)
 			}
+		}
+	}
+
+	if s.config.Get != nil {
+		if err := s.validateInternal(ctx, s.config.Get); err != nil {
+			return s.validateFormatErr("get", err)
+		}
+	}
+
+	if s.config.EventFeed != nil {
+		if s.config.Get == nil {
+			return s.validateFormatErr("event_feed", fmt.Errorf("get query is required when event_feed is configured"))
+		}
+		if err := s.validateInternal(ctx, s.config.EventFeed); err != nil {
+			return s.validateFormatErr("event_feed", err)
 		}
 	}
 
