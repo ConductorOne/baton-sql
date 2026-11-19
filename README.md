@@ -39,6 +39,11 @@ The connector is configured using a YAML file that defines:
 - **Entitlements**: Permissions and roles that can be granted to resources
 - **Provisioning Actions**: SQL queries for granting/revoking entitlements; see [docs/provisioning.md](docs/provisioning.md) for `validation_queries` semantics (a no-rows validation is treated as idempotent success on the DDL engines Db2 and Oracle: on by default for Db2, opt-in via `validation_queries_signal_idempotency` for Oracle)
 
+When `static_entitlements` is configured for a resource type, it takes precedence
+over dynamic `entitlements` for both sync and provisioning. A static entitlement
+without provisioning configured, or an unknown entitlement in static mode, cannot
+fall back to a dynamic mapping's grant/revoke queries.
+
 For Postgres behind a transaction-mode pooler (PgBouncer, Supabase pooler on port 6543, etc.), set `default_query_exec_mode` to `simple_protocol` via the DSN query string or `connect.params` to avoid prepared-statement conflicts (SQLSTATE 42P05). When unset, baton-sql leaves the URL unchanged and pgx uses its default (`cache_statement`).
 
 ```yaml
