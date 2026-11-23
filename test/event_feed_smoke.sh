@@ -57,9 +57,11 @@ run_feed() {
   echo "$out"
 }
 
+# protojson randomly adds a space after ':' and ',', so the patterns allow an optional one.
 has_event() {
   local file="$1" kind="$2" role="$3" user="$4"
-  grep "\"$kind\"" "$file" | grep "\"resource\":\"$role\"" | grep -q "\"resourceType\":\"user\", \"resource\":\"$user\""
+  grep "\"$kind\"" "$file" | grep -E "\"resource\": ?\"$role\"" |
+    grep -qE "\"resourceType\": ?\"user\", ?\"resource\": ?\"$user\""
 }
 
 run_sync() {
@@ -81,7 +83,7 @@ echo "== feed runs and reports seeded changes"
 feed="$(run_feed)"
 grep -q '"resourceChangeEvent"' "$feed" || fail "no resource change events"
 if [ -n "${CHANGED_USER:-}" ]; then
-  grep '"resourceChangeEvent"' "$feed" | grep -q "\"resourceType\":\"user\", \"resource\":\"$CHANGED_USER\"" ||
+  grep '"resourceChangeEvent"' "$feed" | grep -qE "\"resourceType\": ?\"user\", ?\"resource\": ?\"$CHANGED_USER\"" ||
     fail "no resource change event for $CHANGED_USER"
 fi
 if [ "$HAS_GRANTS_FEED" = 1 ]; then
