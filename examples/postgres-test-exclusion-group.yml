@@ -398,6 +398,7 @@ resource_types:
                 JOIN
                 roles r ON r.id = ur.role_id
                 WHERE u.username = ?<username>
+                AND ur.deleted_at IS NULL
               map:
                 - principal_id: ".username"
                   principal_type: "user"
@@ -423,7 +424,9 @@ resource_types:
                 FROM users u, roles r
                 WHERE u.username = ?<username>
                 AND r.role_name = ?<role_name>
-                ON CONFLICT (user_id, role_id) DO NOTHING
+                ON CONFLICT (user_id, role_id) DO UPDATE
+                SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE user_roles.deleted_at IS NOT NULL
           revoke:
             validation_queries:
               - |
@@ -456,6 +459,8 @@ resource_types:
             user_roles ur ON u.id = ur.user_id
           JOIN 
             roles r ON r.id = ur.role_id
+          WHERE
+            ur.deleted_at IS NULL
         pagination:
           strategy: "offset"
           primary_key: "username"
