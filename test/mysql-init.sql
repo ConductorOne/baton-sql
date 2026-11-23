@@ -27,7 +27,8 @@ CREATE TABLE users (
   attr_division VARCHAR(100),
   attr_company VARCHAR(100),
   attr_employee_number VARCHAR(50),
-  attr_employment_type VARCHAR(50)
+  attr_employment_type VARCHAR(50),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
 );
 
 -- Insert sample users with different date formats for last_login (without manager relationships)
@@ -63,7 +64,8 @@ SELECT 'Manager relationships established' as message;
 -- Create roles table
 CREATE TABLE roles (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  role_name VARCHAR(100) NOT NULL
+  role_name VARCHAR(100) NOT NULL,
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
 );
 
 -- Insert sample roles
@@ -74,8 +76,11 @@ INSERT INTO roles (role_name) VALUES
 
 -- Create user_roles table for many-to-many relationship
 CREATE TABLE user_roles (
+  id INT AUTO_INCREMENT UNIQUE,
   user_id INT,
   role_id INT,
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  deleted_at TIMESTAMP(6) NULL,
   PRIMARY KEY (user_id, role_id),
   FOREIGN KEY (user_id) REFERENCES users(id),
   FOREIGN KEY (role_id) REFERENCES roles(id)
@@ -90,6 +95,10 @@ INSERT INTO user_roles (user_id, role_id) VALUES
 (4, 2), -- service.acct has user role
 (6, 1), -- bjorn.tipling.c1 has admin role
 (7, 2); -- bjorn.tipling.ins has user role
+
+-- Soft-deleted assignment (revoked an hour ago) so the event feed reports a revoke
+INSERT INTO user_roles (user_id, role_id, updated_at, deleted_at) VALUES
+(5, 3, CURRENT_TIMESTAMP(6) - INTERVAL 1 HOUR, CURRENT_TIMESTAMP(6) - INTERVAL 1 HOUR); -- disabled.user had reader role
 
 -- Create table to track last login attempts (for testing date formats)
 CREATE TABLE login_history (

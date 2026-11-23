@@ -72,7 +72,8 @@ resource_types:
         LEFT JOIN users m ON u.manager_id = m.id
         WHERE u.username = ?<resource_id>
 
-    # Detects new and modified users via updated_at.
+    # Detects new and modified users via updated_at. Vertica has no triggers, so anything
+    # that writes to these tables must set updated_at (and deleted_at on revoke) itself.
     event_feed:
       query: |
         SELECT
@@ -158,6 +159,8 @@ resource_types:
             user_roles ur ON u.id = ur.user_id
           JOIN
             roles r ON r.id = ur.role_id
+          WHERE
+            ur.deleted_at IS NULL
         pagination:
           strategy: "offset"
           primary_key: "username"

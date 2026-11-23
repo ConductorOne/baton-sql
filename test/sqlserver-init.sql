@@ -14,6 +14,7 @@ CREATE TABLE Users (
     LastLogin DATETIME2 NULL,
     ManagerID INT NULL,
     PasswordHash VARBINARY(32) NULL,
+    UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
     FOREIGN KEY (ManagerID) REFERENCES Users(UserID)
 );
 
@@ -21,14 +22,19 @@ CREATE TABLE Users (
 CREATE TABLE Roles (
     RoleID INT IDENTITY(1,1) PRIMARY KEY,
     RoleName NVARCHAR(100) NOT NULL UNIQUE,
-    Description NVARCHAR(255) NOT NULL
+    Description NVARCHAR(255) NOT NULL,
+    UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
 );
 
 -- Create UserRoles junction table for many-to-many relationship
 CREATE TABLE UserRoles (
+    UserRoleID INT IDENTITY(1,1) UNIQUE,
     UserID INT,
     RoleID INT,
     AssignedAt DATETIME2 DEFAULT GETDATE(),
+    UpdatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    IsDeleted BIT NOT NULL DEFAULT 0,
+    DeletedAt DATETIME2 NULL,
     PRIMARY KEY (UserID, RoleID),
     FOREIGN KEY (UserID) REFERENCES Users(UserID) ON DELETE CASCADE,
     FOREIGN KEY (RoleID) REFERENCES Roles(RoleID) ON DELETE CASCADE
@@ -106,6 +112,35 @@ INSERT INTO UserRoles (UserID, RoleID) VALUES
 ((SELECT UserID FROM Users WHERE Username = 'alice.manager'), (SELECT RoleID FROM Roles WHERE RoleName = 'admin')),
 ((SELECT UserID FROM Users WHERE Username = 'bob.developer'), (SELECT RoleID FROM Roles WHERE RoleName = 'developer')),
 ((SELECT UserID FROM Users WHERE Username = 'bob.developer'), (SELECT RoleID FROM Roles WHERE RoleName = 'user'));
+
+-- Soft-deleted assignment (revoked an hour ago) so the event feed reports a revoke
+INSERT INTO UserRoles (UserID, RoleID, UpdatedAt, IsDeleted, DeletedAt) VALUES
+((SELECT UserID FROM Users WHERE Username = 'disabled.user'), (SELECT RoleID FROM Roles WHERE RoleName = 'reader'),
+ DATEADD(HOUR, -1, SYSUTCDATETIME()), 1, DATEADD(HOUR, -1, SYSUTCDATETIME()));
+GO
+
+-- Keep UpdatedAt current on every update so the event feed sees the change.
+-- SET NOCOUNT ON keeps the trigger's own UPDATE out of the caller's rows-affected count.
+CREATE TRIGGER TR_Users_SetUpdatedAt ON Users AFTER UPDATE AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE t SET UpdatedAt = SYSUTCDATETIME() FROM Users t INNER JOIN inserted i ON t.UserID = i.UserID;
+END;
+GO
+
+CREATE TRIGGER TR_Roles_SetUpdatedAt ON Roles AFTER UPDATE AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE t SET UpdatedAt = SYSUTCDATETIME() FROM Roles t INNER JOIN inserted i ON t.RoleID = i.RoleID;
+END;
+GO
+
+CREATE TRIGGER TR_UserRoles_SetUpdatedAt ON UserRoles AFTER UPDATE AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE t SET UpdatedAt = SYSUTCDATETIME() FROM UserRoles t INNER JOIN inserted i ON t.UserRoleID = i.UserRoleID;
+END;
+GO
 
 -- Insert sample login history with various date formats
 INSERT INTO LoginHistory (UserID, LoginTime, LoginTimeText, LoginTimeAlt, LoginSuccess) VALUES

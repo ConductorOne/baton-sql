@@ -407,8 +407,18 @@ resource_types:
           vars:
             username: "principal.ID"
             role_name: "resource.ID"
+          # Revives a soft-deleted assignment, or inserts a new one.
           grant:
             queries:
+              - |
+                UPDATE ur
+                SET IsDeleted = 0, DeletedAt = NULL, UpdatedAt = SYSUTCDATETIME()
+                FROM UserRoles ur
+                INNER JOIN Users u ON ur.UserID = u.UserID
+                INNER JOIN Roles r ON ur.RoleID = r.RoleID
+                WHERE u.Username = ?<username>
+                AND r.RoleName = ?<role_name>
+                AND ur.IsDeleted = 1
               - |
                 INSERT INTO UserRoles (
                   UserID, 
@@ -420,14 +430,22 @@ resource_types:
                 FROM Users u, Roles r 
                 WHERE u.Username = ?<username> 
                 AND r.RoleName = ?<role_name>
+                AND NOT EXISTS (
+                  SELECT 1 FROM UserRoles ur
+                  WHERE ur.UserID = u.UserID AND ur.RoleID = r.RoleID
+                )
+          # Soft delete so the event feed's revokes_query can report the revoke.
           revoke:
             queries:
               - |
-                DELETE ur FROM UserRoles ur
+                UPDATE ur
+                SET IsDeleted = 1, DeletedAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
+                FROM UserRoles ur
                 INNER JOIN Users u ON ur.UserID = u.UserID
                 INNER JOIN Roles r ON ur.RoleID = r.RoleID
                 WHERE u.Username = ?<username>
                 AND r.RoleName = ?<role_name>
+                AND ur.IsDeleted = 0
 
     # Grant discovery for existing role assignments
     grants:
@@ -438,6 +456,7 @@ resource_types:
           FROM UserRoles ur
           INNER JOIN Users u ON ur.UserID = u.UserID
           INNER JOIN Roles r ON ur.RoleID = r.RoleID
+          WHERE ur.IsDeleted = 0
           ORDER BY r.RoleID
           OFFSET ?<Offset> ROWS FETCH NEXT ?<Limit> ROWS ONLY
         map:

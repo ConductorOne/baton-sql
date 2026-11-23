@@ -31,7 +31,8 @@ CREATE TABLE users (
   attr_division VARCHAR(100),
   attr_company VARCHAR(100),
   attr_employee_number VARCHAR(50),
-  attr_employment_type VARCHAR(50)
+  attr_employment_type VARCHAR(50),
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Insert sample users with different date formats for last_login (without manager relationships)
@@ -72,7 +73,8 @@ UPDATE users SET manager_id = (SELECT id FROM users WHERE username = 'robert.tab
 -- Create roles table
 CREATE TABLE roles (
   id SERIAL PRIMARY KEY,
-  role_name VARCHAR(100) NOT NULL UNIQUE
+  role_name VARCHAR(100) NOT NULL UNIQUE,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Insert sample roles
@@ -83,8 +85,11 @@ INSERT INTO roles (role_name) VALUES
 
 -- Create user_roles table for many-to-many relationship
 CREATE TABLE user_roles (
+  id SERIAL UNIQUE,
   user_id INTEGER,
   role_id INTEGER,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP NULL,
   PRIMARY KEY (user_id, role_id),
   FOREIGN KEY (user_id) REFERENCES users(id),
   FOREIGN KEY (role_id) REFERENCES roles(id)
@@ -102,6 +107,25 @@ INSERT INTO user_roles (user_id, role_id) VALUES
 (8, 2), -- robert.tables has user role
 (9, 2), -- robert.tables2 has user role
 (9, 1); -- robert.tables2 has admin role
+
+-- Soft-deleted assignment (revoked an hour ago) so the event feed reports a revoke
+INSERT INTO user_roles (user_id, role_id, updated_at, deleted_at) VALUES
+(5, 3, CURRENT_TIMESTAMP - INTERVAL '1 hour', CURRENT_TIMESTAMP - INTERVAL '1 hour'); -- disabled.user had reader role
+
+-- Keep updated_at current on every update so the event feed sees the change
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER users_set_updated_at BEFORE UPDATE ON users
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER roles_set_updated_at BEFORE UPDATE ON roles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER user_roles_set_updated_at BEFORE UPDATE ON user_roles
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
 -- Create table to track last login attempts (for testing date formats)

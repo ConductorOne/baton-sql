@@ -434,11 +434,13 @@ resource_types:
             user_roles ur ON u.id = ur.user_id
           JOIN 
             roles r ON r.id = ur.role_id
+          WHERE
+            ur.deleted_at IS NULL
         pagination:
           strategy: "offset"
           primary_key: "username"
         map:
-          - skip_if: ".role_name != resource.ID"
+          - skip_if: "string(.role_name) != resource.ID"
             principal_id: ".username"
             principal_type: "user"
             entitlement_id: "member"

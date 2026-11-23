@@ -89,6 +89,18 @@ Resource types and grants queries can define an `event_feed` section so Conducto
 
 The overlap window re-reads recent rows so rows with tied or late-committed timestamps are not missed. Re-read rows produce the same event IDs, and ConductorOne ignores the duplicates. Resource types with an `event_feed` also need a `get` query that uses `?<resource_id>`. See [`examples/example.yml`](examples/example.yml) for a complete configuration.
 
+The cursor column (for example `updated_at`) must change on every insert and update, including updates made by provisioning and actions. Use a trigger or an `ON UPDATE` default; otherwise every writer has to set it explicitly.
+
+#### Grant revokes and soft deletes
+
+A grants `event_feed` reports revokes through `revokes_query`, which can only see rows that are soft-deleted (for example, rows with a `deleted_at` timestamp). A hard `DELETE` leaves nothing to read, so the revoke is only picked up at the next full sync. If your table hard-deletes, add a soft-delete column or an audit table filled by a trigger. When you configure `revokes_query`:
+
+- The full-sync grants `query` must exclude soft-deleted rows (for example `WHERE deleted_at IS NULL`). Otherwise every full sync restores the grants the feed revoked.
+- Revoke provisioning must soft-delete the row (set `deleted_at` and `updated_at`) instead of deleting it.
+- Grant provisioning must revive a soft-deleted row (clear `deleted_at`, update `updated_at`) instead of inserting a duplicate or doing nothing.
+
+The test examples (`postgres-test.yml`, `sqlserver-test.yml`, `mysql-test.yml`, `vertica-test.yml`) follow these rules, and `test/event_feed_smoke.sh` checks them against the matching `test/*-init.sql` database.
+
 **Multi-database limitation:** event feed queries and `get` queries run only against the primary database (the lexicographically first one), even when `connect.databases` is configured. Full syncs still cover every database, but between full syncs:
 
 - Changes in any other database produce no events.

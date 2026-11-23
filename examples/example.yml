@@ -135,16 +135,27 @@ resource_types:
           vars:
             user_id: "principal.ID"
             access_level: "'basic'"
+          # Grant revives a soft-deleted row, or inserts a new one. Upsert syntax depends on
+          # the database (e.g. ON CONFLICT in PostgreSQL, MERGE in SQL Server or Oracle).
           grant:
             queries:
               - |
+                UPDATE user_access
+                SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?<user_id> AND level = ?<access_level> AND deleted_at IS NOT NULL
+              - |
                 INSERT INTO user_access (user_id, level)
-                VALUES (?<user_id>, ?<access_level>)
+                SELECT ?<user_id>, ?<access_level> FROM DUAL
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM user_access WHERE user_id = ?<user_id> AND level = ?<access_level>
+                )
+          # Revoke soft-deletes so the grants event feed's revokes_query can report it.
           revoke:
             queries:
               - |
-                DELETE FROM user_access
-                WHERE user_id = ?<user_id>
+                UPDATE user_access
+                SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?<user_id> AND deleted_at IS NULL
 
     # Grants Query Configuration
     # --------------------------
@@ -157,6 +168,7 @@ resource_types:
             access_level,
             updated_at
           FROM user_access
+          WHERE deleted_at IS NULL
           LIMIT ?<Limit> OFFSET ?<Offset>
         map:
           - skip_if: ".access_level != 'basic'"
@@ -183,9 +195,12 @@ resource_types:
               AND updated_at >= ?<since>
             ORDER BY updated_at ASC, id ASC
             LIMIT ?<Limit> OFFSET ?<Offset>
+          # updated_at must change on every insert and update (a trigger or ON UPDATE default).
           changes_cursor_column: updated_at
 
-          # Optional: only configure when soft-delete is available in the schema.
+          # Optional: only configure when the table soft-deletes rows. Hard deletes can't be
+          # detected. When set, the full-sync grants query must exclude soft-deleted rows, revoke
+          # must soft-delete, and grant must revive a soft-deleted row (see provisioning above).
           revokes_query: |
             SELECT id AS grant_id, user_id, access_level, deleted_at
             FROM user_access
