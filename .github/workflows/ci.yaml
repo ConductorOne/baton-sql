@@ -69,10 +69,7 @@ jobs:
           psql -h localhost --user postgres -d batondb -t -c "SELECT attr_first_name, attr_job_title FROM users WHERE username = 'jane.doe'" | grep -q "Janet.*Senior Software Engineer"
         env:
           PGPASSWORD: secretpassword
-      - name: Install baton CLI
-        run: gh release download v0.4.5 -R conductorone/baton -p 'baton-v0.4.5-linux-amd64.tar.gz' -O - | sudo tar -xz -C /usr/local/bin baton
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # Uses the baton CLI that the sync-test action installs.
       - name: Run event feed smoke test
         run: test/event_feed_smoke.sh postgres
         env:

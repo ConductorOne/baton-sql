@@ -72,7 +72,13 @@ run_sync() {
 }
 
 synced_grant() {
-  baton grants -f "$1" -o json 2>/dev/null | grep -q "\"role:$LIVE_ROLE:member:user:$LIVE_USER\""
+  synced_grant_id "$1" "role:$LIVE_ROLE:member:user:$LIVE_USER"
+}
+
+synced_grant_id() {
+  local grants="$WORKDIR/grants.json"
+  baton grants -f "$1" -o json >"$grants" || fail "baton grants exited with $?"
+  grep -q "\"$2\"" "$grants"
 }
 
 db_state() {
@@ -90,7 +96,7 @@ if [ "$HAS_GRANTS_FEED" = 1 ]; then
   has_event "$feed" createRevokeEvent "$SEEDED_ROLE" "$SEEDED_USER" || fail "no revoke event for seeded $SEEDED_USER/$SEEDED_ROLE"
   has_event "$feed" createGrantEvent "$SEEDED_ROLE" "$SEEDED_USER" && fail "grant event for soft-deleted $SEEDED_USER/$SEEDED_ROLE"
   c1z="$(run_sync)"
-  baton grants -f "$c1z" -o json 2>/dev/null | grep -q "\"role:$SEEDED_ROLE:member:user:$SEEDED_USER\"" &&
+  synced_grant_id "$c1z" "role:$SEEDED_ROLE:member:user:$SEEDED_USER" &&
     fail "full sync returned soft-deleted grant $SEEDED_USER/$SEEDED_ROLE"
 fi
 
