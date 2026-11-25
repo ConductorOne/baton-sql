@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   account_type VARCHAR(20) DEFAULT 'human',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   last_login TIMESTAMP NULL,
-  manager_id INTEGER
+  manager_id INTEGER,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Insert sample users
@@ -27,7 +28,8 @@ UPDATE users SET manager_id = 3 WHERE username = 'disabled.user';
 -- Create roles table
 CREATE TABLE IF NOT EXISTS roles (
   id IDENTITY PRIMARY KEY,
-  role_name VARCHAR(100) NOT NULL
+  role_name VARCHAR(100) NOT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Insert sample roles
@@ -37,8 +39,11 @@ INSERT INTO roles (role_name) VALUES ('reader');
 
 -- Create user_roles table
 CREATE TABLE IF NOT EXISTS user_roles (
+  id IDENTITY,
   user_id INTEGER,
   role_id INTEGER,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  deleted_at TIMESTAMP NULL,
   PRIMARY KEY (user_id, role_id)
 );
 
@@ -48,5 +53,9 @@ INSERT INTO user_roles (user_id, role_id) VALUES (2, 2);
 INSERT INTO user_roles (user_id, role_id) VALUES (3, 2);
 INSERT INTO user_roles (user_id, role_id) VALUES (3, 3);
 INSERT INTO user_roles (user_id, role_id) VALUES (4, 2);
+
+-- Soft-deleted assignment (revoked an hour ago) so the event feed reports a revoke
+INSERT INTO user_roles (user_id, role_id, updated_at, deleted_at)
+VALUES (5, 3, CURRENT_TIMESTAMP - INTERVAL '1 hour', CURRENT_TIMESTAMP - INTERVAL '1 hour');
 
 SELECT 'Vertica test database initialized successfully' AS message;

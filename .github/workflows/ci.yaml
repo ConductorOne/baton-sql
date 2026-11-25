@@ -69,3 +69,10 @@ jobs:
           psql -h localhost --user postgres -d batondb -t -c "SELECT attr_first_name, attr_job_title FROM users WHERE username = 'jane.doe'" | grep -q "Janet.*Senior Software Engineer"
         env:
           PGPASSWORD: secretpassword
+      # Uses the baton CLI that the sync-test action installs.
+      - name: Run event feed smoke test
+        run: test/event_feed_smoke.sh postgres
+        env:
+          PGPASSWORD: secretpassword
+          CHANGED_USER: jane.doe
+          SQL_CMD: psql -h localhost --user postgres -d batondb -t -A

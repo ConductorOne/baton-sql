@@ -13,6 +13,7 @@ GRANT CREATE SESSION TO baton;
 GRANT CREATE TABLE TO baton;
 GRANT CREATE SEQUENCE TO baton;
 GRANT CREATE VIEW TO baton;
+GRANT CREATE TRIGGER TO baton;
 GRANT UNLIMITED TABLESPACE TO baton;
 GRANT DBA TO baton; -- For testing purposes, grant DBA access
 -- Grant access to DBA dictionary views (required for DBA_ROLES, DBA_USERS, etc.)
@@ -80,8 +81,18 @@ CREATE TABLE users (
   attr_division VARCHAR2(100),
   attr_company VARCHAR2(100),
   attr_employee_number VARCHAR2(50),
-  attr_employment_type VARCHAR2(50)
+  attr_employment_type VARCHAR2(50),
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
+
+-- Keep updated_at current on every update so the event feed sees the change
+CREATE OR REPLACE TRIGGER users_set_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+BEGIN
+  :NEW.updated_at := CURRENT_TIMESTAMP;
+END;
+/
 
 -- Insert sample users with attr_* data
 INSERT INTO users (username, email, employee_id, status, account_type, created_at, last_login, attr_first_name, attr_middle_name, attr_last_name, attr_display_name, attr_job_title, attr_department, attr_division, attr_company, attr_employee_number, attr_employment_type) VALUES

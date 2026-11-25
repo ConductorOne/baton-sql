@@ -21,6 +21,12 @@ type Connector struct {
 	dbs      map[string]*sql.DB
 	dbEngine database.DbEngine
 	celEnv   *bcel.Env
+
+	syncers []connectorbuilder.ResourceSyncer
+	// eventFeedSyncers is a separate set because syncers keep the active database as mutable state,
+	// so sharing them with full sync could race.
+	eventFeedSyncers []connectorbuilder.ResourceSyncer
+	eventFeed        *bsql.SQLEventFeed
 }
 
 func (c *Connector) Close() error {
@@ -38,12 +44,15 @@ func (c *Connector) Close() error {
 
 // ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
 func (c *Connector) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	syncers, err := c.config.GetSQLSyncers(ctx, c.dbs, c.dbEngine, c.celEnv)
-	if err != nil {
+	return c.syncers
+}
+
+// EventFeeds implements EventProviderV2. Returns the SQL event feed when an event feed is configured.
+func (c *Connector) EventFeeds(ctx context.Context) []connectorbuilder.EventFeed {
+	if c.eventFeed == nil {
 		return nil
 	}
-
-	return syncers
+	return []connectorbuilder.EventFeed{c.eventFeed}
 }
 
 // Asset takes an input AssetRef and attempts to fetch it using the connector's authenticated http client
@@ -79,12 +88,7 @@ func (c *Connector) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 // Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
 // to be sure that they are valid.
 func (c *Connector) Validate(ctx context.Context) (annotations.Annotations, error) {
-	syncers, err := c.config.GetSQLSyncers(ctx, c.dbs, c.dbEngine, c.celEnv)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, syncer := range syncers {
+	for _, syncer := range c.syncers {
 		if v, ok := syncer.(interface {
 			Validate(ctx context.Context) error
 		}); ok {
@@ -163,19 +167,43 @@ func newConnector(ctx context.Context, c *bsql.Config, lookup LookupFunc) (*Conn
 		return nil, err
 	}
 
-	celEnv, err := bcel.NewEnv(ctx)
-	if err != nil {
+	closeDBs := func() {
 		for _, db := range dbs {
 			_ = db.Close()
 		}
+	}
+
+	celEnv, err := bcel.NewEnv(ctx)
+	if err != nil {
+		closeDBs()
 		return nil, err
 	}
 
+	syncers, err := c.GetSQLSyncers(ctx, dbs, dbEngine, celEnv)
+	if err != nil {
+		closeDBs()
+		return nil, fmt.Errorf("baton-sql: failed to create resource syncers: %w", err)
+	}
+
+	var feedSyncers []connectorbuilder.ResourceSyncer
+	var eventFeed *bsql.SQLEventFeed
+	if c.HasEventFeed() {
+		feedSyncers, err = c.GetSQLSyncers(ctx, dbs, dbEngine, celEnv)
+		if err != nil {
+			closeDBs()
+			return nil, fmt.Errorf("baton-sql: failed to create event feed syncers: %w", err)
+		}
+		eventFeed = bsql.NewSQLEventFeed(*c, feedSyncers)
+	}
+
 	return &Connector{
-		config:   c,
-		dbs:      dbs,
-		dbEngine: dbEngine,
-		celEnv:   celEnv,
+		config:           c,
+		dbs:              dbs,
+		dbEngine:         dbEngine,
+		celEnv:           celEnv,
+		syncers:          syncers,
+		eventFeedSyncers: feedSyncers,
+		eventFeed:        eventFeed,
 	}, nil
 }
 

@@ -75,9 +75,38 @@ connect:
       SELECT datname FROM pg_database WHERE datistemplate = false
 ```
 
-When `databases` is set, each `list:` / `entitlements:` / `grants:` block runs once per database. Add `scope: cluster` to a query that should only run once (against the lexicographically first database), useful for catalogs that return the same data from any database, like `pg_user`. The active database name is injected into every row as the synthetic column `database`, so `map:` blocks and `skip_if` expressions can reference `.database`. Provisioning queries route to the database named by the `database` provisioning var, falling back to the primary handle when unset.
+When `databases` is set, each `list:` / `entitlements:` / `grants:` block runs once per database. Add `scope: cluster` to a query that should only run once (against the lexicographically first database), useful for catalogs that return the same data from any database, like `pg_user`. The active database name is injected into every row as the synthetic column `database`, so `map:` blocks and `skip_if` expressions can reference `.database`. Provisioning queries route to the database named by the `database` provisioning var, falling back to the primary handle when unset. Event feed and `get` queries run only against the primary database; see [Event Feed](#event-feed).
 
 Single-database configurations are unchanged. The `databases` block is opt-in and existing examples (`postgres-test.yml`, `mysql-test.yml`, etc.) continue to work identically.
+
+### Event Feed
+
+Resource types and grants queries can define an `event_feed` section so ConductorOne picks up changes between full syncs. Each event feed query:
+
+- Must use `?<since>`, which the connector fills with the last processed timestamp minus the `event_feed.overlap` window (default `60s`).
+- Should filter with `>= ?<since>` and order by the cursor column plus the pagination primary key (for example `ORDER BY updated_at, id`), so rows that share a timestamp are paged in a stable order.
+- Must configure `pagination` with `strategy: "offset"` and a `primary_key`, and use `?<Limit>` and `?<Offset>`. The `cursor` strategy is not allowed, because a primary-key cursor cannot resume a query ordered by timestamp.
+
+The overlap window re-reads recent rows so rows with tied or late-committed timestamps are not missed. Re-read rows produce the same event IDs, and ConductorOne ignores the duplicates. Resource types with an `event_feed` also need a `get` query that uses `?<resource_id>`. See [`examples/example.yml`](examples/example.yml) for a complete configuration.
+
+The cursor column (for example `updated_at`) must change on every insert and update, including updates made by provisioning and actions. Use a trigger or an `ON UPDATE` default; otherwise every writer has to set it explicitly.
+
+#### Grant revokes and soft deletes
+
+A grants `event_feed` reports revokes through `revokes_query`, which can only see rows that are soft-deleted (for example, rows with a `deleted_at` timestamp). A hard `DELETE` leaves nothing to read, so the revoke is only picked up at the next full sync. If your table hard-deletes, add a soft-delete column or an audit table filled by a trigger. When you configure `revokes_query`:
+
+- The full-sync grants `query` must exclude soft-deleted rows (for example `WHERE deleted_at IS NULL`). Otherwise every full sync restores the grants the feed revoked.
+- Revoke provisioning must soft-delete the row (set `deleted_at` and `updated_at`) instead of deleting it.
+- Grant provisioning must revive a soft-deleted row (clear `deleted_at`, update `updated_at`) instead of inserting a duplicate or doing nothing.
+
+The test examples (`postgres-test.yml`, `sqlserver-test.yml`, `mysql-test.yml`, `vertica-test.yml`) follow these rules, and `test/event_feed_smoke.sh` checks them against the matching `test/*-init.sql` database.
+
+**Multi-database limitation:** event feed queries and `get` queries run only against the primary database (the lexicographically first one), even when `connect.databases` is configured. Full syncs still cover every database, but between full syncs:
+
+- Changes in any other database produce no events.
+- `get` returns NotFound for resources that live only in another database.
+
+Changes in non-primary databases are picked up at the next full sync. Avoid `event_feed` with `connect.databases` unless all event-relevant data lives in the primary database.
 
 ## `baton-sql` Command Line Usage
 ```
