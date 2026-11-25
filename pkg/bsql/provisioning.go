@@ -33,6 +33,12 @@ func (s *SQLSyncer) getProvisioningConfig(ctx context.Context, entitlementID str
 		}
 	}
 
+	// Static entitlements take precedence during sync, so dynamic mappings must
+	// not supply provisioning for an unsupported or unknown static entitlement.
+	if s.config.StaticEntitlements != nil {
+		return nil, false
+	}
+
 	// Check dynamic entitlements
 	if s.config.Entitlements != nil {
 		for _, e := range s.config.Entitlements.Map {
