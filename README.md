@@ -135,6 +135,12 @@ Flags:
 Use "baton-sql [command] --help" for more information about a command.
 ```
 
+Query diagnostics omit SQL text, argument values, and variable maps, including at
+debug level, because these can contain credentials. Provisioning diagnostics retain
+the operation, zero-based query index, argument count, and affected-row count.
+Database-driver errors are still propagated; treat logs as sensitive when a driver
+includes statement details in its errors.
+
 # Contributing, Support and Issues
 
 We started Baton because we were tired of taking screenshots and manually

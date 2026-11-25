@@ -666,11 +666,9 @@ func (s *SQLSyncer) runPrincipalExistsCheck(
 		return false, fmt.Errorf("failed to prepare principal exists check query: %w", err)
 	}
 
-	l.Debug(
-		"running principal exists check query",
-		zap.String("query", q),
-		zap.Any("args", qArgs),
-	)
+	// SQL text can contain inlined credentials; argument and variable values are
+	// sensitive even when the statement itself uses bind parameters.
+	l.Debug("running principal exists check query", zap.Int("arg_count", len(qArgs)))
 
 	rows, err := executor.QueryContext(ctx, q, qArgs...)
 	if err != nil {
@@ -735,18 +733,13 @@ func (s *SQLSyncer) runValidationQueries(
 ) error {
 	l := ctxzap.Extract(ctx)
 
-	for _, q := range validationQueries {
+	for idx, q := range validationQueries {
 		q, qArgs, err := s.prepareProvisioningQuery(q, vars)
 		if err != nil {
 			return fmt.Errorf("failed to prepare validation query: %w", err)
 		}
 
-		l.Debug(
-			"running validation query",
-			zap.String("query", q),
-			zap.Any("args", qArgs),
-			zap.Any("vars", vars),
-		)
+		l.Debug("running validation query", zap.String("operation", operation), zap.Int("query_index", idx), zap.Int("arg_count", len(qArgs)))
 
 		result, err := executor.QueryContext(ctx, q, qArgs...)
 		if err != nil {
@@ -766,10 +759,10 @@ func (s *SQLSyncer) runValidationQueries(
 
 		if !valid {
 			if s.validationNoRowsMeansIdempotent(signalIdempotency) {
-				l.Debug("validation query returned no rows; treating as idempotent success", zap.String("query", q), zap.String("operation", operation))
-				return fmt.Errorf("%s: validation query %q returned no rows: %w", operation, q, ErrValidationNoRows)
+				l.Debug("validation query returned no rows; treating as idempotent success", zap.Int("query_index", idx), zap.String("operation", operation))
+				return fmt.Errorf("%s: validation query at index %d returned no rows: %w", operation, idx, ErrValidationNoRows)
 			}
-			return fmt.Errorf("%s: validation query %q returned no rows", operation, q)
+			return fmt.Errorf("%s: validation query at index %d returned no rows", operation, idx)
 		}
 	}
 
@@ -817,7 +810,12 @@ func (s *SQLSyncer) RunProvisioningQueriesWithExecutor(
 			zeroRowCount++
 		}
 
-		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected))
+		l.Debug("query executed",
+			zap.String("operation", operation),
+			zap.Int("query_index", idx),
+			zap.Int("arg_count", len(qArgs)),
+			zap.Int64("rows_affected", rowsAffected),
+		)
 	}
 
 	if len(queries) > 0 && zeroRowCount == len(queries) {
@@ -918,11 +916,11 @@ func (s *SQLSyncer) runQuery(
 		return "", err
 	}
 
-	l.Debug("running query", zap.String("query", q), zap.Any("args", qArgs))
+	l.Debug("running query", zap.Int("arg_count", len(qArgs)))
 
 	rows, err := db.QueryContext(ctx, q, qArgs...)
 	if err != nil {
-		l.Error("failed to run query", zap.String("query", q), zap.Any("args", qArgs), zap.Error(err))
+		l.Error("failed to run query", zap.Int("arg_count", len(qArgs)), zap.Error(err))
 		return "", err
 	}
 	defer rows.Close()
@@ -1076,7 +1074,7 @@ func (s *SQLSyncer) RunGrantProvisioning(
 	}
 
 	if replace != nil && replace.Query != "" {
-		l.Info("running grant replace provisioning query", zap.String("query", replace.Query))
+		l.Info("running grant replace provisioning query")
 
 		var ret []*v2.Grant
 
@@ -1230,7 +1228,13 @@ func (s *SQLSyncer) RunGrantProvisioning(
 			zeroRowCount++
 		}
 
-		l.Debug("query executed", zap.String("query", q), zap.Any("args", qArgs), zap.Int64("rows_affected", rowsAffected), zap.Bool("use_tx", useTx))
+		l.Debug("query executed",
+			zap.String("operation", "grant provisioning"),
+			zap.Int("query_index", idx),
+			zap.Int("arg_count", len(qArgs)),
+			zap.Int64("rows_affected", rowsAffected),
+			zap.Bool("use_tx", useTx),
+		)
 	}
 
 	if len(queries) > 0 && zeroRowCount == len(queries) {
